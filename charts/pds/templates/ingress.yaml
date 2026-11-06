@@ -1,0 +1,83 @@
+{{- if .Values.ingress.enabled }}
+{{- if not .Values.ingress.host }}
+{{- fail "ingress.host is required when ingress.enabled is true" }}
+{{- end }}
+{{- if and .Values.ingress.tls.enabled (not .Values.ingress.tls.secretName) }}
+{{- fail "ingress.tls.secretName is required when ingress.tls.enabled is true" }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "pds.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+  {{- $timeouts := dict }}
+  {{- with .Values.ingress.proxyTimeoutSeconds }}
+  {{- $timeouts = dict "nginx.ingress.kubernetes.io/proxy-read-timeout" (toString .) "nginx.ingress.kubernetes.io/proxy-send-timeout" (toString .) }}
+  {{- end }}
+  {{- with (merge (deepCopy .Values.ingress.annotations) .Values.commonAnnotations $timeouts) }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host | quote }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          # The adapter rules come first so /api, /mcp and the authorization server's
+          # paths never fall through to the SPA.
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "pds.adapter.fullname" . }}
+                port:
+                  number: {{ .Values.adapter.service.port }}
+          - path: /oauth
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "pds.adapter.fullname" . }}
+                port:
+                  number: {{ .Values.adapter.service.port }}
+          - path: /.well-known/oauth-authorization-server
+            pathType: Exact
+            backend:
+              service:
+                name: {{ include "pds.adapter.fullname" . }}
+                port:
+                  number: {{ .Values.adapter.service.port }}
+          - path: /.well-known/oauth-protected-resource
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "pds.adapter.fullname" . }}
+                port:
+                  number: {{ .Values.adapter.service.port }}
+          - path: /mcp
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "pds.adapter.fullname" . }}
+                port:
+                  number: {{ .Values.adapter.service.port }}
+          {{- if .Values.ui.enabled }}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "pds.ui.fullname" . }}
+                port:
+                  number: {{ .Values.ui.service.port }}
+          {{- end }}
+{{- end }}

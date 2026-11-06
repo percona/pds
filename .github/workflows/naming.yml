@@ -1,0 +1,24 @@
+name: naming
+
+# The product name reaches every tree, so this gate is not path filtered: a
+# legacy spelling reintroduced in a workflow, a script or a doc is the same
+# defect as one in the adapter.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the naming lint itself
+        run: bash scripts/check-naming_test.sh
+
+      - name: Check the repository
+        run: bash scripts/check-naming.sh

@@ -1,0 +1,29 @@
+# Applied on the spoke after Flux is installed. Not part of the instances
+# kustomization (prune true would fight these).
+# The InstancePresets a create resolves against are installed by the chart
+# as pds-<engine>-<profile>, with the version annotation and the labels
+# the adapter checks. A second copy here drifted from those and matched
+# nothing the hub writes.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: hub
+  namespace: flux-system
+spec:
+  interval: 15s
+  url: http://host.docker.internal:3000/hub/pds.git
+  ref:
+    branch: main
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: instances
+  namespace: flux-system
+spec:
+  interval: 15s
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: hub
+  path: clusters/spoke-a/instances

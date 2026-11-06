@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Percona Database Service</title>
+    <meta
+      name="description"
+      content="Percona Database Service runs MySQL and PostgreSQL on Amazon EKS in your AWS account, or on a Kubernetes cluster you already have. It is open source, and it is in alpha. There is no backward compatibility yet."
+    />
+    <link rel="icon" type="image/svg+xml" href="/percona-mark.svg" />
+    <script>
+      // Apply the stored theme before paint so the first frame is not the wrong theme.
+      // The key is the console's, so a visitor who picked a theme there keeps it here.
+      (function () {
+        try {
+          var stored = localStorage.getItem("pds-theme");
+          var dark =
+            stored === "dark" ||
+            (stored === null && window.matchMedia("(prefers-color-scheme: dark)").matches);
+          if (dark) document.documentElement.classList.add("dark");
+        } catch (error) {
+          /* no stored preference available */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

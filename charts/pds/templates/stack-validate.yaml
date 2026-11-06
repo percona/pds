@@ -1,0 +1,153 @@
+{{- /* Chart.yaml version and appVersion are not pinned: publish rewrites them to the release tag before helm package. */ -}}
+{{- $pin := include "pds.compatibilityPin" . | fromYaml -}}
+{{- include "pds.mustPin" (dict "name" "platform.openeverest.version" "got" .Values.platform.openeverest.version "want" (index $pin "openeverest" "version")) -}}
+{{- include "pds.mustPin" (dict "name" "platform.openeverest.repository" "got" .Values.platform.openeverest.repository "want" (index $pin "openeverest" "repository")) -}}
+{{- include "pds.mustPin" (dict "name" "platform.pxcOperator.version" "got" .Values.platform.pxcOperator.version "want" (index $pin "providers" "pxc" "operator")) -}}
+{{- include "pds.mustPin" (dict "name" "platform.postgresqlOperator.version" "got" .Values.platform.postgresqlOperator.version "want" (index $pin "providers" "postgresql" "operator")) -}}
+{{- include "pds.mustPin" (dict "name" "platform.pmm.version" "got" .Values.platform.pmm.version "want" (index $pin "pmm" "version")) -}}
+{{- include "pds.mustPin" (dict "name" "platform.pmm.appVersion" "got" .Values.platform.pmm.appVersion "want" (index $pin "pmm" "app")) -}}
+{{- include "pds.mustPin" (dict "name" "platform.pmm.repository" "got" .Values.platform.pmm.repository "want" (index $pin "pmm" "repository")) -}}
+{{- if .Subcharts -}}
+{{- with index .Subcharts "openeverest" -}}
+{{- include "pds.mustPin" (dict "name" "OpenEverest subchart version" "got" .Chart.Version "want" (index $pin "openeverest" "version")) -}}
+{{- end -}}
+{{- with index .Subcharts "provider-pxc" -}}
+{{- include "pds.mustPin" (dict "name" "PXC provider subchart version" "got" .Chart.Version "want" (index $pin "providers" "pxc" "version")) -}}
+{{- end -}}
+{{- with index .Subcharts "provider-postgresql" -}}
+{{- include "pds.mustPin" (dict "name" "PostgreSQL provider subchart version" "got" .Chart.Version "want" (index $pin "providers" "postgresql" "version")) -}}
+{{- end -}}
+{{- with index .Subcharts "pmm-server" -}}
+{{- include "pds.mustPin" (dict "name" "PMM subchart version" "got" .Chart.Version "want" (index $pin "pmm" "version")) -}}
+{{- end -}}
+{{- end -}}
+{{- if and .Values.stack.enabled .Values.stack.minio.enabled .Values.stack.s3.enabled -}}
+{{- fail "stack.minio and stack.s3 cannot both be enabled" -}}
+{{- end -}}
+{{- if and (not .Values.stack.enabled) (eq (toString .Values.stack.pmm.enabled) "true") -}}
+{{- fail "stack.pmm.enabled requires stack.enabled" -}}
+{{- end -}}
+{{- if and .Values.stack.enabled .Values.stack.s3.enabled (not .Values.stack.s3.bucket) -}}
+{{- fail "stack.s3.bucket is required when S3 backups are enabled" -}}
+{{- end -}}
+{{- if and .Values.stack.enabled .Values.stack.s3.enabled (not .Values.stack.s3.existingSecret) -}}
+{{- fail "stack.s3.existingSecret is required when S3 backups are enabled" -}}
+{{- end -}}
+{{- /*
+An agent has to know where to beat, what to call itself, and a token the
+hub will accept. Without any of those the process exits at startup while
+helm reports a successful release, and the only trace is a pod log.
+*/ -}}
+{{- if eq .Values.adapter.role "agent" -}}
+{{- if not .Values.adapter.hub.url -}}
+{{- fail "adapter.hub.url is required when adapter.role is agent" -}}
+{{- end -}}
+{{- if not (include "pds.hub.environmentName" .) -}}
+{{- fail "adapter.hub.environmentName is required when adapter.role is agent" -}}
+{{- end -}}
+{{- if and (not .Values.adapter.hub.agentToken) (not .Values.adapter.hub.agentTokenExistingSecret) -}}
+{{- fail "adapter.hub.agentToken or adapter.hub.agentTokenExistingSecret is required when adapter.role is agent" -}}
+{{- end -}}
+{{- if .Values.ingress.enabled -}}
+{{- fail "ingress.enabled is not supported when adapter.role is agent" -}}
+{{- end -}}
+{{- end -}}
+{{- /*
+The hub keeps every environment's desired state in gitDir. On an emptyDir that
+is one pod restart from pruning the instances on every spoke.
+*/ -}}
+{{- if and .Values.adapter.hub.gitDir .Values.adapter.hub.github.org -}}
+{{- fail "adapter.hub.gitDir and adapter.hub.github.org cannot both be set. Pick one hub backend" -}}
+{{- end -}}
+{{- if and .Values.adapter.hub.gitDir (ne (trim (include "pds.hub.gitDirHasStorage" .)) "true") -}}
+{{- fail "adapter.hub.gitDir needs storage: set adapter.hub.persistence.enabled, or adapter.hub.persistence.existingClaim, or mount gitDir with adapter.extraVolumeMounts and adapter.extraVolumes" -}}
+{{- end -}}
+{{- if and .Values.adapter.hub.github.org (not .Values.adapter.hub.github.existingSecret) -}}
+{{- fail "adapter.hub.github.existingSecret is required when adapter.hub.github.org is set" -}}
+{{- end -}}
+{{- if and .Values.adapter.hub.github.existingSecret (not .Values.adapter.hub.github.org) -}}
+{{- fail "adapter.hub.github.org is required when adapter.hub.github.existingSecret is set" -}}
+{{- end -}}
+{{- /*
+A GitHub App needs its three Secret keys together, and replaces the token.
+*/ -}}
+{{- $gh := .Values.adapter.hub.github -}}
+{{- if and (or $gh.appIdKey $gh.appInstallationIdKey $gh.appPrivateKeyKey) (not (and $gh.appIdKey $gh.appInstallationIdKey $gh.appPrivateKeyKey)) -}}
+{{- fail "adapter.hub.github.appIdKey, appInstallationIdKey and appPrivateKeyKey must all be set together" -}}
+{{- end -}}
+{{- /*
+Enrollment hides the registry token only while it equals the GitHub token. An
+App has no GitHub token to equal, so the operator attests the registry token is
+a separate credential rather than the static token the App replaces.
+*/ -}}
+{{- if and $gh.appPrivateKeyKey $gh.registryTokenKey (ne (toString $gh.registryTokenDistinct) "true") -}}
+{{- fail "adapter.hub.github.registryTokenDistinct must be true when an App is set with registryTokenKey: the registry token must be a separate packages:read credential, never the static GitHub token it replaces" -}}
+{{- end -}}
+{{- /*
+Hub replicas do not share the in-memory work queue or environment inventory.
+A second replica would overwrite the durable queue on persist and list an
+environment the first replica never heard of.
+*/ -}}
+{{- if and (or .Values.adapter.hub.gitDir .Values.adapter.hub.github.org) (gt (int .Values.adapter.replicaCount) 1) -}}
+{{- fail "adapter.replicaCount must be 1 when the adapter is a hub: replicas do not share in-memory queue and inventory" -}}
+{{- end -}}
+{{- /*
+An upgrade that turns the stack off on a release that still runs databases
+would drop OpenEverest out from under them. Refuse that and leave the
+release as it is. lookup is empty under helm template.
+*/ -}}
+{{- if and .Release.IsUpgrade (not .Values.stack.enabled) -}}
+{{- $everestServer := lookup "apps/v1" "Deployment" .Release.Namespace "everest-server" -}}
+{{- if $everestServer -}}
+{{- fail "this release runs databases and cannot become a hub. Reinstall it as a connected environment through Connect" -}}
+{{- end -}}
+{{- end -}}
+{{- /*
+A hub is the default install. It has to publish an origin spokes can reach
+and keep desired state in one Git backend. The message names whichever of
+those is missing.
+*/ -}}
+{{- if ne .Values.adapter.role "agent" -}}
+{{- $hubMissing := list -}}
+{{- if not .Values.adapter.hub.publicURL -}}
+{{- $hubMissing = append $hubMissing "adapter.hub.publicURL" -}}
+{{- end -}}
+{{- if and (not .Values.adapter.hub.gitDir) (not .Values.adapter.hub.github.org) -}}
+{{- $hubMissing = append $hubMissing "adapter.hub.gitDir with persistence, or adapter.hub.github.org with its Secret" -}}
+{{- end -}}
+{{- if $hubMissing -}}
+{{- fail (printf "a hub requires %s" (join "; " $hubMissing)) -}}
+{{- end -}}
+{{- end -}}
+{{- if and .Values.adapter.hub.gitDir (or .Values.adapter.hub.persistence.enabled .Values.adapter.hub.persistence.existingClaim) -}}
+{{- range .Values.adapter.extraVolumeMounts -}}
+{{- if eq .mountPath $.Values.adapter.hub.gitDir -}}
+{{- fail "adapter.hub.persistence already mounts gitDir; drop the extraVolumeMount at that path" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- /*
+The operator's Anthropic and Cursor keys are gone. Only a key an Organization
+pastes is used, so a value under these two names is a deployment that expects
+the old behavior, and it is told so rather than left with a Chat that has no
+key. An empty or false value is skipped: those were the chart's own defaults,
+and an upgrade with --reuse-values still carries them.
+*/ -}}
+{{- range $block := list "assistant" "cursor" -}}
+{{- range $key, $value := (index $.Values $block | default dict) -}}
+{{- if $value -}}
+{{- fail (printf "%s.%s was removed. Paste the key in the console, under Connections. Each Organization keeps its own" $block $key) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- /*
+The MCP device flow is gone. Agents sign in with OAuth at the control plane, so
+a value under these two names is a deployment that expects the old route. An
+empty value is skipped: it was the chart's own default, and an upgrade with
+--reuse-values still carries it.
+*/ -}}
+{{- range $key := list "audience" "deviceClientId" -}}
+{{- if index $.Values.adapter.oidc $key -}}
+{{- fail (printf "adapter.oidc.%s was removed. The MCP device flow is gone, and agents sign in with OAuth. Drop the value; the console sign in does not use it" $key) -}}
+{{- end -}}
+{{- end -}}

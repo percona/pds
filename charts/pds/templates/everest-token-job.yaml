@@ -1,0 +1,148 @@
+{{- if .Values.stack.enabled }}
+{{- $name := include "pds.fullname" . }}
+{{- $secret := include "pds.everest.secretName" . }}
+{{- $adapter := include "pds.adapter.fullname" . }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}-everest-token
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: adapter
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "20"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-everest-token
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: adapter
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "20"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "update", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-everest-token
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: adapter
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "20"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-everest-token
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}-everest-token
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}-everest-token
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: adapter
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "25"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  backoffLimit: 20
+  ttlSecondsAfterFinished: 120
+  template:
+    metadata:
+      labels:
+        {{- include "pds.labels" . | nindent 8 }}
+        app.kubernetes.io/component: adapter
+    spec:
+      restartPolicy: OnFailure
+      priorityClassName: pds-bulk
+      serviceAccountName: {{ $name }}-everest-token
+      containers:
+        - name: mint
+          image: "{{ .Values.stack.applyImage.repository }}:{{ .Values.stack.applyImage.tag }}"
+          imagePullPolicy: {{ .Values.stack.applyImage.pullPolicy }}
+          env:
+            - name: EVEREST_URL
+              value: {{ .Values.adapter.everestURL | quote }}
+            - name: TOKEN_SECRET
+              value: {{ $secret | quote }}
+            - name: ACCOUNTS_SECRET
+              value: {{ include "pds.everest.accountsSecretName" . | quote }}
+            - name: ADAPTER_DEPLOYMENT
+              value: {{ $adapter | quote }}
+            - name: NAMESPACE
+              value: {{ .Release.Namespace | quote }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              deadline=$(( $(date +%s) + 600 ))
+              while true; do
+                if [ "$(date +%s)" -ge "${deadline}" ]; then
+                  echo "everest did not answer in time"
+                  exit 1
+                fi
+                code="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 3 \
+                  "${EVEREST_URL}/v1/version" || true)"
+                case "${code}" in
+                  200|401) break ;;
+                esac
+                sleep 5
+              done
+              users="$(kubectl -n "${NAMESPACE}" get secret "${ACCOUNTS_SECRET}" \
+                -o jsonpath='{.data.users\.yaml}' | base64 -d)"
+              pass="$(printf '%s\n' "${users}" | awk '$1 == "passwordHash:" { print $2; exit }')"
+              if [ -z "${pass}" ]; then
+                echo "${ACCOUNTS_SECRET} has no admin password"
+                exit 1
+              fi
+              session="$(curl --silent --show-error --max-time 15 \
+                -X POST "${EVEREST_URL}/v1/auth/token" \
+                -H 'Content-Type: application/json' \
+                -d "{\"grant_type\":\"password\",\"username\":\"admin\",\"password\":\"${pass}\"}")"
+              token="$(printf '%s' "${session}" | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
+              if [ -z "${token}" ]; then
+                echo "POST /v1/auth/token returned no token"
+                exit 1
+              fi
+              kubectl -n "${NAMESPACE}" create secret generic "${TOKEN_SECRET}" \
+                --from-literal="EVEREST_TOKEN=${token}" \
+                --dry-run=client -o yaml | kubectl apply -f -
+              kubectl -n "${NAMESPACE}" rollout restart "deployment/${ADAPTER_DEPLOYMENT}"
+{{- end }}

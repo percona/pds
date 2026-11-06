@@ -1,0 +1,61 @@
+# Source of truth for the Percona Database Service and OpenEverest compatibility unit.
+# Chart.yaml dependencies, values.yaml platform.*, and docs/compatibility.md
+# must match this file. Bump every field in one PR. Mixed component versions
+# are not a supported product.
+schema: 1
+
+support:
+  # Design-partner preview: fresh cluster installs only.
+  freshInstall: supported
+  upgrade: unsupported
+  # The oldest installed version an in-place update (the join script's
+  # --update) starts from, per component: openeverest, pxc or postgresql.
+  # OpenEverest 2.0.0-dev.3 has no upgrade path. A later pin bump adds a floor
+  # only when it knows a transition breaks.
+  update:
+    from:
+      openeverest: ">= 2.0.0-dev.4"
+
+kubernetes:
+  min: ">= 1.27.0-0"
+
+pds:
+  chart: "0.1.0"
+  app: "0.1.0"
+
+openeverest:
+  name: openeverest
+  repository: https://openeverest.github.io/helm-charts/
+  version: "2.0.0-dev.4"
+
+providers:
+  pxc:
+    name: provider-percona-xtradb-cluster
+    alias: provider-pxc
+    repository: oci://ghcr.io/openeverest/charts
+    version: "0.3.1"
+    operator: "1.20.0"
+  postgresql:
+    name: provider-percona-postgresql
+    alias: provider-postgresql
+    repository: oci://ghcr.io/openeverest/charts
+    version: "0.5.0"
+    operator: "3.0.0"
+
+pmm:
+  name: pmm
+  repository: https://percona.github.io/percona-helm-charts/
+  version: "1.9.1"
+  app: "3.9.1"
+
+crds:
+  instance: core.openeverest.io/v1alpha1
+  backup: backup.openeverest.io/v1alpha1
+
+databases:
+  mysql:
+    engine: Percona XtraDB Cluster
+    versionSource: operator-default
+  postgresql:
+    engine: Percona PostgreSQL
+    versionSource: operator-default

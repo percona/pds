@@ -1,0 +1,381 @@
+name: publish-mcp
+
+# An MCP release is a GitHub Release tagged mcp-v1.2.3, separate from the control plane's v1.2.3,
+# so either can ship alone. publish.yml skips mcp-v tags. The workflow file is read from the
+# default branch, so checkout the release tag rather than that branch tip.
+#
+# GoReleaser builds the Go binary in apps/mcp and signs its checksums with keyless cosign. The
+# binaries and checksums go to the GitHub Release, and one npm package, which carries all four
+# binaries, goes to npm through trusted publishing, which needs no token. The trusted publisher of
+# @gas-lab/pds-mcp on npmjs.com names this workflow file and the npm-publish environment.
+# The MCP Registry listing follows the npm publish, because the registry reads the published
+# package to check that the listing's name is the one the package claims. It signs in with this
+# workflow's GitHub identity, so it needs no token either.
+# Once npm serves a stable release, the plugin job opens a pull request that moves the pds plugin
+# to it. Nothing merges that pull request but a person.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: startsWith(github.event.release.tag_name, 'mcp-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      # Attach the binaries, checksums and signature to the release.
+      contents: write
+      # Keyless cosign signing.
+      id-token: write
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      dist-tag: ${{ steps.version.outputs.dist-tag }}
+    defaults:
+      run:
+        working-directory: apps/mcp
+    steps:
+      # Actions are pinned by commit hash because this workflow publishes.
+      # actions/checkout v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      # actions/setup-go v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: "1.26.10"
+          cache-dependency-path: apps/mcp/go.mod
+
+      # actions/setup-node v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "26"
+          check-latest: true
+
+      # sigstore/cosign-installer v3.10.1
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5
+        with:
+          # The signing flags in .goreleaser.yaml are the cosign 2 ones.
+          cosign-release: v2.6.5
+
+      - name: validate the tag
+        id: version
+        run: |
+          set -euo pipefail
+          echo "version=$(node npm/release.mjs version "${TAG}")" >>"${GITHUB_OUTPUT}"
+          echo "dist-tag=$(node npm/release.mjs dist-tag "${TAG}")" >>"${GITHUB_OUTPUT}"
+
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test ./... -race
+
+      # goreleaser-action v6
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a
+        env:
+          PDS_MCP_VERSION: ${{ steps.version.outputs.version }}
+          # GoReleaser does not read the mcp-v prefix as a version, and the tag is already
+          # validated above.
+          GORELEASER_CURRENT_TAG: v${{ steps.version.outputs.version }}
+        with:
+          distribution: goreleaser
+          version: v2.12.0
+          workdir: apps/mcp
+          args: release --clean --skip=validate
+
+      - name: pack the npm package
+        run: npm/pack.sh "${TAG}" "${RUNNER_TEMP}/npm"
+
+      - name: install the packed package
+        run: npm/check-install.sh "${RUNNER_TEMP}/npm" "${{ steps.version.outputs.version }}"
+
+      # Before the publish, so a failed npm publish can be re-run with the assets already in place.
+      - name: attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          assets="${RUNNER_TEMP}/assets"
+          mkdir -p "${assets}"
+          jq -r '.[] | select(.type == "Binary" and .name != "pds-mcp") | "\(.path) \(.name)"' \
+            dist/goreleaser/artifacts.json | while read -r path name; do
+            cp "${path}" "${assets}/${name}"
+          done
+          cp dist/goreleaser/pds-mcp_"${VERSION}"_checksums.txt* "${assets}/"
+          gh release upload "${TAG}" "${assets}"/* --clobber --repo "${GITHUB_REPOSITORY}"
+
+      # actions/upload-artifact v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: npm-tarballs
+          path: ${{ runner.temp }}/npm/*.tgz
+          if-no-files-found: error
+
+  # The package the publish job is about to release, installed and run on the systems it
+  # targets before anything reaches npm.
+  install:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      # actions/checkout v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      # actions/setup-node v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "26"
+          check-latest: true
+
+      # actions/download-artifact v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: npm-tarballs
+          path: ${{ runner.temp }}/npm
+
+      - run: apps/mcp/npm/check-install.sh "${RUNNER_TEMP}/npm" "${{ needs.build.outputs.version }}"
+
+  publish:
+    needs: [build, install]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The environment requires a reviewer other than the person who published the release and
+    # accepts release tags only. It holds no secret: npm trusts this workflow and environment.
+    environment: npm-publish
+    permissions:
+      contents: read
+      # Trusted publishing exchanges this identity for a short-lived npm credential.
+      id-token: write
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+      DIST_TAG: ${{ needs.build.outputs.dist-tag }}
+      # npm generates provenance only for a public repository, and refuses to publish with the
+      # flag from a private one.
+      PROVENANCE: ${{ github.event.repository.private && ' ' || '--provenance' }}
+    steps:
+      # actions/setup-node v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "26"
+          check-latest: true
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm 11.5.1 or later; the npm bundled with Node may be older.
+      - run: npm install --global npm@11.15.0
+
+      # actions/download-artifact v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: npm-tarballs
+          path: ${{ runner.temp }}/npm
+
+      # A package already at this version is skipped, so a failed run can be re-run.
+      - name: publish
+        run: |
+          set -euo pipefail
+          cd "${RUNNER_TEMP}/npm"
+          tarball="$(ls gas-lab-pds-mcp-[0-9]*.tgz)"
+          name="@gas-lab/pds-mcp"
+          if npm view "${name}@${VERSION}" version >/dev/null 2>&1; then
+            echo "${name}@${VERSION} is already published"
+            exit 0
+          fi
+          # shellcheck disable=SC2086
+          npm publish "${tarball}" --access public --tag "${DIST_TAG}" ${PROVENANCE}
+          echo "Published ${name}@${VERSION} under the dist-tag ${DIST_TAG}." >>"${GITHUB_STEP_SUMMARY}"
+
+  # The listing in the MCP Registry: the npm package and the remote /mcp, at the release's version.
+  # It runs after the npm publish because the registry checks the published package. The
+  # registry lists public servers only, so a private repository skips it.
+  registry:
+    if: ${{ !github.event.repository.private }}
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # The registry accepts this workflow's identity as proof of the percona namespace on GitHub.
+      id-token: write
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+    steps:
+      # actions/checkout v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      # actions/setup-node v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "26"
+          check-latest: true
+
+      # sigstore/cosign-installer v3.10.1
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5
+        with:
+          cosign-release: v2.6.5
+
+      - name: install mcp-publisher
+        run: apps/mcp/npm/install-publisher.sh "${RUNNER_TEMP}/bin"
+
+      - name: stamp the listing
+        run: node apps/mcp/npm/release.mjs server-json "${TAG}" "${RUNNER_TEMP}/server.json"
+
+      # Checks the listing against the registry without publishing it.
+      - name: validate the listing
+        run: |
+          set -euo pipefail
+          "${RUNNER_TEMP}/bin/mcp-publisher" validate "${RUNNER_TEMP}/server.json"
+
+      - name: sign in to the registry
+        run: |
+          set -euo pipefail
+          "${RUNNER_TEMP}/bin/mcp-publisher" login github-oidc
+
+      - name: publish the listing
+        run: |
+          set -euo pipefail
+          "${RUNNER_TEMP}/bin/mcp-publisher" publish "${RUNNER_TEMP}/server.json"
+          echo "Listed io.github.percona/pds-mcp ${TAG#mcp-v} in the MCP Registry." >>"${GITHUB_STEP_SUMMARY}"
+
+  # What a person does: npx from the registry in a clean directory.
+  verify:
+    needs: [build, publish]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      # actions/setup-node v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "26"
+          check-latest: true
+
+      - name: npx the published version
+        run: |
+          set -euo pipefail
+          clean="$(mktemp -d)"
+          cd "${clean}"
+          # The registry can take a minute to serve a new version.
+          for attempt in 1 2 3 4 5 6; do
+            actual="$(npx --yes --prefer-online "@gas-lab/pds-mcp@${VERSION}" version || true)"
+            [[ "${actual}" == "pds-mcp ${VERSION}" ]] && break
+            sleep 20
+          done
+          if [[ "${actual}" != "pds-mcp ${VERSION}" ]]; then
+            echo "npx printed \"${actual}\", expected \"pds-mcp ${VERSION}\"" >&2
+            exit 1
+          fi
+          echo "${actual}"
+
+      - name: check the provenance
+        if: ${{ !github.event.repository.private }}
+        run: |
+          set -euo pipefail
+          cd "$(mktemp -d)"
+          echo '{}' >package.json
+          npm install --no-audit --no-fund "@gas-lab/pds-mcp@${VERSION}"
+          npm audit signatures
+
+  # Moves plugins/pds to the release: its version and the exact @gas-lab/pds-mcp its data server
+  # runs. It starts from the default branch, not the release tag, because the pull request is
+  # against that branch. A prerelease changes nothing. The built-in token opens the pull request,
+  # so GitHub does not start the pull_request workflows on it; the last step starts the plugin
+  # checks on the branch instead.
+  plugin:
+    needs: [build, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # Push the branch.
+      contents: write
+      pull-requests: write
+      # Start the plugins workflow on that branch.
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.event.release.tag_name }}
+      VERSION: ${{ needs.build.outputs.version }}
+      BASE: ${{ github.event.repository.default_branch }}
+    steps:
+      # actions/checkout v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      # actions/setup-node v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "26"
+          check-latest: true
+
+      - name: stamp the plugin
+        id: stamp
+        run: |
+          set -euo pipefail
+          result="$(node plugins/release.mjs stamp "${TAG}")"
+          echo "${result}"
+          echo "result=${result%% *}" >>"${GITHUB_OUTPUT}"
+
+      - name: open the pull request
+        if: steps.stamp.outputs.result == 'stamped'
+        run: |
+          set -euo pipefail
+          branch="plugins/release-${VERSION}"
+          if git ls-remote --exit-code --heads origin "${branch}" >/dev/null; then
+            echo "${branch} already exists; leaving it as it is."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "${branch}"
+          git add plugins/pds
+          git commit -m "chore(plugins): release the pds plugin ${VERSION}" \
+            -m "The data server runs @gas-lab/pds-mcp ${VERSION}, which npm serves."
+          git push origin "${branch}"
+          cat >"${RUNNER_TEMP}/body.md" <<EOF
+          ## Summary
+
+          Moves the pds plugin to ${VERSION}, the MCP server release npm now serves. The plugin's version and the exact \`@gas-lab/pds-mcp\` its data server runs change together.
+
+          ## What changed
+
+          - \`version\` in both plugin manifests and the \`@gas-lab/pds-mcp@${VERSION}\` argument in both MCP files, written by \`node plugins/release.mjs stamp ${TAG}\` in the \`publish-mcp\` workflow.
+
+          ## Verification
+
+          The release workflow ran \`plugins/check.mjs\` on the stamped files and waited until \`npm view @gas-lab/pds-mcp@${VERSION}\` answered. Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+
+          ## Not verified
+
+          Neither client has installed this version yet. After merging, update the plugin in Claude Code and in Cursor and confirm \`pds-data\` runs ${VERSION}.
+
+          ## Notes
+
+          Opened by the release workflow with the built-in token and never merged by it. The checks are started on this branch by the workflow.
+          EOF
+          gh pr create --base "${BASE}" --head "${branch}" \
+            --title "chore(plugins): release the pds plugin ${VERSION}" \
+            --body-file "${RUNNER_TEMP}/body.md"
+          gh workflow run plugins.yml --ref "${branch}"

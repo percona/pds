@@ -1,0 +1,138 @@
+{{- if and .Values.stack.enabled .Values.stack.minio.enabled }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-root
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+stringData:
+  MINIO_ROOT_USER: {{ .Values.stack.minio.rootUser | quote }}
+  MINIO_ROOT_PASSWORD: {{ .Values.stack.minio.rootPassword | quote }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ include "pds.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: minio
+  ports:
+    - name: s3
+      port: 9000
+      targetPort: 9000
+---
+{{- if .Values.stack.minio.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-data
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.stack.minio.persistence.size | quote }}
+  {{- with .Values.stack.minio.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: 1
+  {{- if .Values.stack.minio.persistence.enabled }}
+  # One writer owns the volume, so the old pod has to release it before the new
+  # one starts. A rolling update would deadlock waiting on a claim that is still
+  # attached.
+  strategy:
+    type: Recreate
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "pds.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: minio
+  template:
+    metadata:
+      labels:
+        {{- include "pds.labels" . | nindent 8 }}
+        app.kubernetes.io/component: minio
+    spec:
+      priorityClassName: pds-bulk
+      containers:
+        - name: minio
+          # Official minio repositories reject anonymous pulls.
+          image: docker.io/pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+          args:
+            - server
+            - /data
+            - --console-address
+            - :9001
+          envFrom:
+            - secretRef:
+                name: minio-root
+          ports:
+            - name: s3
+              containerPort: 9000
+            - name: console
+              containerPort: 9001
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+        {{- if .Values.stack.minio.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: minio-data
+        {{- else }}
+          emptyDir: {}
+        {{- end }}
+{{- end }}

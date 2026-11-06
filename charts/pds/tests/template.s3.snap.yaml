@@ -1,0 +1,178 @@
+---
+# Source: pds/templates/s3-backup-storage-job.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pds-s3-backup
+  namespace: everest-system
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    app.kubernetes.io/component: s3
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+---
+# Source: pds/templates/s3-backup-storage-job.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pds-s3-backup
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    app.kubernetes.io/component: s3
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "update", "patch"]
+  - apiGroups: ["backup.openeverest.io"]
+    resources: ["backupstorages"]
+    verbs: ["get", "create", "update", "patch"]
+---
+# Source: pds/templates/s3-backup-storage-job.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: pds-s3-backup
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    app.kubernetes.io/component: s3
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: pds-s3-backup
+subjects:
+  - kind: ServiceAccount
+    name: pds-s3-backup
+    namespace: everest-system
+---
+# Source: pds/templates/s3-backup-storage-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pds-s3-backup
+  namespace: everest-system
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    app.kubernetes.io/component: s3
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "15"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 20
+  ttlSecondsAfterFinished: 120
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: pds-0.1.0
+        app.kubernetes.io/name: pds
+        app.kubernetes.io/instance: pds
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/part-of: pds
+        app.kubernetes.io/component: s3
+    spec:
+      restartPolicy: OnFailure
+      priorityClassName: pds-bulk
+      serviceAccountName: pds-s3-backup
+      containers:
+        - name: apply
+          image: "alpine/k8s:1.32.3"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DB_NAMESPACE
+              value: "pds"
+            - name: S3_ENDPOINT
+              value: ""
+            - name: S3_BUCKET
+              value: "pds-backups"
+            - name: S3_REGION
+              value: "us-east-1"
+            - name: STORAGE_NAME
+              value: "s3"
+            - name: S3_SECRET
+              value: "s3-credentials"
+            - name: RELEASE_NAMESPACE
+              value: "everest-system"
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              deadline=$(( $(date +%s) + 600 ))
+              while ! kubectl get namespace "${DB_NAMESPACE}" >/dev/null 2>&1; do
+                if [ "$(date +%s)" -ge "${deadline}" ]; then
+                  echo "namespace ${DB_NAMESPACE} did not appear in time"
+                  exit 1
+                fi
+                sleep 5
+              done
+              while ! kubectl get crd backupstorages.backup.openeverest.io >/dev/null 2>&1; do
+                if [ "$(date +%s)" -ge "${deadline}" ]; then
+                  echo "BackupStorage CRD did not appear in time"
+                  exit 1
+                fi
+                sleep 5
+              done
+              kubectl -n "${RELEASE_NAMESPACE}" get secret "${S3_SECRET}" >/dev/null
+              access_key="$(kubectl -n "${RELEASE_NAMESPACE}" get secret "${S3_SECRET}" -o jsonpath='{.data.AWS_ACCESS_KEY_ID}' | base64 -d)"
+              secret_key="$(kubectl -n "${RELEASE_NAMESPACE}" get secret "${S3_SECRET}" -o jsonpath='{.data.AWS_SECRET_ACCESS_KEY}' | base64 -d)"
+              kubectl -n "${DB_NAMESPACE}" create secret generic "${S3_SECRET}" \
+                --from-literal=AWS_ACCESS_KEY_ID="${access_key}" \
+                --from-literal=AWS_SECRET_ACCESS_KEY="${secret_key}" \
+                --dry-run=client -o yaml | kubectl apply -f -
+              if [ -z "${S3_ENDPOINT}" ]; then
+                S3_ENDPOINT="https://s3.${S3_REGION}.amazonaws.com"
+              fi
+              cat <<EOF | kubectl apply -f -
+              apiVersion: backup.openeverest.io/v1alpha1
+              kind: BackupStorage
+              metadata:
+                name: ${STORAGE_NAME}
+                namespace: ${DB_NAMESPACE}
+              spec:
+                type: s3
+                s3:
+                  bucket: ${S3_BUCKET}
+                  region: ${S3_REGION}
+                  endpointURL: ${S3_ENDPOINT}
+                  credentialsSecretRef:
+                    name: ${S3_SECRET}
+                  forcePathStyle: false
+                  verifyTLS: true
+              EOF

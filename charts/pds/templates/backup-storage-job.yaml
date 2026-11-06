@@ -1,0 +1,162 @@
+{{- if and .Values.stack.enabled .Values.stack.minio.enabled }}
+{{- $name := include "pds.fullname" . }}
+{{- $dbns := include "pds.dbNamespace" . }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}-backup-storage
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}-backup-storage
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+rules:
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "update", "patch"]
+  - apiGroups: ["backup.openeverest.io"]
+    resources: ["backupstorages"]
+    verbs: ["get", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-backup-storage
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}-backup-storage
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}-backup-storage
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}-backup-storage
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "15"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  backoffLimit: 20
+  ttlSecondsAfterFinished: 120
+  template:
+    metadata:
+      labels:
+        {{- include "pds.labels" . | nindent 8 }}
+        app.kubernetes.io/component: minio
+    spec:
+      restartPolicy: OnFailure
+      priorityClassName: pds-bulk
+      serviceAccountName: {{ $name }}-backup-storage
+      containers:
+        - name: apply
+          image: "{{ .Values.stack.applyImage.repository }}:{{ .Values.stack.applyImage.tag }}"
+          imagePullPolicy: {{ .Values.stack.applyImage.pullPolicy }}
+          env:
+            - name: DB_NAMESPACE
+              value: {{ $dbns | quote }}
+            - name: MINIO_ENDPOINT
+              value: {{ printf "http://minio.%s.svc.cluster.local:9000" .Release.Namespace | quote }}
+            - name: MINIO_BUCKET
+              value: {{ .Values.stack.minio.bucket | quote }}
+            - name: STORAGE_NAME
+              value: {{ .Values.stack.minio.storageName | quote }}
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-root
+                  key: MINIO_ROOT_USER
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minio-root
+                  key: MINIO_ROOT_PASSWORD
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              deadline=$(( $(date +%s) + 600 ))
+              while ! kubectl get namespace "${DB_NAMESPACE}" >/dev/null 2>&1; do
+                if [ "$(date +%s)" -ge "${deadline}" ]; then
+                  echo "namespace ${DB_NAMESPACE} did not appear in time"
+                  exit 1
+                fi
+                sleep 5
+              done
+              while ! kubectl get crd backupstorages.backup.openeverest.io >/dev/null 2>&1; do
+                if [ "$(date +%s)" -ge "${deadline}" ]; then
+                  echo "BackupStorage CRD did not appear in time"
+                  exit 1
+                fi
+                sleep 5
+              done
+              kubectl -n "${DB_NAMESPACE}" create secret generic minio-backup \
+                --from-literal=AWS_ACCESS_KEY_ID="${MINIO_ROOT_USER}" \
+                --from-literal=AWS_SECRET_ACCESS_KEY="${MINIO_ROOT_PASSWORD}" \
+                --dry-run=client -o yaml | kubectl apply -f -
+              cat <<EOF | kubectl apply -f -
+              apiVersion: backup.openeverest.io/v1alpha1
+              kind: BackupStorage
+              metadata:
+                name: ${STORAGE_NAME}
+                namespace: ${DB_NAMESPACE}
+              spec:
+                type: s3
+                s3:
+                  bucket: ${MINIO_BUCKET}
+                  region: us-east-1
+                  endpointURL: ${MINIO_ENDPOINT}
+                  credentialsSecretRef:
+                    name: minio-backup
+                  forcePathStyle: true
+                  verifyTLS: false
+              EOF
+{{- end }}

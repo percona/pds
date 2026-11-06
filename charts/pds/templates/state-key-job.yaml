@@ -1,0 +1,160 @@
+{{/*
+The key that seals stored credentials is minted by a hook Job rather than
+rendered into the release.
+
+A key generated at render time would differ on every helm template, so no two
+renders of this chart would agree and every upgrade would replace the key that
+opens the credentials already stored. Reading the existing Secret with lookup
+does not fix that: lookup returns nothing when there is no cluster to ask,
+which is exactly the case helm template and the chart snapshots run in.
+
+The Job makes the key inside the cluster, once, and leaves it alone on every
+run after the first. The key never passes through values and never appears in
+the rendered release.
+*/}}
+{{- if and .Values.adapter.database.enabled (not .Values.adapter.state.existingSecret) }}
+{{- $hook := include "pds.state.keyHookName" . }}
+{{- $secret := include "pds.state.encryptionSecretName" . }}
+{{- $field := include "pds.state.encryptionSecretKey" . }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $hook }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: state-key
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $hook }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: state-key
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+rules:
+  # get on the one name, create with no resourceNames because the first write
+  # of a named object cannot use them. There is no update and no delete: the
+  # key is written once and replacing it would orphan every stored credential.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - {{ $secret | quote }}
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $hook }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: state-key
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $hook }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $hook }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $hook }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: state-key
+  annotations:
+    # Weight 5 puts this before the database hook at 10, so the key exists by
+    # the time the adapter Deployment is applied and its secretKeyRef resolves.
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 120
+  template:
+    metadata:
+      labels:
+        {{- include "pds.labels" . | nindent 8 }}
+        app.kubernetes.io/component: state-key
+    spec:
+      restartPolicy: OnFailure
+      # No priorityClassName. This runs as a pre-install hook, and the chart's
+      # PriorityClass is an ordinary release resource that does not exist yet.
+      serviceAccountName: {{ $hook }}
+      containers:
+        - name: mint
+          image: "{{ .Values.stack.applyImage.repository }}:{{ .Values.stack.applyImage.tag }}"
+          imagePullPolicy: {{ .Values.stack.applyImage.pullPolicy }}
+          env:
+            - name: SECRET_NAME
+              value: {{ $secret | quote }}
+            - name: SECRET_FIELD
+              value: {{ $field | quote }}
+            - name: SECRET_NAMESPACE
+              value: {{ .Release.Namespace | quote }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              if kubectl get secret "${SECRET_NAME}" -n "${SECRET_NAMESPACE}" >/dev/null 2>&1; then
+                echo "the state encryption key is already present, leaving it as it is"
+                exit 0
+              fi
+              # 32 bytes is the AES-256 key the adapter refuses to run without.
+              # The value is piped straight into kubectl and never echoed: it
+              # would otherwise land in the Job log, which is the one place it
+              # must not be.
+              key="$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
+              # create, not apply: a second Job that raced this one must fail on
+              # AlreadyExists rather than overwrite a key that has already
+              # sealed credentials.
+              # No labels are set on it, and the Role grants no patch. The
+              # Secret is deliberately not part of the release: it has to
+              # outlive an uninstall, because the rows it opens do. Labelling it
+              # as managed by Helm would say the opposite, and a patch verb here
+              # would be a way to overwrite a key that has already sealed
+              # credentials.
+              if printf '%s' "${key}" | kubectl create secret generic "${SECRET_NAME}" \
+                -n "${SECRET_NAMESPACE}" --from-file="${SECRET_FIELD}=/dev/stdin"; then
+                echo "minted the state encryption key"
+              elif kubectl get secret "${SECRET_NAME}" -n "${SECRET_NAMESPACE}" >/dev/null 2>&1; then
+                echo "another run minted the state encryption key first, leaving it as it is"
+              else
+                echo "could not mint the state encryption key"
+                exit 1
+              fi
+{{- end }}

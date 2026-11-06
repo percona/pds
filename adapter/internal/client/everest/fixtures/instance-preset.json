@@ -1,0 +1,26 @@
+{
+  "apiVersion": "core.openeverest.io/v1alpha1",
+  "kind": "InstancePreset",
+  "metadata": {
+    "name": "pds-mysql-dev",
+    "annotations": {
+      "pds.percona.com/preset-version": "1"
+    },
+    "labels": {
+      "pds.percona.com/engine": "mysql",
+      "pds.percona.com/profile": "dev"
+    }
+  },
+  "spec": {
+    "providerRef": { "name": "percona-xtradb-cluster" },
+    "topology": { "type": "cluster" },
+    "components": {
+      "engine": {
+        "replicas": 1,
+        "storage": { "size": "20Gi" },
+        "resources": { "limits": { "cpu": "1", "memory": "2Gi" } }
+      },
+      "proxy": { "type": "haproxy", "replicas": 1 }
+    }
+  }
+}

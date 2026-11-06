@@ -1,0 +1,94 @@
+# Values for the second golden snapshot. Every optional piece of the adapter
+# and UI chart is turned on so the snapshot covers the Ingress, the credential
+# Secrets, the in-cluster database, and the override paths that the default
+# snapshot cannot reach. The platform stack stays off so the snapshot stays
+# reviewable. A hub keeps one replica, so this file does too.
+stack:
+  enabled: false
+nameOverride: ""
+fullnameOverride: platform
+
+imagePullSecrets:
+  - name: ghcr-pull
+
+commonLabels:
+  percona.com/team: platform
+commonAnnotations:
+  percona.com/owner: platform-team
+
+serviceAccount:
+  create: true
+  name: platform-adapter
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/pds-adapter
+
+adapter:
+  # A hub keeps one replica. Two would fail the render once a Git backend is set.
+  replicaCount: 1
+  image:
+    repository: ghcr.io/percona/percona-services-adapter
+    tag: 0.1.0-rc.1
+    pullPolicy: Always
+  environment: dev
+  # The snapshot has to cover the rendered flag env, including the assistant
+  # that gates the provider surfaces.
+  features:
+    chat: false
+    assistant: false
+  logLevel: debug
+  everestURL: http://everest.everest-system.svc.cluster.local:8080
+  everestBackupStorage: backups
+  pmmURL: https://monitoring-service.pds.svc.cluster.local
+  oidc:
+    issuer: https://login.example.com/
+    clientId: pds-console
+    existingSecret: pds-oidc
+    signup:
+      enabled: true
+      organizationCeiling: 200
+  # The stack is off on this snapshot, so the rendered database needs the
+  # operator turned on for itself. That pulls the operator subchart into the
+  # snapshot, which is the one place this file stops being purely this chart's
+  # own templates, and it is what a hub actually deploys.
+  database:
+    enabled: true
+    operator:
+      enabled: true
+    inCluster:
+      storageClass: gp3-encrypted
+  hub:
+    joinTokenTTL: 12h
+    heartbeatStale: 2m
+    clusterRegion: eu-west-1
+    joinSecret: platform-join
+    inventoryConfigMap: platform-inventory
+    workConfigMap: platform-work
+  nodeSelector:
+    node.kubernetes.io/instance-type: m6i.large
+  tolerations:
+    - key: percona.com/control-plane
+      operator: Exists
+      effect: NoSchedule
+
+ui:
+  replicaCount: 2
+  image:
+    tag: 0.1.0-rc.1
+  podAnnotations:
+    percona.com/rollout: manual
+
+servicenow:
+  enabled: true
+  apiKey: snapshot-api-key
+  clientToken: snapshot-client-token
+  url: https://example.service-now.com
+
+ingress:
+  enabled: true
+  className: nginx
+  host: pds.example.com
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 16m
+  tls:
+    enabled: true
+    secretName: pds-tls

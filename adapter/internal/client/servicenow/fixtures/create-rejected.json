@@ -1,0 +1,9 @@
+{
+  "result": {
+    "success": false,
+    "ticket_id": "",
+    "table_name": "",
+    "message": "",
+    "error_message": "client_token does not match an active account"
+  }
+}

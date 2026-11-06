@@ -1,0 +1,20 @@
+{
+  "apiVersion": "core.openeverest.io/v1alpha1",
+  "kind": "Instance",
+  "metadata": {
+    "name": "checkout-prod",
+    "namespace": "pds",
+    "labels": {
+      "pds.percona.com/profile": "prod"
+    }
+  },
+  "spec": {
+    "providerRef": { "name": "percona-xtradb-cluster" },
+    "topology": { "type": "cluster" },
+    "components": {
+      "engine": { "replicas": 3 },
+      "proxy": { "type": "haproxy", "replicas": 3 }
+    }
+  },
+  "status": { "phase": "Pending" }
+}

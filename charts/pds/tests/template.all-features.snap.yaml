@@ -1,0 +1,1983 @@
+---
+# Source: pds/templates/priorityclass.yaml
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: pds-operator
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+  annotations:
+    percona.com/owner: platform-team
+value: 1000000
+globalDefault: false
+preemptionPolicy: PreemptLowerPriority
+description: Database operators take CPU and memory before the rest of the control plane.
+---
+# Source: pds/templates/priorityclass.yaml
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: pds-bulk
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+  annotations:
+    percona.com/owner: platform-team
+value: -10
+globalDefault: false
+preemptionPolicy: Never
+description: Adapter, UI, PMM, and MinIO yield to the database operators.
+---
+# Source: pds/charts/hub-postgresql-operator/templates/role-binding.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pds-hub-postgresql-operator
+  namespace: default
+---
+# Source: pds/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: platform-adapter
+  namespace: default
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/pds-adapter
+    percona.com/owner: platform-team
+automountServiceAccountToken: true
+---
+# Source: pds/templates/servicenow-secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: platform-servicenow
+  namespace: default
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: adapter
+  annotations:
+    percona.com/owner: platform-team
+type: Opaque
+stringData:
+  SN_API_KEY: "snapshot-api-key"
+  SN_CLIENT_TOKEN: "snapshot-client-token"
+---
+# Source: pds/templates/platform-versions-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-platform-versions
+  namespace: default
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: platform
+  annotations:
+    percona.com/owner: platform-team
+data:
+  # Platform chart versions this release expects. The stack install uses the
+  # same pin; this object is what kubectl can read back.
+  openeverest.chart: "openeverest"
+  openeverest.repository: "https://openeverest.github.io/helm-charts/"
+  openeverest.version: "2.0.0-dev.4"
+  openeverest.namespace: "everest-system"
+  pxcOperator.install: "false"
+  pxcOperator.chart: "pxc-operator"
+  pxcOperator.repository: "https://percona.github.io/percona-helm-charts/"
+  pxcOperator.version: "1.20.0"
+  postgresqlOperator.install: "false"
+  postgresqlOperator.chart: "pg-operator"
+  postgresqlOperator.repository: "https://percona.github.io/percona-helm-charts/"
+  postgresqlOperator.version: "3.0.0"
+  pmm.chart: "pmm"
+  pmm.repository: "https://percona.github.io/percona-helm-charts/"
+  pmm.version: "1.9.1"
+  pmm.appVersion: "3.9.1"
+  pmm.service: "monitoring-service"
+---
+# Source: pds/templates/ui-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-ui-nginx
+  namespace: default
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: ui
+  annotations:
+    percona.com/owner: platform-team
+data:
+  # Serves the built SPA and proxies /api to the adapter, so the browser only
+  # ever talks to one origin and the adapter needs no CORS handling.
+  default.conf: |
+    # The combined format logs $request and $http_referer, and both can carry
+    # the claim URL. A claim link and the invite call put a single-use token in
+    # that query, and the browser sends the claim URL as Referer on the next
+    # same-origin request. Log the path only.
+    log_format notoken '$remote_addr - $remote_user [$time_local] "$request_method $uri $server_protocol" '
+                       '$status $body_bytes_sent "$http_user_agent"';
+
+    # HSTS is only for the public site. An empty value adds no header, so
+    # every other host is left alone. X-Forwarded-Host covers an edge that
+    # rewrites Host and still records the name the browser used.
+    map "$host,$http_x_forwarded_host" $pds_hsts {
+      default "";
+      "~(^|,)pds\.percona\.com(,|$)" "max-age=31536000";
+    }
+
+    server {
+      access_log /var/log/nginx/access.log notoken;
+      listen 8080;
+      server_name _;
+      server_tokens off;
+      # Redirects carry a path only. nginx would otherwise build them from its
+      # own port, which the ingress, port-forward or TLS proxy in front of it
+      # does not use.
+      absolute_redirect off;
+      # A location with its own add_header drops these, so those locations
+      # repeat them.
+      add_header X-Frame-Options "DENY" always;
+      add_header Content-Security-Policy "frame-ancestors 'none'" always;
+      add_header X-Content-Type-Options "nosniff" always;
+      add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+      add_header Strict-Transport-Security $pds_hsts always;
+
+      # The console is built under /app/. The public landing page is only
+      # served by the hosted deployment, so the root sends people to the
+      # console here.
+      root /usr/share/nginx/html;
+      index index.html;
+
+      # Probe target that does not depend on the SPA build output.
+      location = /nginx-health {
+        access_log off;
+        add_header Content-Type text/plain;
+        add_header X-Frame-Options "DENY" always;
+        add_header Content-Security-Policy "frame-ancestors 'none'" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Strict-Transport-Security $pds_hsts always;
+        return 200 "ok";
+      }
+
+      location /api/ {
+        proxy_pass http://platform-adapter:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # Chat waits on an upstream model for up to 165s.
+        # The adapter write timeout is 180s; keep this at or above that. A
+        # streamed chat turn sends X-Accel-Buffering: no, so its events are not
+        # held here, and a heartbeat every 10s keeps it from reading as idle.
+        proxy_read_timeout 180s;
+        proxy_send_timeout 180s;
+      }
+
+      # The authorization server agents sign in through. It lives on the same
+      # origin as /api, so the metadata an agent reads names this host.
+      location /oauth/ {
+        proxy_pass http://platform-adapter:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+      }
+
+      location = /.well-known/oauth-authorization-server {
+        proxy_pass http://platform-adapter:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+      }
+
+      location /.well-known/oauth-protected-resource {
+        proxy_pass http://platform-adapter:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+      }
+
+      # The MCP endpoint agents use once signed in. The adapter answers
+      # without buffering, and the bearer token passes through untouched.
+      location = /mcp {
+        proxy_pass http://platform-adapter:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_read_timeout 180s;
+        proxy_send_timeout 180s;
+      }
+
+      location /mcp/ {
+        proxy_pass http://platform-adapter:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_read_timeout 180s;
+        proxy_send_timeout 180s;
+      }
+
+      location = / {
+        return 302 /app/;
+      }
+
+      location = /app {
+        return 301 /app/;
+      }
+
+      # The shell names the hashed script of the current build, so a browser
+      # that keeps an old copy keeps loading the previous release. no-cache
+      # still allows a cached copy, but only after the server says it is
+      # unchanged. The hashed assets under assets/ never change and may be kept.
+      location = /app/index.html {
+        add_header Cache-Control "no-cache";
+        add_header X-Frame-Options "DENY" always;
+        add_header Content-Security-Policy "frame-ancestors 'none'" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Strict-Transport-Security $pds_hsts always;
+      }
+
+      location /app/ {
+        try_files $uri $uri/ /app/index.html;
+      }
+
+      # Console pages from before the console moved under /app/. Bookmarks and
+      # invite links already sent keep working; the query, and with it a claim
+      # token, travels in $request_uri.
+      location ~ ^/(login|claim|databases|clusters|activity|support|health|chat)(/|$) {
+        return 301 /app$request_uri;
+      }
+
+      # Nothing else in the web root is for this install: the image also holds
+      # nginx's stock page and the hosted landing page.
+      location / {
+        return 404;
+      }
+    }
+---
+# Source: pds/templates/hub-git-pvc.yaml
+# The hub's desired state for every environment it serves. It has to outlive the
+# pod: losing it means Flux prunes the instances on every spoke at the next
+# reconcile.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: platform-hub-git
+  namespace: default
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: adapter
+  annotations:
+    helm.sh/resource-policy: keep
+    percona.com/owner: platform-team
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: "1Gi"
+---
+# Source: pds/templates/adapter-rbac.yaml
+# CPU and memory for each database. metrics-server answers a namespaced
+# request, and databases are not always in the release namespace, so this
+# grant is cluster-wide.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: platform-adapter-metrics
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: adapter
+  annotations:
+    percona.com/owner: platform-team
+rules:
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+# Source: pds/templates/adapter-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: platform-adapter-metrics
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: adapter
+  annotations:
+    percona.com/owner: platform-team
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: platform-adapter-metrics
+subjects:
+  - kind: ServiceAccount
+    name: platform-adapter
+    namespace: default
+---
+# Source: pds/charts/hub-postgresql-operator/templates/role.yaml
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: pds-hub-postgresql-operator
+  namespace: default
+  labels:
+    helm.sh/chart: hub-postgresql-operator-3.0.0
+    app.kubernetes.io/name: hub-postgresql-operator
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "3.0.0"
+    app.kubernetes.io/managed-by: Helm
+    meta.helm.sh/release-name: pds
+    meta.helm.sh/release-namespace: default
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - pods
+  - secrets
+  - serviceaccounts
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - endpoints
+  verbs:
+  - create
+  - delete
+  - deletecollection
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - endpoints/restricted
+  - pods/exec
+  - services
+  verbs:
+  - create
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  - replicasets
+  - statefulsets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - batch
+  resources:
+  - cronjobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - cert-manager.io
+  - certmanager.k8s.io
+  resources:
+  - certificaterequests
+  - certificates
+  - issuers
+  verbs:
+  - create
+  - delete
+  - deletecollection
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - update
+  - watch
+- apiGroups:
+  - pgv2.percona.com
+  resources:
+  - perconapgbackups
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - pgv2.percona.com
+  resources:
+  - perconapgbackups/finalizers
+  - perconapgclusters/status
+  - perconapgrestores/finalizers
+  - perconapgrestores/status
+  - perconapgupgrades/finalizers
+  - perconapgupgrades/status
+  verbs:
+  - patch
+  - update
+- apiGroups:
+  - pgv2.percona.com
+  resources:
+  - perconapgbackups/status
+  verbs:
+  - create
+  - patch
+  - update
+- apiGroups:
+  - pgv2.percona.com
+  resources:
+  - perconapgclusters
+  - perconapgupgrades
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - pgv2.percona.com
+  resources:
+  - perconapgclusters/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - pgv2.percona.com
+  resources:
+  - perconapgrestores
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - policy
+  resources:
+  - poddisruptionbudgets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - postgres-operator.crunchydata.com
+  resources:
+  - pgupgrades
+  - postgresclusters
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - rolebindings
+  - roles
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - snapshot.storage.k8s.io
+  resources:
+  - volumesnapshots
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - upstream.pgv2.percona.com
+  resources:
+  - crunchybridgeclusters
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - upstream.pgv2.percona.com
+  resources:
+  - crunchybridgeclusters/finalizers
+  - crunchybridgeclusters/status
+  verbs:
+  - patch
+  - update
+- apiGroups:
+  - upstream.pgv2.percona.com
+  resources:
+  - pgadmins
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - upstream.pgv2.percona.com
+  resources:
+  - pgadmins/finalizers
+  - pgupgrades/finalizers
+  - postgresclusters/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - upstream.pgv2.percona.com
+  resources:
+  - pgadmins/status
+  - pgupgrades/status
+  verbs:
+  - patch
+- apiGroups:
+  - upstream.pgv2.percona.com
+  resources:
+  - pgupgrades
+  - postgresclusters
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - upstream.pgv2.percona.com
+  resources:
+  - postgresclusters/status
+  verbs:
+  - create
+  - patch
+  - update
+---
+# Source: pds/templates/adapter-rbac.yaml
+# Write access for the connection Secrets the connections panel pastes into.
+# resourceNames limits get/update/delete to those names. create cannot use
+# resourceNames, so it is granted on secrets in this namespace only: that is
+# how the first paste creates the Secret.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: platform-adapter-connections
+  namespace: default
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: adapter
+  annotations:
+    percona.com/owner: platform-team
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - "platform-servicenow"
+      - "platform-assistant"
+      - "platform-cursor"
+    verbs: ["get", "update", "patch", "delete"]
+  # Hashed join tokens the hub mints. Heartbeats present the plaintext once;
+  # only the hash is stored.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - "platform-join"
+    verbs: ["get", "update", "patch"]
+  # The Everest token is a session that expires, so the adapter logs in again
+  # with the admin account rather than waiting for the next upgrade to mint one.
+  # Reading it is all that takes: the token it gets back is held in memory.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - "everest-accounts"
+    verbs: ["get"]
+  # The hub asks this environment's agent for the monitoring admin password when
+  # a customer copies it. Reading it is all that takes: the agent hands the
+  # value over once and keeps nothing.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - "pmm-secret"
+    verbs: ["get"]
+  # The agent reports the address the cloud gave monitoring's load balancer, so
+  # the panel can link to it. Reading that one Service is all that takes. The
+  # hub names it monitoring-service in every environment, so the grant does too.
+  - apiGroups: [""]
+    resources: ["services"]
+    resourceNames:
+      - "monitoring-service"
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames:
+      - "platform-activity"
+      - "platform-work"
+      - "platform-inventory"
+      - "platform-inventory-0"
+      - "platform-inventory-1"
+      - "platform-inventory-2"
+      - "platform-inventory-3"
+      - "platform-inventory-4"
+      - "platform-inventory-5"
+      - "platform-inventory-6"
+      - "platform-inventory-7"
+      - "platform-inventory-8"
+      - "platform-inventory-9"
+      - "platform-inventory-10"
+      - "platform-inventory-11"
+      - "platform-inventory-12"
+      - "platform-inventory-13"
+      - "platform-inventory-14"
+      - "platform-inventory-15"
+    verbs: ["get", "update", "patch"]
+  # Create is unrestricted because the first write of a named object cannot
+  # use resourceNames. get/update/patch stay limited to the objects above.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+---
+# Source: pds/charts/hub-postgresql-operator/templates/role-binding.yaml
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: pds-hub-postgresql-operator
+  namespace: default
+  labels:
+    helm.sh/chart: hub-postgresql-operator-3.0.0
+    app.kubernetes.io/name: hub-postgresql-operator
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "3.0.0"
+    app.kubernetes.io/managed-by: Helm
+    meta.helm.sh/release-name: pds
+    meta.helm.sh/release-namespace: default
+subjects:
+- kind: ServiceAccount
+  name: pds-hub-postgresql-operator
+roleRef:
+  kind: Role
+  name: pds-hub-postgresql-operator
+  apiGroup: rbac.authorization.k8s.io
+---
+# Source: pds/templates/adapter-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: platform-adapter-connections
+  namespace: default
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: adapter
+  annotations:
+    percona.com/owner: platform-team
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: platform-adapter-connections
+subjects:
+  - kind: ServiceAccount
+    name: platform-adapter
+    namespace: default
+---
+# Source: pds/templates/adapter-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: platform-adapter
+  namespace: default
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: adapter
+  annotations:
+    percona.com/owner: platform-team
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/component: adapter
+---
+# Source: pds/templates/ui-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: platform-ui
+  namespace: default
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: ui
+  annotations:
+    percona.com/owner: platform-team
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/component: ui
+---
+# Source: pds/charts/hub-postgresql-operator/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pds-hub-postgresql-operator
+  namespace: default
+  labels:
+    helm.sh/chart: hub-postgresql-operator-3.0.0
+    app.kubernetes.io/name: hub-postgresql-operator
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "3.0.0"
+    app.kubernetes.io/managed-by: Helm
+    meta.helm.sh/release-name: pds
+    meta.helm.sh/release-namespace: default
+    pgv2.percona.com/control-plane: postgres-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      pgv2.percona.com/control-plane: postgres-operator
+      app.kubernetes.io/component: operator
+      app.kubernetes.io/name: hub-postgresql-operator
+      app.kubernetes.io/instance: pds
+      app.kubernetes.io/part-of: hub-postgresql-operator
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: operator
+        app.kubernetes.io/name: hub-postgresql-operator
+        app.kubernetes.io/instance: pds
+        app.kubernetes.io/part-of: hub-postgresql-operator
+        pgv2.percona.com/control-plane: postgres-operator
+    spec:
+      serviceAccountName: pds-hub-postgresql-operator
+      terminationGracePeriodSeconds: 600
+      containers:
+        - name: operator
+          image: docker.io/percona/percona-postgresql-operator:3.0.0
+          imagePullPolicy: Always
+          ports:
+          - containerPort: 8080
+            name: metrics
+            protocol: TCP
+          env:
+            - name: PGO_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: WATCH_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: LOG_STRUCTURED
+              value: "false"
+            - name: LOG_LEVEL
+              value: "INFO"
+            - name: DISABLE_TELEMETRY
+              value: "false"
+            - name: PPROF_BIND_ADDRESS
+              value: "0"
+            - name: PGO_CONTROLLER_LEADER_ELECTION_ENABLED
+              value: "true"
+            - name: PGO_CONTROLLER_LEASE_NAME
+              value: ""
+            - name: PGO_CONTROLLER_LEASE_DURATION
+              value: "60s"
+            - name: PGO_CONTROLLER_RENEW_DEADLINE
+              value: "40s"
+            - name: PGO_CONTROLLER_RETRY_PERIOD
+              value: "10s"
+            - name: PGO_FEATURE_GATES
+              value: "BackupSnapshots=false"
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /metrics
+              port: metrics
+              scheme: HTTP
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          resources:
+            limits:
+              cpu: 200m
+              memory: 500Mi
+            requests:
+              cpu: 100m
+              memory: 20Mi
+---
+# Source: pds/templates/adapter-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-adapter
+  namespace: default
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: adapter
+  annotations:
+    percona.com/owner: platform-team
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pds
+      app.kubernetes.io/instance: pds
+      app.kubernetes.io/component: adapter
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: pds-0.1.0
+        app.kubernetes.io/name: pds
+        app.kubernetes.io/instance: pds
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/part-of: pds
+        percona.com/team: platform
+        app.kubernetes.io/component: adapter
+      annotations:
+        checksum/servicenow-secret: af9b69a9013f9f51b84db0efecea8b8526a4063a1466b77563e36be2b6e4097b
+        percona.com/owner: platform-team
+    spec:
+      serviceAccountName: platform-adapter
+      priorityClassName: pds-bulk
+      imagePullSecrets:
+        - name: ghcr-pull
+      securityContext:
+        fsGroup: 65532
+        runAsGroup: 65532
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: adapter
+          image: ghcr.io/percona/percona-services-adapter:0.1.0-rc.1
+          imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            privileged: false
+            readOnlyRootFilesystem: true
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: ADAPTER_ADDR
+              value: ":8080"
+            - name: ADAPTER_ENV
+              value: "dev"
+            - name: ADAPTER_LOG_LEVEL
+              value: "debug"
+            - name: ADAPTER_SHUTDOWN_TIMEOUT
+              value: "15s"
+            - name: EVEREST_URL
+              value: "http://everest.everest-system.svc.cluster.local:8080"
+            - name: EVEREST_NAMESPACE
+              value: "pds"
+            - name: EVEREST_BACKUP_STORAGE
+              value: "backups"
+            - name: EVEREST_MONITORING_CONFIG
+              value: ""
+            - name: EVEREST_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: platform-everest
+                  key: EVEREST_TOKEN
+                  optional: true
+            - name: EVEREST_ACCOUNTS_SECRET
+              value: "everest-accounts"
+            - name: PMM_URL
+              value: "https://monitoring-service.pds.svc.cluster.local"
+            - name: PMM_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: platform-pmm
+                  key: PMM_TOKEN
+                  optional: true
+            - name: OIDC_ISSUER
+              value: "https://login.example.com/"
+            - name: OIDC_CLIENT_ID
+              value: "pds-console"
+            - name: OIDC_SCOPES
+              value: ""
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: pds-oidc
+                  key: OIDC_CLIENT_SECRET
+            - name: SIGNUP_ENABLED
+              value: "true"
+            - name: SIGNUP_ORGANIZATION_CEILING
+              value: "200"
+            - name: SN_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: platform-servicenow
+                  key: SN_API_KEY
+                  optional: true
+            - name: SN_CLIENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: platform-servicenow
+                  key: SN_CLIENT_TOKEN
+                  optional: true
+            - name: SN_SECRET_NAME
+              value: "platform-servicenow"
+            - name: ASSISTANT_SECRET_NAME
+              value: "platform-assistant"
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: CURSOR_SECRET_NAME
+              value: "platform-cursor"
+            - name: SN_URL
+              value: "https://example.service-now.com"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: platform-hub-db-pguser-hub
+                  key: uri
+            - name: HUB_ORGANIZATION
+              value: "default"
+            - name: SESSION_LIFETIME
+              value: "720h"
+            - name: SESSION_IDLE_TIMEOUT
+              value: "168h"
+            - name: INVITE_TTL
+              value: "48h"
+            - name: STATE_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: platform-state-key
+                  key: STATE_ENCRYPTION_KEY
+            - name: STATE_ENCRYPTION_KEYS_RETIRED
+              valueFrom:
+                secretKeyRef:
+                  name: platform-state-key
+                  key: STATE_ENCRYPTION_KEYS_RETIRED
+                  optional: true
+            - name: ACTIVITY_CONFIGMAP
+              value: "platform-activity"
+            - name: HUB_JOIN_SECRET
+              value: "platform-join"
+            - name: HUB_INVENTORY_CONFIGMAP
+              value: "platform-inventory"
+            - name: HUB_WORK_CONFIGMAP
+              value: "platform-work"
+            - name: HUB_JOIN_TOKEN_TTL
+              value: "12h"
+            - name: HUB_HEARTBEAT_STALE
+              value: "2m"
+            - name: HUB_CLUSTER_REGION
+              value: "eu-west-1"
+            - name: HUB_GIT_DIR
+              value: "/var/lib/hub-git"
+            - name: HUB_PUBLIC_URL
+              value: "https://hub.example"
+            - name: HUB_AGENT_IMAGE
+              value: "ghcr.io/percona/percona-services-adapter:0.1.0-rc.1"
+            - name: ADAPTER_FEATURE_ACTIVITY
+              value: "true"
+            - name: ADAPTER_FEATURE_ASSISTANT
+              value: "false"
+            - name: ADAPTER_FEATURE_CHAT
+              value: "false"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: hub-git
+              mountPath: /var/lib/hub-git
+      volumes:
+        # The root filesystem is read only, so the process needs a writable /tmp.
+        - name: tmp
+          emptyDir: {}
+        - name: hub-git
+          persistentVolumeClaim:
+            claimName: platform-hub-git
+      nodeSelector:
+        node.kubernetes.io/instance-type: m6i.large
+      tolerations:
+        - effect: NoSchedule
+          key: percona.com/control-plane
+          operator: Exists
+---
+# Source: pds/templates/ui-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-ui
+  namespace: default
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: ui
+  annotations:
+    percona.com/owner: platform-team
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pds
+      app.kubernetes.io/instance: pds
+      app.kubernetes.io/component: ui
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: pds-0.1.0
+        app.kubernetes.io/name: pds
+        app.kubernetes.io/instance: pds
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/part-of: pds
+        percona.com/team: platform
+        app.kubernetes.io/component: ui
+      annotations:
+        checksum/nginx-config: 68d90555de1dc7dd57d50bef1f8f077fa3d4dbec2be48fe240ec91f104a7afd3
+        percona.com/owner: platform-team
+        percona.com/rollout: manual
+    spec:
+      serviceAccountName: platform-adapter
+      priorityClassName: pds-bulk
+      imagePullSecrets:
+        - name: ghcr-pull
+      securityContext:
+        fsGroup: 101
+        runAsGroup: 101
+        runAsNonRoot: true
+        runAsUser: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ui
+          image: ghcr.io/percona/percona-services-ui:0.1.0-rc.1
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            privileged: false
+            readOnlyRootFilesystem: true
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /app/
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /app/
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: 200m
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d
+              readOnly: true
+            # nginx writes its cache, temp files, and pid file at runtime, and
+            # the root filesystem is read only.
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: platform-ui-nginx
+        - name: nginx-cache
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+# Source: pds/templates/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: platform
+  namespace: default
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 16m
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "180"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "180"
+    percona.com/owner: platform-team
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - "pds.example.com"
+      secretName: pds-tls
+  rules:
+    - host: "pds.example.com"
+      http:
+        paths:
+          # The adapter rules come first so /api, /mcp and the authorization server's
+          # paths never fall through to the SPA.
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: platform-adapter
+                port:
+                  number: 8080
+          - path: /oauth
+            pathType: Prefix
+            backend:
+              service:
+                name: platform-adapter
+                port:
+                  number: 8080
+          - path: /.well-known/oauth-authorization-server
+            pathType: Exact
+            backend:
+              service:
+                name: platform-adapter
+                port:
+                  number: 8080
+          - path: /.well-known/oauth-protected-resource
+            pathType: Prefix
+            backend:
+              service:
+                name: platform-adapter
+                port:
+                  number: 8080
+          - path: /mcp
+            pathType: Prefix
+            backend:
+              service:
+                name: platform-adapter
+                port:
+                  number: 8080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: platform-ui
+                port:
+                  number: 8080
+---
+# Source: pds/templates/hub-database.yaml
+#
+# The cluster object is applied by a hook Job rather than rendered into the
+# release. Helm resolves every manifest against the API server before it
+# installs the CRDs a subchart carries, so a first install of the operator and
+# a PerconaPGCluster together fails on the kind being unknown. The chart
+# already applies Everest objects this way for the same reason.
+#
+# The hook is pre-install, not post-install. Helm runs post-install hooks only
+# after --wait has finished, and --wait cannot finish: the adapter Deployment
+# reads its connection URL from the Secret the operator mints for this cluster,
+# so nothing would ever create the cluster and the install would time out.
+# Helm applies the CRDs a subchart carries before it runs pre-install hooks, so
+# the kind is registered by the time this Job looks for it.
+#
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: platform-hub-database
+  namespace: default
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: hub-database
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    percona.com/owner: platform-team
+---
+# Source: pds/templates/state-key-job.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: platform-state-key
+  namespace: default
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: state-key
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    percona.com/owner: platform-team
+---
+# Source: pds/templates/hub-database.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: platform-hub-database
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: hub-database
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    percona.com/owner: platform-team
+rules:
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list"]
+---
+# Source: pds/templates/hub-database.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: platform-hub-database
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: hub-database
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    percona.com/owner: platform-team
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: platform-hub-database
+subjects:
+  - kind: ServiceAccount
+    name: platform-hub-database
+    namespace: default
+---
+# Source: pds/templates/hub-database.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: platform-hub-database
+  namespace: default
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: hub-database
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    percona.com/owner: platform-team
+rules:
+  - apiGroups: ["pgv2.percona.com"]
+    resources: ["perconapgclusters"]
+    verbs: ["get", "create", "update", "patch"]
+---
+# Source: pds/templates/state-key-job.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: platform-state-key
+  namespace: default
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: state-key
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    percona.com/owner: platform-team
+rules:
+  # get on the one name, create with no resourceNames because the first write
+  # of a named object cannot use them. There is no update and no delete: the
+  # key is written once and replacing it would orphan every stored credential.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - "platform-state-key"
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+---
+# Source: pds/templates/hub-database.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: platform-hub-database
+  namespace: default
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: hub-database
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    percona.com/owner: platform-team
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: platform-hub-database
+subjects:
+  - kind: ServiceAccount
+    name: platform-hub-database
+    namespace: default
+---
+# Source: pds/templates/state-key-job.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: platform-state-key
+  namespace: default
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: state-key
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    percona.com/owner: platform-team
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: platform-state-key
+subjects:
+  - kind: ServiceAccount
+    name: platform-state-key
+    namespace: default
+---
+# Source: pds/templates/tests/adapter-health.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: platform-test-adapter-health
+  namespace: default
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "1"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    percona.com/owner: platform-team
+spec:
+  restartPolicy: Never
+  imagePullSecrets:
+    - name: ghcr-pull
+  containers:
+    - name: curl
+      image: "curlimages/curl:8.11.1"
+      imagePullPolicy: IfNotPresent
+      # Liveness and readiness must be green, and the features route must
+      # answer. This probe carries no session, so 200 and 401 both count.
+      args:
+        - /bin/sh
+        - -c
+        - |
+          set -eu
+          base="http://platform-adapter:8080"
+          curl --fail --silent --show-error --max-time 10 "$base/healthz" | grep -q '"status":"ok"'
+          curl --fail --silent --show-error --max-time 10 "$base/readyz" | grep -q '"status":"ok"'
+          # 401 is a pass. The route needs a signed in organization now, and this
+          # probe carries no session, so an answer at all is what proves the
+          # request reached the adapter and its router ran.
+          code=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 "$base/api/features")
+          case "$code" in
+            200|401) echo "features responded $code" ;;
+            *) echo "features responded $code"; exit 1 ;;
+          esac
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        runAsUser: 100
+        capabilities:
+          drop:
+            - ALL
+      resources:
+        limits:
+          cpu: 100m
+          memory: 128Mi
+        requests:
+          cpu: 20m
+          memory: 32Mi
+---
+# Source: pds/templates/tests/ui-serving.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: platform-test-ui-serving
+  namespace: default
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "2"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    percona.com/owner: platform-team
+spec:
+  restartPolicy: Never
+  imagePullSecrets:
+    - name: ghcr-pull
+  containers:
+    - name: curl
+      image: "curlimages/curl:8.11.1"
+      imagePullPolicy: IfNotPresent
+      args:
+        - /bin/sh
+        - -c
+        - |
+          set -eu
+          base="http://platform-ui:8080"
+          curl --fail --silent --show-error --max-time 10 "$base/app/" | grep -q '<div id="root">'
+          # The SPA reaches the adapter through the UI origin, so the proxy rule
+          # is part of the contract this chart ships.
+          # 401 is a pass. The route needs a signed in organization now, and this
+          # probe carries no session, so an answer at all is what proves the
+          # request reached the adapter through the proxy.
+          code=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 "$base/api/features")
+          case "$code" in
+            200|401) echo "api proxy responded $code" ;;
+            *) echo "api proxy responded $code"; exit 1 ;;
+          esac
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        runAsUser: 100
+        capabilities:
+          drop:
+            - ALL
+      resources:
+        limits:
+          cpu: 100m
+          memory: 128Mi
+        requests:
+          cpu: 20m
+          memory: 32Mi
+---
+# Source: pds/templates/hub-database.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: platform-hub-database
+  namespace: default
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: hub-database
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "15"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    percona.com/owner: platform-team
+spec:
+  # A missing CRD on upgrade is terminal, not transient: Helm never installs a
+  # subchart's CRDs on upgrade, so retrying cannot make one appear. Retrying
+  # anyway turned a clear failure into an eight minute one.
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 120
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: pds-0.1.0
+        app.kubernetes.io/name: pds
+        app.kubernetes.io/instance: pds
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/part-of: pds
+        percona.com/team: platform
+        app.kubernetes.io/component: hub-database
+    spec:
+      restartPolicy: OnFailure
+      # No priorityClassName. This runs as a pre-install hook, and the chart's
+      # PriorityClass is an ordinary release resource that does not exist yet,
+      # so naming it makes the API server refuse the pod.
+      serviceAccountName: platform-hub-database
+      containers:
+        - name: apply
+          image: "alpine/k8s:1.32.3"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: IS_UPGRADE
+              value: "false"
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              # A fresh install already has the CRDs: Helm applies a subchart's
+              # crds directory before it runs pre-install hooks, so the only
+              # wait needed there is for propagation. An upgrade never gets
+              # them, so a missing CRD is reported at once rather than waited on.
+              if [ "${IS_UPGRADE}" = "true" ]; then
+                deadline=$(date +%s)
+              else
+                deadline=$(( $(date +%s) + 60 ))
+              fi
+              while ! kubectl get crd perconapgclusters.pgv2.percona.com >/dev/null 2>&1; do
+                if [ "$(date +%s)" -ge "${deadline}" ]; then
+                  echo "The PerconaPGCluster CRD is not registered in this cluster."
+                  echo
+                  echo "Helm installs a subchart's CRDs on install but never on upgrade, so"
+                  echo "turning adapter.database.enabled on for an existing release needs them"
+                  echo "applied once first:"
+                  echo
+                  echo "  helm show crds percona/pg-operator --version 3.0.0 | kubectl apply --server-side -f -"
+                  echo
+                  echo "Then run the same helm upgrade again."
+                  exit 1
+                fi
+                sleep 5
+              done
+              # The object existing is not the same as the API serving it. An
+              # apply that arrives before the CRD is established fails with no
+              # matches for kind, which reads like a missing CRD and is not.
+              kubectl wait --for=condition=established --timeout=60s \
+                crd/perconapgclusters.pgv2.percona.com
+              # The heredoc is quoted so the shell expands nothing in the body.
+              # A label or annotation carrying a dollar sign would otherwise be
+              # mangled, or abort the script under set -u.
+              # The CRD check above is terminal, which is why backoffLimit is 0
+              # on upgrade. The apply is not: an admission webhook or API server
+              # blip should be retried rather than failing the release, so the
+              # retry lives here instead of in the Job.
+              # The manifest is held in a variable rather than piped. A pipe
+              # is consumed by the first attempt, so every retry would read end
+              # of file and fail with no objects passed to apply, which is not
+              # the error that was being retried.
+              manifest=$(cat <<'EOF'
+
+              apiVersion: pgv2.percona.com/v2
+              kind: PerconaPGCluster
+              metadata:
+                name: platform-hub-db
+                namespace: default
+                labels:
+                  helm.sh/chart: pds-0.1.0
+                  app.kubernetes.io/name: pds
+                  app.kubernetes.io/instance: pds
+                  app.kubernetes.io/version: "0.1.0"
+                  app.kubernetes.io/managed-by: Helm
+                  app.kubernetes.io/part-of: pds
+                  percona.com/team: platform
+                  app.kubernetes.io/component: hub-database
+              spec:
+                crVersion: 3.0.0
+                image: "docker.io/percona/percona-distribution-postgresql:18.3-2"
+                postgresVersion: 18
+                # The adapter connects as this role, to this database. The
+                # operator owns the password and writes it to
+                # <cluster>-pguser-<user>, so no credential passes through
+                # values or through a chart rendered Secret.
+                users:
+                  - name: "hub"
+                    databases:
+                      - "hub"
+                instances:
+                  - name: instance1
+                    replicas: 1
+                    resources:
+                      limits:
+                        cpu: "1"
+                        memory: 2Gi
+                      requests:
+                        cpu: 200m
+                        memory: 512Mi
+                    dataVolumeClaimSpec:
+                      accessModes:
+                        - ReadWriteOnce
+                      storageClassName: "gp3-encrypted"
+                      resources:
+                        requests:
+                          storage: 10Gi
+                backups:
+                  pgbackrest:
+                    image: "docker.io/percona/percona-pgbackrest:2.58.0-1"
+                    repos:
+                      - name: repo1
+                        volume:
+                          volumeClaimSpec:
+                            accessModes:
+                              - ReadWriteOnce
+                            storageClassName: "gp3-encrypted"
+                            resources:
+                              requests:
+                                storage: 10Gi
+              EOF
+              )
+              attempt=1
+              until printf '%s\n' "${manifest}" | kubectl apply -f -; do
+                if [ "${attempt}" -ge 3 ]; then
+                  echo "could not apply the cluster after ${attempt} attempts"
+                  exit 1
+                fi
+                echo "apply failed, retrying"
+                attempt=$(( attempt + 1 ))
+                sleep 5
+              done
+---
+# Source: pds/templates/state-key-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: platform-state-key
+  namespace: default
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: state-key
+  annotations:
+    # Weight 5 puts this before the database hook at 10, so the key exists by
+    # the time the adapter Deployment is applied and its secretKeyRef resolves.
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    percona.com/owner: platform-team
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 120
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: pds-0.1.0
+        app.kubernetes.io/name: pds
+        app.kubernetes.io/instance: pds
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/part-of: pds
+        percona.com/team: platform
+        app.kubernetes.io/component: state-key
+    spec:
+      restartPolicy: OnFailure
+      # No priorityClassName. This runs as a pre-install hook, and the chart's
+      # PriorityClass is an ordinary release resource that does not exist yet.
+      serviceAccountName: platform-state-key
+      containers:
+        - name: mint
+          image: "alpine/k8s:1.32.3"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: SECRET_NAME
+              value: "platform-state-key"
+            - name: SECRET_FIELD
+              value: "STATE_ENCRYPTION_KEY"
+            - name: SECRET_NAMESPACE
+              value: "default"
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              if kubectl get secret "${SECRET_NAME}" -n "${SECRET_NAMESPACE}" >/dev/null 2>&1; then
+                echo "the state encryption key is already present, leaving it as it is"
+                exit 0
+              fi
+              # 32 bytes is the AES-256 key the adapter refuses to run without.
+              # The value is piped straight into kubectl and never echoed: it
+              # would otherwise land in the Job log, which is the one place it
+              # must not be.
+              key="$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
+              # create, not apply: a second Job that raced this one must fail on
+              # AlreadyExists rather than overwrite a key that has already
+              # sealed credentials.
+              # No labels are set on it, and the Role grants no patch. The
+              # Secret is deliberately not part of the release: it has to
+              # outlive an uninstall, because the rows it opens do. Labelling it
+              # as managed by Helm would say the opposite, and a patch verb here
+              # would be a way to overwrite a key that has already sealed
+              # credentials.
+              if printf '%s' "${key}" | kubectl create secret generic "${SECRET_NAME}" \
+                -n "${SECRET_NAMESPACE}" --from-file="${SECRET_FIELD}=/dev/stdin"; then
+                echo "minted the state encryption key"
+              elif kubectl get secret "${SECRET_NAME}" -n "${SECRET_NAMESPACE}" >/dev/null 2>&1; then
+                echo "another run minted the state encryption key first, leaving it as it is"
+              else
+                echo "could not mint the state encryption key"
+                exit 1
+              fi

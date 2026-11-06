@@ -1,0 +1,17 @@
+{
+  "result": {
+    "success": true,
+    "tickets": [
+      {
+        "number": "CS0061234",
+        "sys_id": "3f1c9a2e6b7d4e8fa0c1d2e3f4a5b6c7",
+        "table_name": "sn_customerservice_case",
+        "state": "Awaiting Percona",
+        "short_description": "Cannot create database orders-prod",
+        "u_main_technology": "MySQL",
+        "opened_at": "2026-08-20 09:12:33",
+        "sys_updated_on": "2026-08-21 14:02:10"
+      }
+    ]
+  }
+}

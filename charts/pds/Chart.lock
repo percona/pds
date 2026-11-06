@@ -1,0 +1,18 @@
+dependencies:
+- name: openeverest
+  repository: https://openeverest.github.io/helm-charts/
+  version: 2.0.0-dev.4
+- name: provider-percona-xtradb-cluster
+  repository: oci://ghcr.io/openeverest/charts
+  version: 0.3.1
+- name: provider-percona-postgresql
+  repository: oci://ghcr.io/openeverest/charts
+  version: 0.5.0
+- name: pg-operator
+  repository: https://percona.github.io/percona-helm-charts/
+  version: 3.0.0
+- name: pmm
+  repository: https://percona.github.io/percona-helm-charts/
+  version: 1.9.1
+digest: sha256:a42c76d25d8d2d97f6f61580cb3314a9c0a68046fb06d67d3817e320dc764c71
+generated: "2026-10-15T12:20:26.054063-03:00"

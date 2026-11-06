@@ -1,0 +1,19 @@
+---
+name: databases
+description: {{.Description}}
+---
+{{.Instructions}}
+
+## Starting a workflow
+
+The `pds` server lists prompts. When the person's request matches one, tell them to start it from the client's prompt list instead of improvising its steps:
+{{range .Prompts}}
+- `{{.Name}}`: {{.Title}}. {{.Description}}
+{{- end}}
+
+## Signing in
+
+- The `pds` server asks the person to sign in through the client the first time a tool needs it. Nothing is stored in this plugin, and no token is asked for in the chat.
+- The `pds-data` server runs on this computer. It reads a database's connection details from PDS, keeps the password in the operating system's credential store (the Keychain on macOS, the Secret Service on Linux) and runs queries from here, so no row goes through PDS. The first time it needs to connect, a client that can show a sign-in page opens it. Otherwise the tool says so, and the person runs `npx -y @gas-lab/pds-mcp login --passwords` in a terminal and tries again.
+- Saving a database password on this computer needs the Organization to allow it and the person to agree when they sign in. Running SQL that changes data needs the Organization to allow it and the person to run `npx -y @gas-lab/pds-mcp login --sql-write`. Until both hold, `run_query` is not listed. Never suggest a way around either.
+- `write_env` puts the host, port, user and database name into a `.env` file in the directory the client started in. Ask before it writes the password into that file.

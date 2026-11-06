@@ -1,0 +1,120 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "pds.adapter.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: adapter
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.adapter.replicaCount }}
+  {{- if or .Values.adapter.hub.gitDir .Values.adapter.hub.github.org }}
+  strategy:
+    type: Recreate
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "pds.selectorLabels" (dict "root" . "component" "adapter") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "pds.labels" . | nindent 8 }}
+        app.kubernetes.io/component: adapter
+      {{- $podAnnotations := merge (deepCopy .Values.adapter.podAnnotations) (deepCopy .Values.commonAnnotations) }}
+      {{- if and .Values.servicenow.enabled (not .Values.servicenow.existingSecret) }}
+      {{- $checksum := include (print $.Template.BasePath "/servicenow-secret.yaml") . | sha256sum }}
+      {{- $podAnnotations = merge (dict "checksum/servicenow-secret" $checksum) $podAnnotations }}
+      {{- end }}
+      {{- if and .Values.adapter.hub.agentToken (not .Values.adapter.hub.agentTokenExistingSecret) }}
+      {{- $checksum := include (print $.Template.BasePath "/hub-agent-token-secret.yaml") . | sha256sum }}
+      {{- $podAnnotations = merge (dict "checksum/hub-agent-token" $checksum) $podAnnotations }}
+      {{- end }}
+      {{- if and .Values.adapter.hub.operatorToken (not .Values.adapter.hub.operatorTokenExistingSecret) }}
+      {{- $checksum := include (print $.Template.BasePath "/hub-operator-token-secret.yaml") . | sha256sum }}
+      {{- $podAnnotations = merge (dict "checksum/hub-operator-token" $checksum) $podAnnotations }}
+      {{- end }}
+      {{- with $podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "pds.serviceAccountName" . }}
+      priorityClassName: pds-bulk
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.adapter.podSecurityContext | nindent 8 }}
+      containers:
+        - name: adapter
+          image: {{ include "pds.image" (dict "image" .Values.adapter.image "root" .) }}
+          imagePullPolicy: {{ .Values.adapter.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.adapter.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.adapter.service.port }}
+              protocol: TCP
+          env:
+            {{- include "pds.adapter.env" . | nindent 12 }}
+            {{- with .Values.adapter.role }}
+            - name: ADAPTER_ROLE
+              value: {{ . | quote }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.adapter.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if and .Values.adapter.hub.gitDir (or .Values.adapter.hub.persistence.enabled .Values.adapter.hub.persistence.existingClaim) }}
+            - name: hub-git
+              mountPath: {{ .Values.adapter.hub.gitDir }}
+            {{- end }}
+            {{- with .Values.adapter.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        # The root filesystem is read only, so the process needs a writable /tmp.
+        - name: tmp
+          emptyDir: {}
+        {{- if and .Values.adapter.hub.gitDir (or .Values.adapter.hub.persistence.enabled .Values.adapter.hub.persistence.existingClaim) }}
+        - name: hub-git
+          persistentVolumeClaim:
+            claimName: {{ include "pds.hub.gitClaimName" . }}
+        {{- end }}
+        {{- with .Values.adapter.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.adapter.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.adapter.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.adapter.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

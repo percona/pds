@@ -1,0 +1,164 @@
+{{- if and .Values.stack.enabled .Values.stack.s3.enabled }}
+{{- $name := include "pds.fullname" . }}
+{{- $dbns := include "pds.dbNamespace" . }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}-s3-backup
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: s3
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}-s3-backup
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: s3
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+rules:
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "update", "patch"]
+  - apiGroups: ["backup.openeverest.io"]
+    resources: ["backupstorages"]
+    verbs: ["get", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-s3-backup
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: s3
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}-s3-backup
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}-s3-backup
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}-s3-backup
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: s3
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "15"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  backoffLimit: 20
+  ttlSecondsAfterFinished: 120
+  template:
+    metadata:
+      labels:
+        {{- include "pds.labels" . | nindent 8 }}
+        app.kubernetes.io/component: s3
+    spec:
+      restartPolicy: OnFailure
+      priorityClassName: pds-bulk
+      serviceAccountName: {{ $name }}-s3-backup
+      containers:
+        - name: apply
+          image: "{{ .Values.stack.applyImage.repository }}:{{ .Values.stack.applyImage.tag }}"
+          imagePullPolicy: {{ .Values.stack.applyImage.pullPolicy }}
+          env:
+            - name: DB_NAMESPACE
+              value: {{ $dbns | quote }}
+            - name: S3_ENDPOINT
+              value: {{ .Values.stack.s3.endpointURL | quote }}
+            - name: S3_BUCKET
+              value: {{ .Values.stack.s3.bucket | quote }}
+            - name: S3_REGION
+              value: {{ .Values.stack.s3.region | quote }}
+            - name: STORAGE_NAME
+              value: {{ .Values.stack.s3.storageName | quote }}
+            - name: S3_SECRET
+              value: {{ .Values.stack.s3.existingSecret | quote }}
+            - name: RELEASE_NAMESPACE
+              value: {{ .Release.Namespace | quote }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              deadline=$(( $(date +%s) + 600 ))
+              while ! kubectl get namespace "${DB_NAMESPACE}" >/dev/null 2>&1; do
+                if [ "$(date +%s)" -ge "${deadline}" ]; then
+                  echo "namespace ${DB_NAMESPACE} did not appear in time"
+                  exit 1
+                fi
+                sleep 5
+              done
+              while ! kubectl get crd backupstorages.backup.openeverest.io >/dev/null 2>&1; do
+                if [ "$(date +%s)" -ge "${deadline}" ]; then
+                  echo "BackupStorage CRD did not appear in time"
+                  exit 1
+                fi
+                sleep 5
+              done
+              kubectl -n "${RELEASE_NAMESPACE}" get secret "${S3_SECRET}" >/dev/null
+              access_key="$(kubectl -n "${RELEASE_NAMESPACE}" get secret "${S3_SECRET}" -o jsonpath='{.data.AWS_ACCESS_KEY_ID}' | base64 -d)"
+              secret_key="$(kubectl -n "${RELEASE_NAMESPACE}" get secret "${S3_SECRET}" -o jsonpath='{.data.AWS_SECRET_ACCESS_KEY}' | base64 -d)"
+              kubectl -n "${DB_NAMESPACE}" create secret generic "${S3_SECRET}" \
+                --from-literal=AWS_ACCESS_KEY_ID="${access_key}" \
+                --from-literal=AWS_SECRET_ACCESS_KEY="${secret_key}" \
+                --dry-run=client -o yaml | kubectl apply -f -
+              if [ -z "${S3_ENDPOINT}" ]; then
+                S3_ENDPOINT="https://s3.${S3_REGION}.amazonaws.com"
+              fi
+              cat <<EOF | kubectl apply -f -
+              apiVersion: backup.openeverest.io/v1alpha1
+              kind: BackupStorage
+              metadata:
+                name: ${STORAGE_NAME}
+                namespace: ${DB_NAMESPACE}
+              spec:
+                type: s3
+                s3:
+                  bucket: ${S3_BUCKET}
+                  region: ${S3_REGION}
+                  endpointURL: ${S3_ENDPOINT}
+                  credentialsSecretRef:
+                    name: ${S3_SECRET}
+                  forcePathStyle: {{ .Values.stack.s3.forcePathStyle }}
+                  verifyTLS: true
+              EOF
+{{- end }}

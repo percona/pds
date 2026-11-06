@@ -1,0 +1,33 @@
+{
+  "apiVersion": "core.openeverest.io/v1alpha1",
+  "kind": "Instance",
+  "metadata": {
+    "name": "orders-dev",
+    "namespace": "pds",
+    "creationTimestamp": "2026-08-24T09:12:03Z",
+    "labels": {
+      "app.kubernetes.io/managed-by": "pds",
+      "pds.percona.com/profile": "dev"
+    }
+  },
+  "spec": {
+    "providerRef": { "name": "percona-xtradb-cluster" },
+    "topology": { "type": "cluster" },
+    "components": {
+      "engine": {
+        "replicas": 1,
+        "resources": { "limits": { "cpu": "1", "memory": "2Gi" } },
+        "storage": { "size": "20Gi" }
+      },
+      "proxy": { "type": "haproxy", "replicas": 1 }
+    }
+  },
+  "status": {
+    "phase": "Ready",
+    "connectionSecretRef": { "name": "orders-dev-conn" },
+    "components": [
+      { "name": "engine", "selector": "app=orders-dev", "replicas": 1, "readyReplicas": 1 },
+      { "name": "proxy", "selector": "app=orders-dev-proxy", "replicas": 2, "readyReplicas": 0 }
+    ]
+  }
+}

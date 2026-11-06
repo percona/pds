@@ -1,0 +1,30 @@
+{{- if .Values.stack.enabled }}
+{{/*
+The pinned OpenEverest controller watches VMAgent even when Kubernetes
+monitoring is off. Without this GVK the manager times out on cache sync and
+never reconciles Instances. The stub registers the type only; it does not
+deploy VictoriaMetrics.
+*/}}
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: vmagents.operator.victoriametrics.com
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  group: operator.victoriametrics.com
+  names:
+    kind: VMAgent
+    listKind: VMAgentList
+    plural: vmagents
+    singular: vmagent
+  scope: Namespaced
+  versions:
+    - name: v1beta1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          x-kubernetes-preserve-unknown-fields: true
+{{- end }}

@@ -1,0 +1,72 @@
+apiVersion: v2
+name: pds
+description: Percona Database Service hub. Connected environments run the databases.
+type: application
+
+# Chart version tracks the repository release; appVersion tracks the adapter and
+# UI images the chart deploys by default.
+version: 0.1.0
+appVersion: "0.1.0"
+
+kubeVersion: ">= 1.27.0-0"
+
+home: https://github.com/percona/pds
+sources:
+  - https://github.com/percona/pds
+icon: https://raw.githubusercontent.com/percona/pds/main/apps/ui/public/logo.png
+
+keywords:
+  - percona
+  - mysql
+  - postgresql
+  - kubernetes
+  - openeverest
+  - pmm
+  - dbaas
+
+maintainers:
+  - name: Percona Database Service team
+    url: https://github.com/percona/pds
+
+# OpenEverest, its engine providers, and PMM are real dependencies so a
+# connected environment (`values-spoke.yaml`) brings up the database platform.
+# The default install is a hub and does not. `helm dependency update` is
+# required before lint or template. OpenEverest still refuses any namespace
+# but everest-system, so a stack install uses --namespace everest-system.
+dependencies:
+  - name: openeverest
+    version: 2.0.0-dev.4
+    repository: https://openeverest.github.io/helm-charts/
+    condition: stack.enabled
+  - name: provider-percona-xtradb-cluster
+    version: 0.3.1
+    repository: oci://ghcr.io/openeverest/charts
+    alias: provider-pxc
+    condition: stack.enabled
+  - name: provider-percona-postgresql
+    version: 0.5.0
+    repository: oci://ghcr.io/openeverest/charts
+    alias: provider-postgresql
+    condition: stack.enabled
+  # The adapter's own database needs the PostgreSQL operator on a release
+  # where the stack is off, which is what a hub is. A stack install gets the
+  # same operator through provider-postgresql, so only one of the two is ever
+  # on and templates/hub-database.yaml refuses the pair.
+  - name: pg-operator
+    version: 3.0.0
+    repository: https://percona.github.io/percona-helm-charts/
+    alias: hub-postgresql-operator
+    condition: adapter.database.operator.enabled
+  - name: pmm
+    version: 1.9.1
+    repository: https://percona.github.io/percona-helm-charts/
+    condition: stack.pmm.subchart,stack.pmm.enabled,stack.enabled
+    alias: pmm-server
+
+annotations:
+  pds.percona.com/platform-charts: |
+    openeverest/openeverest 2.0.0-dev.4
+    oci://ghcr.io/openeverest/charts/provider-percona-xtradb-cluster 0.3.1
+    oci://ghcr.io/openeverest/charts/provider-percona-postgresql 0.5.0
+    percona/pg-operator 3.0.0
+    percona/pmm 1.9.1 (PMM 3.9.1)

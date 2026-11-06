@@ -1,0 +1,122 @@
+---
+# Source: pds/templates/db-namespace.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pds-db-namespace
+  namespace: everest-system
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    app.kubernetes.io/component: database
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "4"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded,hook-failed
+---
+# Source: pds/templates/db-namespace.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pds-db-namespace
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    app.kubernetes.io/component: database
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "4"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded,hook-failed
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    resourceNames: [pds]
+    verbs: ["get", "patch"]
+---
+# Source: pds/templates/db-namespace.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: pds-db-namespace
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    app.kubernetes.io/component: database
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "4"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded,hook-failed
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: pds-db-namespace
+subjects:
+  - kind: ServiceAccount
+    name: pds-db-namespace
+    namespace: everest-system
+---
+# Source: pds/templates/db-namespace.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pds-db-namespace
+  namespace: everest-system
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    app.kubernetes.io/component: database
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 120
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: pds-0.1.0
+        app.kubernetes.io/name: pds
+        app.kubernetes.io/instance: pds
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/part-of: pds
+        app.kubernetes.io/component: database
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: pds-db-namespace
+      containers:
+        - name: ensure
+          image: "alpine/k8s:1.32.3"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DB_NAMESPACE
+              value: "pds"
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              kubectl create namespace "${DB_NAMESPACE}" --dry-run=client -o yaml \
+                | kubectl apply -f -
+              kubectl label namespace "${DB_NAMESPACE}" \
+                app.kubernetes.io/managed-by=everest --overwrite

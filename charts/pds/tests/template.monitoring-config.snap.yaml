@@ -1,0 +1,362 @@
+---
+# Source: pds/templates/monitoring-config-job.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pds-monitoring-config
+  namespace: everest-system
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    app.kubernetes.io/component: monitoring
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+---
+# Source: pds/templates/monitoring-config-job.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pds-monitoring-config
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    app.kubernetes.io/component: monitoring
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "update", "patch"]
+  - apiGroups: ["monitoring.openeverest.io"]
+    resources: ["monitoringconfigs"]
+    verbs: ["get", "create", "update", "patch"]
+---
+# Source: pds/templates/monitoring-config-job.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: pds-monitoring-config
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    app.kubernetes.io/component: monitoring
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: pds-monitoring-config
+subjects:
+  - kind: ServiceAccount
+    name: pds-monitoring-config
+    namespace: everest-system
+---
+# Source: pds/templates/monitoring-config-job.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pds-monitoring-config
+  namespace: everest-system
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    app.kubernetes.io/component: monitoring
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+rules:
+  # kubectl wait lists and watches, which resourceNames cannot narrow.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  # exec is only for putting the admin password back into Grafana when PMM
+  # started with a different one.
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    resourceNames: ["pmm-0"]
+    verbs: ["create", "get"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames:
+      - "pds-adapter"
+    verbs: ["get", "patch"]
+  # kubectl rollout status lists and watches, which resourceNames cannot
+  # narrow.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["list", "watch"]
+---
+# Source: pds/templates/monitoring-config-job.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pds-monitoring-config
+  namespace: everest-system
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    app.kubernetes.io/component: monitoring
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pds-monitoring-config
+subjects:
+  - kind: ServiceAccount
+    name: pds-monitoring-config
+    namespace: everest-system
+---
+# Source: pds/templates/monitoring-config-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pds-monitoring-config
+  namespace: everest-system
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    app.kubernetes.io/component: monitoring
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "16"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 20
+  ttlSecondsAfterFinished: 120
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: pds-0.1.0
+        app.kubernetes.io/name: pds
+        app.kubernetes.io/instance: pds
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/part-of: pds
+        app.kubernetes.io/component: monitoring
+    spec:
+      restartPolicy: OnFailure
+      priorityClassName: pds-bulk
+      serviceAccountName: pds-monitoring-config
+      containers:
+        - name: apply
+          image: "alpine/k8s:1.32.3"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DB_NAMESPACE
+              value: "pds"
+            - name: NAMESPACE
+              value: "everest-system"
+            - name: CONFIG_NAME
+              value: "pmm"
+            - name: PMM_URL
+              value: "https://monitoring-service.everest-system.svc.cluster.local"
+            - name: MINT_TOKEN
+              value: "true"
+            - name: TOKEN_SECRET
+              value: "pds-pmm"
+            - name: PMM_API
+              value: "http://monitoring-service.everest-system.svc.cluster.local/graph/api"
+            - name: PMM_POD
+              value: pmm-0
+            - name: ADMIN_SECRET
+              value: "pmm-secret"
+            - name: RESTART_DEPLOYMENTS
+              value: "pds-adapter"
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              # As a hook, helm bounds this with --timeout too, so an install
+              # runs with --timeout 15m to let a first pmm-0 pull finish. When
+              # Flux installs PMM nothing waits on this Job, and the server
+              # comes up after the chart and the image have both been pulled.
+              deadline=$(( $(date +%s) + 900 ))
+              in_time() {
+                if [ "$(date +%s)" -ge "${deadline}" ]; then
+                  echo "$1"
+                  exit 1
+                fi
+              }
+              minted=false
+              if [ "${MINT_TOKEN}" = "true" ]; then
+                if ! kubectl -n "${NAMESPACE}" get secret "${ADMIN_SECRET}" >/dev/null 2>&1; then
+                  # A release installed before the pre-install hook existed
+                  # lost the subchart's Secret on its first upgrade.
+                  pass="$(head -c 64 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24)"
+                  printf '%s' "${pass}" | kubectl -n "${NAMESPACE}" create secret generic "${ADMIN_SECRET}" \
+                    --from-file="PMM_ADMIN_PASSWORD=/dev/stdin" >/dev/null || true
+                fi
+                until kubectl -n "${NAMESPACE}" wait "pod/${PMM_POD}" --for=condition=Ready --timeout=30s >/dev/null 2>&1; do
+                  in_time "${PMM_POD} did not become ready in time"
+                  echo "waiting for ${PMM_POD}"
+                  sleep 5
+                done
+                # The id of the account named pds, out of one account or a
+                # search page. Each object goes on its own line first, so the
+                # id cannot come from a neighbouring account.
+                account_id() {
+                  printf '%s' "$1" | sed 's/},{/}\n{/g' | grep '"name":"pds"' | head -n 1 \
+                    | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p'
+                }
+                status() {
+                  curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 "$@" || true
+                }
+                # The token goes to curl in a header file, so it never shows in
+                # the process list.
+                bearer="$(mktemp)"
+                netrc="$(mktemp)"
+                trap 'rm -f "${bearer}" "${netrc}"' EXIT
+                token_answers() {
+                  printf 'Authorization: Bearer %s\n' "$1" >"${bearer}"
+                  [ "$(status -H "@${bearer}" "${PMM_API}/org")" = "200" ]
+                }
+                PMM_TOKEN="$(kubectl -n "${NAMESPACE}" get secret "${TOKEN_SECRET}" \
+                  -o jsonpath='{.data.PMM_TOKEN}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+                if [ -n "${PMM_TOKEN}" ] && token_answers "${PMM_TOKEN}"; then
+                  echo "the PMM token in ${TOKEN_SECRET} still answers, keeping it"
+                  # A run that minted and then failed before the restart leaves
+                  # the marker unset, so the retry still restarts.
+                  rolled="$(kubectl -n "${NAMESPACE}" get secret "${TOKEN_SECRET}" \
+                    -o jsonpath='{.metadata.annotations.pds\.percona\.com/rolled-out}' 2>/dev/null || true)"
+                  if [ "${rolled}" != "true" ]; then
+                    minted=true
+                  fi
+                else
+                  pass="$(kubectl -n "${NAMESPACE}" get secret "${ADMIN_SECRET}" \
+                    -o jsonpath='{.data.PMM_ADMIN_PASSWORD}' | base64 -d)"
+                  if [ -z "${pass}" ]; then
+                    echo "${ADMIN_SECRET} has no PMM_ADMIN_PASSWORD"
+                    exit 1
+                  fi
+                  printf 'machine %s login admin password %s\n' \
+                    "$(printf '%s' "${PMM_API}" | sed 's|^http://||; s|[/:].*||')" "${pass}" >"${netrc}"
+                  if [ "$(status --netrc-file "${netrc}" "${PMM_API}/org")" != "200" ]; then
+                    # PMM keeps the admin password it first started with on its
+                    # volume, so a volume that outlived its Secret needs the
+                    # Secret's password put back.
+                    echo "resetting the PMM admin password to the one in ${ADMIN_SECRET}"
+                    printf '%s' "${pass}" | kubectl -n "${NAMESPACE}" exec -i "${PMM_POD}" -- sh -c \
+                      'grafana cli --config=/etc/grafana/grafana.ini --homepath /usr/share/grafana admin reset-admin-password --password-from-stdin >/dev/null'
+                    kubectl -n "${NAMESPACE}" exec "${PMM_POD}" -- supervisorctl restart grafana >/dev/null
+                    until [ "$(status --netrc-file "${netrc}" "${PMM_API}/org")" = "200" ]; do
+                      in_time "PMM did not accept the admin password in time"
+                      sleep 3
+                    done
+                  fi
+                  account="$(curl --silent --show-error --max-time 20 --netrc-file "${netrc}" \
+                    -X POST -H 'Content-Type: application/json' \
+                    -d '{"name":"pds","role":"Admin"}' "${PMM_API}/serviceaccounts" || true)"
+                  id="$(account_id "${account}")"
+                  if [ -z "${id}" ]; then
+                    found="$(curl --silent --show-error --max-time 20 --netrc-file "${netrc}" \
+                      "${PMM_API}/serviceaccounts/search?query=pds")"
+                    id="$(account_id "${found}")"
+                  fi
+                  if [ -z "${id}" ]; then
+                    echo "could not create the PMM service account"
+                    exit 1
+                  fi
+                  issued="$(curl --silent --show-error --max-time 20 --netrc-file "${netrc}" \
+                    -X POST -H 'Content-Type: application/json' \
+                    -d "{\"name\":\"pds-$(date +%s)\"}" "${PMM_API}/serviceaccounts/${id}/tokens")"
+                  PMM_TOKEN="$(printf '%s' "${issued}" | sed -n 's/.*"key":"\([^"]*\)".*/\1/p')"
+                  if [ -z "${PMM_TOKEN}" ]; then
+                    echo "PMM issued no service account token"
+                    exit 1
+                  fi
+                  printf '%s' "${PMM_TOKEN}" | kubectl -n "${NAMESPACE}" create secret generic "${TOKEN_SECRET}" \
+                    --from-file="PMM_TOKEN=/dev/stdin" --dry-run=client -o yaml | kubectl apply -f -
+                  kubectl -n "${NAMESPACE}" annotate secret "${TOKEN_SECRET}" \
+                    pds.percona.com/rolled-out=false --overwrite >/dev/null
+                  minted=true
+                fi
+              fi
+              if [ -z "${PMM_TOKEN:-}" ]; then
+                echo "PMM_TOKEN is empty; cannot create MonitoringConfig ${CONFIG_NAME}"
+                exit 1
+              fi
+              while ! kubectl get namespace "${DB_NAMESPACE}" >/dev/null 2>&1; do
+                in_time "namespace ${DB_NAMESPACE} did not appear in time"
+                echo "waiting for namespace ${DB_NAMESPACE}"
+                sleep 5
+              done
+              while ! kubectl get crd monitoringconfigs.monitoring.openeverest.io >/dev/null 2>&1; do
+                in_time "the MonitoringConfig CRD did not appear in time"
+                echo "waiting for the MonitoringConfig CRD"
+                sleep 5
+              done
+              printf '%s' "${PMM_TOKEN}" | kubectl -n "${DB_NAMESPACE}" create secret generic pmm-credentials \
+                --from-file=apiKey=/dev/stdin \
+                --dry-run=client -o yaml | kubectl apply -f -
+              cat <<EOF | kubectl apply -f -
+              apiVersion: monitoring.openeverest.io/v1alpha1
+              kind: MonitoringConfig
+              metadata:
+                name: ${CONFIG_NAME}
+                namespace: ${DB_NAMESPACE}
+              spec:
+                type: pmm
+                pmm:
+                  url: ${PMM_URL}
+                  verifyTLS: false
+                  credentialsSecretRef:
+                    name: pmm-credentials
+              EOF
+              if [ "${minted}" = "true" ]; then
+                # The control plane reads the token from its environment, which
+                # a pod only takes in when it starts. It restarts only after the
+                # MonitoringConfig exists, so the agent's first check on start
+                # finds it rather than remembering a miss. Helm's own wait is
+                # over by now, so the hook waits for the new pods itself. The
+                # marker is set last: a run that fails anywhere before it
+                # leaves the marker unset, and the retry restarts again.
+                for deployment in ${RESTART_DEPLOYMENTS}; do
+                  if kubectl -n "${NAMESPACE}" get "deployment/${deployment}" >/dev/null 2>&1; then
+                    kubectl -n "${NAMESPACE}" rollout restart "deployment/${deployment}"
+                    kubectl -n "${NAMESPACE}" rollout status "deployment/${deployment}" --timeout=300s
+                  fi
+                done
+                kubectl -n "${NAMESPACE}" annotate secret "${TOKEN_SECRET}" \
+                  pds.percona.com/rolled-out=true --overwrite >/dev/null
+              fi

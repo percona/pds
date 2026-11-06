@@ -1,0 +1,158 @@
+---
+# Source: pds/templates/pmm-admin-secret-job.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pds-pmm-admin
+  namespace: everest-system
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    app.kubernetes.io/component: monitoring
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+---
+# Source: pds/templates/pmm-admin-secret-job.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pds-pmm-admin
+  namespace: everest-system
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    app.kubernetes.io/component: monitoring
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+rules:
+  # get on the one name, create with no resourceNames because the first write
+  # of a named object cannot use them. There is no update: PMM keeps the
+  # password it started with, so replacing it would lock the hook out.
+  # patch only adds the keep policy to a Secret the subchart once rendered.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - "pmm-secret"
+    verbs: ["get", "patch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+---
+# Source: pds/templates/pmm-admin-secret-job.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pds-pmm-admin
+  namespace: everest-system
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    app.kubernetes.io/component: monitoring
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pds-pmm-admin
+subjects:
+  - kind: ServiceAccount
+    name: pds-pmm-admin
+    namespace: everest-system
+---
+# Source: pds/templates/pmm-admin-secret-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pds-pmm-admin
+  namespace: everest-system
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    app.kubernetes.io/component: monitoring
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 120
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: pds-0.1.0
+        app.kubernetes.io/name: pds
+        app.kubernetes.io/instance: pds
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/part-of: pds
+        app.kubernetes.io/component: monitoring
+    spec:
+      restartPolicy: OnFailure
+      # No priorityClassName. This runs as a pre-install hook, and the chart's
+      # PriorityClass is an ordinary release resource that does not exist yet.
+      serviceAccountName: pds-pmm-admin
+      containers:
+        - name: mint
+          image: "alpine/k8s:1.32.3"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: SECRET_NAME
+              value: "pmm-secret"
+            - name: SECRET_NAMESPACE
+              value: "everest-system"
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              if kubectl get secret "${SECRET_NAME}" -n "${SECRET_NAMESPACE}" >/dev/null 2>&1; then
+                # A release installed while the subchart rendered this Secret
+                # owns it, and the upgrade that stops rendering it would delete
+                # it and leave pmm-0 unable to start. Helm skips a resource
+                # marked keep.
+                owner="$(kubectl get secret "${SECRET_NAME}" -n "${SECRET_NAMESPACE}" \
+                  -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}')"
+                if [ "${owner}" = "Helm" ]; then
+                  kubectl annotate secret "${SECRET_NAME}" -n "${SECRET_NAMESPACE}" \
+                    helm.sh/resource-policy=keep --overwrite >/dev/null
+                  echo "kept the PMM admin password the subchart created"
+                fi
+                echo "the PMM admin password is already present, leaving it as it is"
+                exit 0
+              fi
+              # The password is piped straight into kubectl and never echoed,
+              # so it does not land in the Job log.
+              pass="$(head -c 64 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24)"
+              # create, not apply: a Job that raced this one must not replace
+              # a password PMM has already started with.
+              if printf '%s' "${pass}" | kubectl create secret generic "${SECRET_NAME}" \
+                -n "${SECRET_NAMESPACE}" --from-file="PMM_ADMIN_PASSWORD=/dev/stdin"; then
+                echo "minted the PMM admin password"
+              elif kubectl get secret "${SECRET_NAME}" -n "${SECRET_NAMESPACE}" >/dev/null 2>&1; then
+                echo "another run minted the PMM admin password first, leaving it as it is"
+              else
+                echo "could not mint the PMM admin password"
+                exit 1
+              fi

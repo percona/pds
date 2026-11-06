@@ -1,0 +1,836 @@
+# Default values for pds.
+#
+# A helm install of this chart is a hub: the UI, the adapter in the HTTP
+# role, and the adapter's own PostgreSQL. It does not install OpenEverest,
+# the engine providers, monitoring, or a backup bucket. Those run on a
+# connected environment (values-spoke.yaml). The render fails unless
+# adapter.hub.publicURL is set and a Git backend is set: adapter.hub.gitDir
+# with persistence, or adapter.hub.github.org with its Secret.
+#
+# Published chart and image tags come from a GitHub Release.
+
+# -- Override the generated chart name used in resource names.
+nameOverride: ""
+# -- Override the full resource name prefix.
+fullnameOverride: ""
+
+# -- Image pull secrets applied to every pod in this chart. Connect bootstrap
+# writes ghcr-pull from the hub GitHub token when the agent image is private GHCR.
+imagePullSecrets: []
+# - name: ghcr-pull
+
+# -- Extra labels added to every rendered object.
+commonLabels: {}
+# -- Extra annotations added to every rendered object.
+commonAnnotations: {}
+
+rbac:
+  # -- Create the adapter Roles and ClusterRoles (connection Secrets, events,
+  # and metrics). Without them the adapter cannot read or write those objects.
+  create: true
+
+serviceAccount:
+  # -- Create a ServiceAccount for the adapter and the UI.
+  create: true
+  # -- Name of an existing ServiceAccount to use when create is false.
+  name: ""
+  # -- Annotations for the ServiceAccount. Use this to bind a cloud provider
+  # workload identity to the adapter.
+  annotations: {}
+
+adapter:
+  # -- Number of adapter replicas. A hub must stay at 1: replicas do not
+  # share the in-memory work queue or environment inventory.
+  replicaCount: 1
+  image:
+    # -- Adapter image repository. Placeholder until images are published.
+    repository: ghcr.io/percona/percona-services-adapter
+    # -- Image tag. Defaults to the chart appVersion when empty.
+    tag: ""
+    # -- Image pull policy.
+    pullPolicy: IfNotPresent
+  service:
+    # -- Adapter Service type.
+    type: ClusterIP
+    # -- Adapter Service port. The container listens on the same port.
+    port: 8080
+  # -- Deployment environment: dev for text logs, prod for JSON logs.
+  environment: prod
+  # -- Log level: debug, info, warn, or error.
+  logLevel: info
+  # -- Graceful shutdown timeout.
+  shutdownTimeout: 15s
+  # -- OpenEverest API base URL. Empty on a hub, which does not run it.
+  # A connected environment sets the in-cluster Service.
+  everestURL: ""
+  # -- Namespace database Instances live in. A hub records this name and does
+  # not create the namespace. On a connected environment it matches stack.dbNamespace.
+  everestNamespace: pds
+  # -- Install the Percona Database Service InstancePresets. Leave false for an adapter-only
+  # chart so Helm does not apply InstancePreset objects when the CRD may
+  # be missing. A stack install creates them because stack.enabled is true.
+  installInstancePresets: false
+  # -- Namespace helm notes report PMM in. Empty uses the release namespace
+  # when the stack is on, and the database namespace otherwise.
+  pmmNamespace: ""
+  # -- Everest BackupStorage backups and schedules are written to. A hub
+  # records s3, the store a connected environment brings. Empty on a connected
+  # cluster that installs MinIO selects that store instead.
+  everestBackupStorage: s3
+  # -- Everest MonitoringConfig new instances scrape through. Empty uses
+  # `pmm` when the stack has a PMM client URL and credentials, and leaves
+  # pmm-client off otherwise.
+  everestMonitoringConfig: ""
+  # -- PMM URL pmm-client sidecars use from database pods. Empty uses the
+  # in-cluster monitoring-service when stack.pmm.enabled is true. Set this
+  # to a host-reachable HTTPS address when PMM runs on Docker Desktop.
+  # pmm-client always speaks HTTPS, so do not point this at an HTTP port.
+  pmmClientURL: ""
+  # -- PMM base URL. Empty on a hub. When this release installs PMM, an empty
+  # value becomes the in-cluster monitoring Service. HTTP avoids the
+  # self-signed TLS cert.
+  pmmURL: ""
+  oidc:
+    # -- OIDC issuer URL. Empty leaves the password login as the only way in.
+    # Set, people can also sign in through the issuer, which needs discovery,
+    # the authorization code flow with a client secret, PKCE S256 and RS256 ID
+    # tokens. If discovery fails at start the adapter logs an error and keeps
+    # the password login.
+    issuer: ""
+    # -- Client id the adapter is registered under at the issuer.
+    clientId: ""
+    # -- Scopes to request, space separated. Empty means `openid email profile`.
+    scopes: ""
+    # -- Existing Secret that holds the client secret. This chart never writes
+    # it from values.
+    existingSecret: ""
+    # -- Key inside existingSecret.
+    secretKey: OIDC_CLIENT_SECRET
+    signup:
+      # -- Let a person nobody invited make an Organization on their first
+      # sign in through the issuer. Off keeps a self-hosted install closed.
+      enabled: false
+      # -- How many Organizations this install accepts before signup refuses.
+      organizationCeiling: 1000
+  # -- Adapter process role. Set to agent on a spoke so this Deployment
+  # heartbeats to the hub. Leave empty on the hub (HTTP API). Do not put
+  # ADAPTER_ROLE in extraEnv: this Deployment already sets it.
+  role: ""
+  # -- Product surfaces, each on or off. Every surface is on when it is not
+  # named here, so `{}` is the whole product. The adapter answers 501 on a
+  # surface that is off and publishes the set at GET /api/features, which is
+  # where the UI reads it, so one entry turns a surface off in both halves.
+  #
+  # Surfaces: databases, clusters, backups, connections, support,
+  # chat, assistant, metrics, activity, mcp.
+  #
+  # A name that is not a surface stops the adapter starting rather than being
+  # ignored, because a typo here would silently leave a surface on. A flag
+  # whose surface was deleted is ignored for one release, with a warning at
+  # startup, and refused from the release after that.
+  #
+  # Activity is named on because it reads the adapter database, which a hub
+  # has.
+  features:
+    activity: true
+  # -- Hub and agent settings. These were free-form extraEnv, which meant the
+  # documented way to set them was kubectl set env, and the next helm upgrade
+  # rendered the Deployment without them.
+  hub:
+    # -- Desired-state working tree. A hub sets this, on persistent storage, or
+    # github.org plus existingSecret. Do not set both. One of the two is
+    # required.
+    gitDir: ""
+    # -- Public origin a spoke reaches the hub on. Required on a hub. The join
+    # command is built from it; request Host is never used.
+    publicURL: ""
+    # -- Address agents and people reach the authorization server at, which is its
+    # issuer and the origin of /mcp. Leave empty to use publicURL, which is what
+    # almost every hub wants. Set it only when the address spokes use is not one a
+    # browser or an agent can use as an issuer: it must be https, or http on
+    # localhost, 127.0.0.1 or ::1, with no path.
+    oauthIssuer: ""
+    # -- Git URL a spoke can clone. Flux on the spoke pulls desired state
+    # from it. Leave empty when github.org is set: Connect creates one private
+    # repo per environment instead.
+    gitURL: ""
+    # -- GitHub org for one private repository per environment. The token stays in
+    # existingSecret; this chart never writes it from values.
+    github:
+      org: ""
+      existingSecret: ""
+      tokenKey: HUB_GITHUB_TOKEN
+      # -- Secret keys that make the hub authenticate as a GitHub App
+      # installation instead of with a person's token. Set all three; they
+      # replace tokenKey. The App needs Administration write, Contents write
+      # and Metadata read on the org. The private key is the PEM on one line
+      # with literal \n between lines.
+      appIdKey: ""
+      appInstallationIdKey: ""
+      appPrivateKeyKey: ""
+      # -- Required with the App keys and registryTokenKey: says the registry
+      # token is a separate packages:read credential. Enrollment hides the
+      # registry token only while it equals the GitHub token, and an App has
+      # none to compare, so a registry token reused from the old static token
+      # would be handed to every environment. The chart cannot compare Secret
+      # values.
+      registryTokenDistinct: false
+      # -- Secret key for a GHCR packages token. Empty omits registry from
+      # enrollment so the org git token never leaves the hub.
+      registryTokenKey: ""
+    # -- How long a minted join token stays valid. Zero never expires.
+    joinTokenTTL: 24h
+    # -- How long after its last heartbeat a spoke reads as unreachable.
+    heartbeatStale: 90s
+    # -- Default AWS region for a Connect command.
+    clusterRegion: us-west-2
+    # -- Secret holding hashed join tokens. Empty uses <release>-join-tokens.
+    joinSecret: ""
+    # -- Prefix for hub inventory ConfigMaps. Empty uses <release>-hub-inventory.
+    # The prefix object lists environment names. Snapshots live in <prefix>-0
+    # through <prefix>-15 so Role resourceNames can name them at install.
+    inventoryConfigMap: ""
+    # -- ConfigMap holding queued spoke work. Empty uses <release>-hub-work.
+    workConfigMap: ""
+    # -- Image spokes install. Empty uses this release's adapter image.
+    # Enrollment sends it as agentImage. A private GHCR package is pulled with
+    # registryTokenKey, not the org git token.
+    agentImage: ""
+    # -- Agent role: the hub origin this spoke dials.
+    url: ""
+    # -- Agent role: the name the hub lists this environment under.
+    environmentName: ""
+    # -- Deprecated: use environmentName. Read for one release, and
+    # environmentName wins when both are set.
+    clusterName: ""
+    # -- Shared agent token. Prefer a per-environment join token; this
+    # authorizes only the environments named below, and none when that list is
+    # empty. The chart stores it in a Secret and the Deployment reads it
+    # through secretKeyRef. Set agentTokenExistingSecret instead to point at a
+    # Secret you already created.
+    agentToken: ""
+    # -- Existing Secret holding the agent token. When set, agentToken is not
+    # written into a chart-managed Secret.
+    agentTokenExistingSecret: ""
+    # -- Key inside agentTokenExistingSecret, or inside the chart-managed Secret.
+    agentTokenKey: HUB_AGENT_TOKEN
+    # -- Shared secret that authorizes minting join tokens and disconnecting
+    # environments. Required when this release is a hub. The chart stores it in a
+    # Secret. Set operatorTokenExistingSecret instead to point at a Secret you
+    # already created.
+    operatorToken: ""
+    # -- Existing Secret holding the hub operator token. When set,
+    # operatorToken is not written into a chart-managed Secret.
+    operatorTokenExistingSecret: ""
+    # -- Key inside operatorTokenExistingSecret, or inside the chart-managed Secret.
+    operatorTokenKey: HUB_OPERATOR_TOKEN
+    # -- Environments the shared agent token may act for.
+    agentEnvironments: []
+    # -- Deprecated: use agentEnvironments. Read for one release, and
+    # agentEnvironments wins when both are set.
+    agentClusters: []
+    # -- Storage for gitDir. A hub keeps every environment's desired state here,
+    # so it outlives the pod.
+    persistence:
+      enabled: false
+      size: 1Gi
+      storageClass: ""
+      existingClaim: ""
+  # -- How the adapter's state is separated and protected in that database.
+  # It applies only when database.enabled is on.
+  state:
+    # -- Organization this release serves.
+    #
+    # A name pins this release to that Organization, which is made at start when
+    # it does not exist. Treat it as immutable once installed: another name serves
+    # a different Organization, and the hub comes up with no environments, no join
+    # tokens and no connections of the first.
+    #
+    # "*" means this release serves every Organization in the database. A name
+    # starts with a letter and holds only lower case letters, digits and hyphens,
+    # so the star cannot collide with a real one.
+    #
+    # Activity reads the database and stays on. GitHub repositories are named
+    # <organization>-<team>-<environment>. replicaCount stays 1: hub replicas do
+    # not share the in-memory work queue or environment inventory.
+    # Empty means "default".
+    organization: ""
+    # -- Existing Secret holding the key that seals stored credentials, for a
+    # key you keep in a manager of your own. Setting it means the chart mints
+    # nothing, and the Secret has to exist before the adapter starts.
+    #
+    # The value is base64 of 32 random bytes:
+    #
+    #   kubectl create secret generic pds-state-key \
+    #     --from-literal=STATE_ENCRYPTION_KEY="$(head -c 32 /dev/urandom | base64)"
+    #
+    # Left empty, a pre-install hook mints one in the release namespace on the
+    # first install and never touches it again. Either way the key stays out of
+    # values and out of the rendered release, so it is not in helm get values
+    # and not in the database it protects.
+    #
+    # Back this Secret up. Without it every stored credential is unreadable and
+    # has to be pasted again on the connections panel: the adapter does not fall back
+    # to the Secrets the credentials were imported from.
+    existingSecret: ""
+    # -- Key inside existingSecret, and inside the minted one.
+    keyField: STATE_ENCRYPTION_KEY
+    # -- Field in that same Secret holding the keys accepted for reading only,
+    # comma separated, base64 of 32 bytes each. A row names the key that sealed
+    # it, so a replaced key stays listed until whatever it sealed has been
+    # written again.
+    #
+    # There is deliberately no values entry for the keys themselves. A retired
+    # key is a live key: it opens every row that names it. Put it in the Secret
+    # beside the primary one, where it is not in the rendered release and not
+    # in helm get values:
+    #
+    #   kubectl patch secret pds-state-key --type merge -p \
+    #     "{\"stringData\":{\"STATE_ENCRYPTION_KEYS_RETIRED\":\"$OLD_KEY\"}}"
+    #
+    # The reference is optional, so a deployment that has never rotated needs
+    # nothing here.
+    retiredKeysField: STATE_ENCRYPTION_KEYS_RETIRED
+  # -- Customer login. Every route needs a signed in organization, in every mode,
+  # self hosted included. The password hashes and the sessions are rows in the
+  # adapter database, so adapter.database has to be on: the adapter refuses to
+  # start without it rather than serving an open API.
+  #
+  # Percona onboards an organization from the command line and mints a single use
+  # invite link the customer sets their own password through:
+  #
+  #   kubectl exec deploy/pds-adapter -- adapter organization create acme
+  #
+  # Nothing in the product creates an organization, and there is no public signup.
+  auth:
+    # -- How long a session lasts however much it is used. This is the outer
+    # bound on a stolen cookie.
+    sessionLifetime: 720h
+    # -- How long a session survives unused. It has to be shorter than
+    # sessionLifetime or it would never apply, and the adapter refuses to start
+    # if it is not.
+    sessionIdleTimeout: 168h
+    # -- How long an invite link stays claimable after it is minted. Long
+    # enough to reach a customer on the next working day, short enough that a
+    # link found later is already dead.
+    inviteTTL: 48h
+    # -- An organization with a password this chart knows, seeded by a hook Job.
+    #
+    # This is for development only: kind, scripts/up.sh and the Playwright run
+    # all need to sign in, and none of them can click an invite link. It is off
+    # by default and turning it on gives one known credential to anybody who
+    # can reach the deployment.
+    #
+    # Never enable it on a customer deployment. The password is a value, so it
+    # lands in the release Secret and in the output of helm get values.
+    bootstrapOrganization:
+      # -- Seed the development organization.
+      #
+      # The organization seeded is adapter.state.organization, and there is deliberately no
+      # separate id here. Seeding a development organization only makes sense for one
+      # named organization. Turning this on with adapter.state.organization "*" fails the
+      # render. A named organization keeps today's pin: the adapter serves that id
+      # and refuses a session for any other, so a second id would only ever be
+      # a password that cannot sign in.
+      enabled: false
+      # -- Password for that organization, at least 12 characters. Ignored when
+      # existingSecret is set.
+      password: ""
+      # -- Existing Secret holding the password under BOOTSTRAP_PASSWORD, so a
+      # local run can keep it out of values.
+      existingSecret: ""
+  # -- The adapter's own PostgreSQL database. This is control plane state, not
+  # a customer database: those are provisioned through OpenEverest and never
+  # land here. Off leaves the adapter keeping its state outside a database,
+  # which is what every release before this one did.
+  database:
+    # -- Connect the adapter to PostgreSQL. The schema is reconciled at start,
+    # so nothing has to be run before a deploy, and readiness stays red on a
+    # pod until its connection and that reconcile both succeed.
+    #
+    # Turning this on for a release that already exists, with the rendered
+    # in-cluster database, needs the PostgreSQL operator CRDs applied once
+    # first. Helm installs a subchart's CRDs on install and never on upgrade,
+    # so the upgrade fails at once, naming this:
+    #
+    #   helm show crds percona/pg-operator --version 3.0.0 \
+    #     | kubectl apply --server-side -f -
+    #
+    # A fresh install needs nothing extra, and neither does the external shape
+    # below: it installs no operator and applies no cluster, so it needs no CRDs.
+    #
+    # On, because customer login cannot be turned off: the password hashes and
+    # the sessions are rows here, so an adapter serving the API with no
+    # database would have nothing to check a request against and refuses to
+    # start. The agent role never serves that API and needs no database of
+    # its own.
+    enabled: true
+    # -- Existing Secret holding the connection URL, for a database you
+    # already run. Setting it wins over inCluster below, so nothing is rendered
+    # in the cluster and the adapter reads this Secret instead. The chart never
+    # writes a URL from values: it would land in the release Secret and in the
+    # output of helm get values.
+    existingSecret: ""
+    # -- Key inside existingSecret. It does not apply to the in-cluster
+    # database: the operator mints that Secret and always writes the URL under
+    # uri, so this value is ignored there.
+    #
+    # The adapter reads this through a secretKeyRef that is deliberately not
+    # optional. Between install and the operator minting the Secret the pod
+    # reports CreateContainerConfigError, which is the intended wait: an
+    # optional reference would start the adapter with no URL, and it would then
+    # report ready while keeping no state at all.
+    #
+    # The reference is read once, when the pod starts. Rotating the password on
+    # an external database, or the operator rewriting its pguser Secret, does
+    # not reach a running pod: the adapter keeps retrying the old URL and stays
+    # out of the Service until the Deployment is restarted. Roll the adapter
+    # after any rotation.
+    urlKey: DATABASE_URL
+    # -- Render a PostgreSQL cluster in the release namespace. It is ignored
+    # when existingSecret names a database you already run. On by default so
+    # that kind and self hosted installs need nothing external. The Percona PostgreSQL operator reconciles it and mints the
+    # credentials, so no password passes through values here either.
+    #
+    # A hook Job applies the cluster object, so the release does not own it and
+    # helm uninstall leaves the database and its volumes in place. Delete the
+    # PerconaPGCluster before you uninstall, or before you turn this back off:
+    # the operator clears the finalizers on it, and once the operator is gone
+    # the object cannot be removed and the namespace will not terminate.
+    inCluster:
+      enabled: true
+      # -- Cluster name. Empty uses <release>-hub-db, bounded to 40
+      # characters. A value of your own has the same limit: the operator
+      # appends to it for the user Secret, the Services and the instance pods,
+      # and those names cannot exceed 63.
+      #
+      # Treat this as immutable once installed. A hook applies the cluster and
+      # the release does not own it, so renaming creates a second one and
+      # leaves the first, with its volumes, behind. The adapter then follows
+      # the new Secret to an empty database with no migration.
+      name: ""
+      # -- Role the adapter connects as. The operator creates it and owns its
+      # password.
+      user: hub
+      # -- Database the adapter connects to.
+      database: hub
+      # -- PostgreSQL major version.
+      postgresVersion: 18
+      # -- Instances in the set. One is enough for a single hub; raise it for
+      # a replicated primary.
+      replicas: 1
+      # -- Data volume size per instance.
+      storage: 10Gi
+      # -- StorageClass for the data volume. Empty uses the cluster default.
+      storageClass: ""
+      # -- Volume the pgBackRest repository writes to.
+      backupStorage: 10Gi
+      images:
+        # -- PostgreSQL image. The tag has to carry the same major version as
+        # postgresVersion above.
+        postgres: docker.io/percona/percona-distribution-postgresql:18.3-2
+        # -- pgBackRest image. Backups are required by the operator, so this
+        # is not optional even on a laptop.
+        pgbackrest: docker.io/percona/percona-pgbackrest:2.58.0-1
+      # -- Resource requests and limits for each instance.
+      resources:
+        requests:
+          cpu: 200m
+          memory: 512Mi
+        limits:
+          cpu: "1"
+          memory: 2Gi
+    # -- Install the Percona PostgreSQL operator for this database. On, because
+    # a hub does not install the engine provider that would bring the same
+    # operator. A connected environment turns this off: that provider installs it,
+    # and the chart refuses both.
+    operator:
+      enabled: true
+  # -- Extra environment variables for the adapter container.
+  extraEnv: []
+  # - name: SOME_FLAG
+  #   value: ""
+  # -- Extra volume mounts for the adapter container.
+  extraVolumeMounts: []
+  # -- Extra volumes for the adapter. A nonempty list is not gitDir storage
+  # by itself: gitDir still needs persistence or an extraVolumeMount whose
+  # mountPath is gitDir.
+  extraVolumes: []
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  # -- Pod level security context.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  # -- Container level security context.
+  securityContext:
+    allowPrivilegeEscalation: false
+    privileged: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+  # -- Extra pod annotations.
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+ui:
+  # -- Deploy the UI. A spoke profile turns this off.
+  enabled: true
+  # -- Number of UI replicas.
+  replicaCount: 1
+  image:
+    # -- UI image repository. Placeholder until images are published.
+    repository: ghcr.io/percona/percona-services-ui
+    # -- Image tag. Defaults to the chart appVersion when empty.
+    tag: ""
+    # -- Image pull policy.
+    pullPolicy: IfNotPresent
+  service:
+    # -- UI Service type.
+    type: ClusterIP
+    # -- UI Service port. The nginx container listens on the same port.
+    port: 8080
+  # -- Render the nginx ConfigMap that serves the SPA and proxies /api to the
+  # adapter. Disable it when the image ships its own server config.
+  nginxConfig: true
+  # -- Serve the public landing page at / instead of redirecting / to the
+  # console at /app/. The Compose nginx file is this render with it set.
+  landingPage: false
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  # -- Pod level security context.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 101
+    runAsGroup: 101
+    fsGroup: 101
+    seccompProfile:
+      type: RuntimeDefault
+  # -- Container level security context.
+  securityContext:
+    allowPrivilegeEscalation: false
+    privileged: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+  # -- Extra pod annotations.
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Everest API token. The adapter reads EVEREST_TOKEN from a Secret when one
+# exists and sends it as Authorization: Bearer. A connected environment mints that
+# Secret. A hub leaves it absent and sends no header.
+everest:
+  # -- Name of a Secret you manage that holds an EVEREST_TOKEN key.
+  existingSecret: ""
+  # -- Name of the Secret the install writes. Defaults to <fullname>-everest.
+  secretName: ""
+  # -- Name of the Secret holding the Everest admin account. The adapter reads
+  # it to mint a new token when the one it holds expires. Defaults to
+  # everest-accounts, which is what Everest writes on first install.
+  accountsSecret: ""
+
+# PMM service account token. The adapter reads PMM_TOKEN from a Secret when one
+# exists. A connected environment mints it. Point existingSecret at a token you
+# already have when this release should not mint one. Without a token the
+# metrics endpoint reports pending rather than failing.
+pmm:
+  # -- Name of a Secret you manage that holds a PMM_TOKEN key.
+  existingSecret: ""
+  # -- Name of the Secret this chart reads. Defaults to <fullname>-pmm.
+  secretName: ""
+
+# ServiceNow credentials for the Percona Connector. The adapter answers 501 on
+# /api/support/tickets while the client token is absent, and the UI hides the
+# support CTAs, so leaving this disabled is a supported configuration. Support
+# stays off until url is set.
+servicenow:
+  # -- Create a Secret from the API key below. Keep it false in git and pass the
+  # values at install time, or point existingSecret at a Secret you manage.
+  enabled: false
+  # -- Name of a Secret you manage that holds SN_API_KEY.
+  existingSecret: ""
+  # -- Name of the Secret this chart creates. Defaults to <fullname>-servicenow.
+  secretName: ""
+  # -- ServiceNow API key, sent as the x-sn-apikey header. Provisioned with the
+  # control plane. The UI does not collect it.
+  apiKey: ""
+  # -- Optional ServiceNow client token, sent in the request body. Leave empty
+  # so a platform engineer pastes it on the connections panel.
+  clientToken: ""
+  # -- ServiceNow instance, mounted as SN_URL. Required for support: when
+  # empty the support routes answer 501 even with both tokens. It has to be
+  # https: the API key and client token travel on every call.
+  url: ""
+
+ingress:
+  # -- Create an Ingress that serves the UI at / and the adapter at /api.
+  # Keep the Ingress behind IAP or a VPN. The MVP has no public exposure.
+  enabled: false
+  # -- Ingress class name.
+  className: ""
+  # -- Host name. Required when the Ingress is enabled.
+  host: pds.local
+  # -- Extra annotations for the Ingress. They win over the timeout
+  # annotations below when both set the same key.
+  annotations: {}
+  # -- Read and send timeout, in seconds, that ingress-nginx allows between two
+  # writes on an /api response. A chat turn can run for 165s and the adapter
+  # write timeout is 180s, so this stays at or above 180. ingress-nginx
+  # defaults to 60s, which cuts a slow chat turn off with a 504. Other
+  # controllers ignore these annotations.
+  proxyTimeoutSeconds: 180
+  tls:
+    # -- Terminate TLS on the Ingress.
+    enabled: false
+    # -- Name of the Secret holding the certificate.
+    secretName: ""
+
+# `helm test` hooks. They curl the adapter health endpoint and the UI index page
+# from inside the cluster.
+tests:
+  # -- Render the helm test hooks.
+  enabled: true
+  image:
+    # -- Image used by the test pods.
+    repository: curlimages/curl
+    # -- Image tag.
+    tag: 8.11.1
+    # -- Image pull policy.
+    pullPolicy: IfNotPresent
+  # -- UID the test pods run as. runAsNonRoot needs a numeric UID, and the
+  # pinned curl image declares a named user (curl_user, UID 100).
+  runAsUser: 100
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+# Database platform for a connected environment. Off on a hub, which is this
+# chart's default install. values-spoke.yaml turns it on. ServiceNow is
+# Percona SaaS and is not installed here.
+stack:
+  # -- Install OpenEverest, the engine providers, optional PMM, and MinIO.
+  # A hub leaves this false. A connected environment sets it true.
+  enabled: false
+  pmm:
+    # -- Install the PMM 3 subchart and wire it up in the same install: a
+    # hook Job mints the service account token and creates the
+    # MonitoringConfig new databases report to. Unset, PMM follows
+    # stack.enabled, which is why this has no value here: the subchart
+    # condition reads stack.pmm.enabled first and falls through to
+    # stack.enabled. The percona/pmm-server image is amd64 only, so an arm64
+    # cluster sets this false and points adapter.pmmURL at a PMM that runs
+    # elsewhere.
+    # enabled: true
+    # -- Install the PMM subchart. Unset follows stack.pmm.enabled. False keeps
+    # everything else about PMM in this release (the admin password, the token
+    # Job, the MonitoringConfig and the client URL) and leaves the server
+    # itself to something else. A spoke sets it, because Flux installs PMM
+    # there from the hub's Git. The server must then keep the Service name
+    # monitoring-service, the pod name pmm-0 and the Secret pmm-secret.
+    # subchart: true
+    {}
+  # -- Namespace OpenEverest requires. The release must use this value.
+  everestNamespace: everest-system
+  # -- Namespace database Instances land in. A pre-install hook Job creates it
+  # and labels it managed-by=everest. Helm cannot own this Namespace: it would
+  # stamp managed-by=Helm, and OpenEverest would ignore the namespace.
+  dbNamespace: pds
+  minio:
+    # -- Deploy a local S3 store and register it as BackupStorage minio.
+    enabled: true
+    # -- BackupStorage name the adapter writes backups to.
+    storageName: minio
+    # -- Bucket the MinIO Job creates and the BackupStorage points at.
+    bucket: pds-backups
+    # -- MinIO root user. Laptop credentials only. Do not reuse them.
+    rootUser: minio
+    # -- MinIO root password. Laptop credentials only. Do not reuse them.
+    rootPassword: minio12345
+    persistence:
+      # -- Keep the bucket on a PersistentVolumeClaim. Off puts it on an
+      # emptyDir, where every backup is lost the moment the pod restarts or
+      # moves to another node, while the Backup records still report success.
+      enabled: true
+      # -- Size of the backup volume.
+      size: 20Gi
+      # -- StorageClass for the backup volume. Empty uses the cluster default.
+      # A node local class pins the bucket to one node, which is fine for a
+      # laptop; a cluster that has to survive losing a node wants stack.s3.
+      storageClass: ""
+  applyImage:
+    # -- Image for Jobs that wait for Everest CRDs and apply BackupStorage
+    # or the Percona Database Service InstancePresets.
+    repository: alpine/k8s
+    tag: "1.32.3"
+    pullPolicy: IfNotPresent
+  s3:
+    # -- Register an existing S3 bucket as BackupStorage. Mutually exclusive
+    # with stack.minio, which is the in-cluster store for laptop runs.
+    # scripts/up.sh turns this on for a cluster outside kind.
+    enabled: false
+    # -- BackupStorage name the adapter writes backups to.
+    storageName: s3
+    # -- Bucket name. The bucket has to exist already.
+    bucket: ""
+    # -- Bucket region.
+    region: us-east-1
+    # -- Endpoint. Empty leaves it unset, which points the operator at the
+    # provider default for the region. Set it for an S3 compatible store.
+    # -- S3 API endpoint. Empty means https://s3.<region>.amazonaws.com.
+    # OpenEverest requires endpointURL on BackupStorage, so the install Job
+    # always fills this in.
+    endpointURL: ""
+    # -- Address buckets as a path instead of a subdomain. S3 compatible
+    # stores that do not serve virtual hosted buckets need this.
+    forcePathStyle: false
+    # -- Secret with AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.
+    existingSecret: ""
+
+# OpenEverest subchart values. Used when stack.enabled is true. Kubernetes
+# monitoring (kube-state-metrics, VictoriaMetrics) stays off: operators own
+# the node, and PMM is the only metrics path this product serves. The
+# controller still watches VMAgent, so templates/vmagent-crd.yaml registers
+# that GVK without deploying the operator.
+openeverest:
+  telemetry: false
+  createMonitoringResources: false
+  kube-state-metrics:
+    enabled: false
+  monitoring:
+    enabled: false
+  plugins:
+    hub:
+      enabled: false
+  pmm:
+    enabled: false
+  pmm3:
+    enabled: false
+
+# PXC provider. The operator watches every namespace so Instances in
+# stack.dbNamespace are reconciled from everest-system.
+# The provider chart does not honor operator.priorityClassName, so operators
+# stay at Kubernetes default 0. Adapter, UI, PMM, MinIO, and Jobs use
+# pds-bulk (-10) and yield while an operator needs the node.
+provider-pxc:
+  operator:
+    watchAllNamespaces: true
+    priorityClassName: pds-operator
+
+# PostgreSQL provider.
+provider-postgresql:
+  pg-operator:
+    watchAllNamespaces: true
+    priorityClassName: pds-operator
+
+# Percona PostgreSQL operator for the adapter's own database, used when
+# adapter.database.operator.enabled is true. A stack install gets the same
+# operator through provider-postgresql instead. It watches only the release
+# namespace: the hub database is the only cluster it owns.
+# This chart does not honor priorityClassName, the same way the engine provider
+# charts do not, so the operator runs at the Kubernetes default of 0.
+hub-postgresql-operator:
+  watchAllNamespaces: false
+
+# PMM 3 subchart values (Chart.yaml alias pmm-server). The alias has to be a
+# DNS label: Helm puts it in the StatefulSet name. Used when stack.enabled
+# and stack.pmm.enabled are true. Tight limits so a metrics scrape cannot
+# starve the operators. The percona/pmm-server image is amd64 only.
+pmm-server:
+  fullnameOverride: pmm
+  priorityClassName: pds-bulk
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  service:
+    type: ClusterIP
+    name: monitoring-service
+  storage:
+    size: 5Gi
+  extraLabels:
+    app.kubernetes.io/name: pmm
+  # The image is amd64 only, so a cluster with mixed nodes schedules it on an
+  # amd64 one.
+  nodeSelector:
+    kubernetes.io/arch: amd64
+  # The subchart renders its admin Secret on install only, so the first
+  # upgrade deletes it. pmm-admin-secret-job.yaml creates it instead, once, and
+  # the token hook reads the admin password from it.
+  secret:
+    create: false
+    name: pmm-secret
+
+# Pinned platform chart versions. Must match compatibility.yaml. The stack
+# install uses the Chart.yaml dependencies, and the chart renders these
+# into a ConfigMap so the pin can be read from the cluster.
+platform:
+  # -- Render the platform versions ConfigMap.
+  configMap: true
+  openeverest:
+    # -- Helm repository that serves the OpenEverest chart.
+    repository: https://openeverest.github.io/helm-charts/
+    # -- Chart name.
+    chart: openeverest
+    # -- Pinned chart version.
+    version: 2.0.0-dev.4
+    # -- Namespace of the OpenEverest server. The chart hard fails on any other
+    # value, so this cannot be folded into the release namespace. Database
+    # Instances live in stack.dbNamespace, which a pre-install hook Job creates.
+    namespace: everest-system
+  pxcOperator:
+    # -- The PXC provider chart installs the operator. This chart does not
+    # install pxc-operator a second time.
+    install: false
+    # -- Helm repository for the standalone chart, used only when the
+    # provider install is turned off.
+    repository: https://percona.github.io/percona-helm-charts/
+    # -- Chart name.
+    chart: pxc-operator
+    # -- Operator version the PXC provider chart deploys.
+    version: 1.20.0
+  postgresqlOperator:
+    # -- The PostgreSQL provider chart installs the operator.
+    install: false
+    repository: https://percona.github.io/percona-helm-charts/
+    chart: pg-operator
+    version: 3.0.0
+  pmm:
+    # -- Helm repository that serves PMM 3.
+    repository: https://percona.github.io/percona-helm-charts/
+    # -- Chart name.
+    chart: pmm
+    # -- Pinned chart version.
+    version: 1.9.1
+    # -- PMM version the pinned chart deploys. The percona/pmm-server image is
+    # amd64 only.
+    appVersion: 3.9.1
+    # -- Service name PMM clients report to.
+    service: monitoring-service

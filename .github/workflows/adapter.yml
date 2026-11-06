@@ -1,0 +1,104 @@
+name: adapter
+
+# go.work selects the module, .golangci.yml drives the lint gate, and a
+# workflow edit has to test itself. None of those live under adapter/.
+# push is limited to main so a pull request branch runs once, through
+# pull_request, instead of once per event.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "adapter/**"
+      - "go.work"
+      - "go.work.sum"
+      - ".golangci.yml"
+      - "scripts/go-coverage.sh"
+      - ".github/workflows/adapter.yml"
+  pull_request:
+    paths:
+      - "adapter/**"
+      - "go.work"
+      - "go.work.sum"
+      - ".golangci.yml"
+      - "scripts/go-coverage.sh"
+      - ".github/workflows/adapter.yml"
+  workflow_dispatch:
+
+jobs:
+  adapter:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: adapter
+
+    # The adapter keeps its own state in PostgreSQL. internal/store skips its
+    # tests without a live server, and a skipped concurrency test is the one
+    # nobody has seen work, so CI gives it a real one.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: hub
+          POSTGRES_PASSWORD: hub
+          POSTGRES_DB: hub
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hub"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      ADAPTER_TEST_DATABASE_URL: postgres://hub:hub@127.0.0.1:5432/hub?sslmode=disable
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.10"
+          cache-dependency-path: adapter/go.sum
+
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+
+      # The action major has to track the golangci-lint major: v6 refuses a
+      # v2 version string outright, and v9 is also the first major on node24.
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.13
+          working-directory: adapter
+
+      - name: go vet
+        run: go vet ./...
+
+      # Runs the suite with -coverpkg=./... and gates on the total. Without
+      # -coverpkg a package with no _test.go of its own reads as 0% even when
+      # another package's tests cover it, which made internal/engine/oe look
+      # untested when it is at 88%. See scripts/go-coverage.sh.
+      - name: go test and coverage gate
+        working-directory: .
+        run: scripts/go-coverage.sh
+
+      - name: go build
+        run: go build ./cmd/adapter
+
+      # The join scripts are go:embed content, so they ship with the binary
+      # and never see the Go gates. They are also what a customer pipes into
+      # bash, which is the widest blast radius in the repository.
+      - name: shellcheck the join scripts
+        working-directory: .
+        run: |
+          shellcheck --severity=warning \
+            adapter/internal/api/connect_bootstrap.sh \
+            adapter/internal/api/connect_bootstrap_test.sh
+
+      - name: connect bootstrap tests
+        working-directory: .
+        run: bash adapter/internal/api/connect_bootstrap_test.sh
+
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...

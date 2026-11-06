@@ -1,0 +1,10 @@
+{
+  "result": {
+    "success": true,
+    "number": "CS0061234",
+    "ticket_id": "3f1c9a2e6b7d4e8fa0c1d2e3f4a5b6c7",
+    "table_name": "sn_customerservice_case",
+    "message": "Ticket created successfully",
+    "error_message": ""
+  }
+}

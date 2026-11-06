@@ -1,0 +1,25 @@
+pre-commit:
+  parallel: true
+  commands:
+    gofmt:
+      glob: "adapter/**/*.go"
+      run: gofmt -w {staged_files}
+    golangci-lint:
+      glob: "adapter/**/*.go"
+      run: cd adapter && golangci-lint run
+    oxlint:
+      glob: "apps/ui/**/*.{ts,tsx}"
+      # .oxlintrc.json ignores e2e, so passing a spec explicitly makes oxlint
+      # exit 1 with "No files found to lint" and blocks the commit.
+      exclude:
+        - "apps/ui/e2e/*"
+      run: npx oxlint {staged_files}
+    prettier:
+      glob: "apps/ui/**/*.{ts,tsx,css,json,md}"
+      run: npx prettier --write {staged_files}
+    oxlint-mcp:
+      glob: "apps/mcp/**/*.mjs"
+      run: npx oxlint {staged_files}
+    prettier-mcp:
+      glob: "apps/mcp/**/*.{mjs,json,md}"
+      run: npx prettier --write {staged_files}

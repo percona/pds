@@ -1,0 +1,46 @@
+{{- if and .Values.stack.enabled .Values.stack.minio.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "pds.fullname" . }}-minio-bucket
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  backoffLimit: 12
+  ttlSecondsAfterFinished: 120
+  template:
+    metadata:
+      labels:
+        {{- include "pds.labels" . | nindent 8 }}
+        app.kubernetes.io/component: minio
+    spec:
+      restartPolicy: OnFailure
+      priorityClassName: pds-bulk
+      containers:
+        - name: mc
+          # Official mc repositories reject anonymous pulls.
+          image: docker.io/pgsty/mc:RELEASE.2026-09-16T00-00-00Z
+          envFrom:
+            - secretRef:
+                name: minio-root
+          env:
+            - name: MINIO_BUCKET
+              value: {{ .Values.stack.minio.bucket | quote }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              mc alias set local http://minio:9000 "${MINIO_ROOT_USER}" "${MINIO_ROOT_PASSWORD}"
+              mc mb --ignore-existing "local/${MINIO_BUCKET}"
+              mc ls "local/${MINIO_BUCKET}"
+{{- end }}

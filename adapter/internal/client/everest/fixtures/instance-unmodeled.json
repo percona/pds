@@ -1,0 +1,21 @@
+{
+  "apiVersion": "core.openeverest.io/v1alpha1",
+  "kind": "Instance",
+  "metadata": { "name": "orders-dev", "namespace": "pds" },
+  "spec": {
+    "providerRef": { "name": "percona-xtradb-cluster" },
+    "topology": { "type": "cluster" },
+    "parameters": { "restoreWaitTimeout": "10m" },
+    "dataSource": { "type": "Backup", "backup": { "backupRef": { "name": "orders-dev-20260824091500" } } },
+    "components": {
+      "engine": {
+        "replicas": 1,
+        "resources": { "limits": { "cpu": "1", "memory": "2Gi" } },
+        "storage": { "size": "20Gi" },
+        "parameters": { "configuration": "max_connections=200" }
+      },
+      "proxy": { "type": "haproxy", "replicas": 1 }
+    }
+  },
+  "status": { "phase": "Ready" }
+}

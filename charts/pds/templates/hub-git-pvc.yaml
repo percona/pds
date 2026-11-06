@@ -1,0 +1,27 @@
+{{- if and .Values.adapter.hub.gitDir .Values.adapter.hub.persistence.enabled (not .Values.adapter.hub.persistence.existingClaim) }}
+# The hub's desired state for every environment it serves. It has to outlive the
+# pod: losing it means Flux prunes the instances on every spoke at the next
+# reconcile.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "pds.hub.gitClaimName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: adapter
+  annotations:
+    helm.sh/resource-policy: keep
+  {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- with .Values.adapter.hub.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.adapter.hub.persistence.size | quote }}
+{{- end }}

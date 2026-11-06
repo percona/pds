@@ -1,0 +1,65 @@
+version: "2"
+run:
+  tests: true
+linters:
+  enable:
+    - bodyclose
+    - forbidigo
+    - godox
+    - misspell
+    - noctx
+    - nolintlint
+    - revive
+  settings:
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^fmt\.Print(f|ln)?$
+          msg: log through log/slog, or write to an io.Writer the caller passes in.
+        - pattern: ^log\.(Print|Fatal|Panic)(f|ln)?$
+          msg: log through log/slog.
+        - pattern: ^context\.(Background|TODO)$
+          msg: take the caller's context. A request path never starts a fresh one.
+    godox:
+      keywords: [TODO, FIXME, XXX, HACK]
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - bodyclose
+          - errcheck
+          - forbidigo
+          - noctx
+        path: _test\.go
+      # Process entry points, background loops and the CLI own their context.
+      # Request handlers and the services behind them inherit one.
+      - linters:
+          - forbidigo
+        path-except: internal/(api|service)/
+        text: context\.(Background|TODO)
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

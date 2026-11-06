@@ -1,0 +1,59 @@
+name: landing
+
+# The landing page has its own lockfile outside the npm workspace, so it
+# installs and checks on its own. The shared lint config and TypeScript base
+# live at the repo root.
+on:
+  push:
+    paths:
+      - "landing/**"
+      - "tsconfig.base.json"
+      - ".oxlintrc.json"
+      - ".prettierrc"
+      - ".github/workflows/landing.yml"
+  pull_request:
+    paths:
+      - "landing/**"
+      - "tsconfig.base.json"
+      - ".oxlintrc.json"
+      - ".prettierrc"
+      - ".github/workflows/landing.yml"
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: landing
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+          check-latest: true
+          cache: npm
+          cache-dependency-path: landing/package-lock.json
+
+      - run: npm ci
+
+      - name: oxlint
+        run: npm run lint:oxlint
+
+      - name: prettier check
+        run: npm run lint:prettier
+
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: vitest
+        run: npm test
+
+      # The typecheck step above already ran tsc; `npm run build` would run it again.
+      - name: vite build
+        run: npx vite build
+
+      - name: npm audit
+        run: npm audit --omit=dev --audit-level=high

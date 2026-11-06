@@ -1,0 +1,9 @@
+{
+  "type": "mysql",
+  "provider": "percona-xtradb-cluster",
+  "host": "orders-dev-haproxy.pds",
+  "port": 3306,
+  "username": "root",
+  "password": "s3cr3t-from-everest",
+  "uri": "mysql://root:s3cr3t-from-everest@orders-dev-haproxy.pds:3306"
+}

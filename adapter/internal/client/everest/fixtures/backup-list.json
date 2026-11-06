@@ -1,0 +1,32 @@
+{
+  "apiVersion": "backup.openeverest.io/v1alpha1",
+  "kind": "BackupList",
+  "items": [
+    {
+      "metadata": {
+        "name": "orders-dev-20260824091500",
+        "namespace": "pds",
+        "creationTimestamp": "2026-08-24T09:15:00Z"
+      },
+      "spec": {
+        "origin": { "type": "Instance", "instanceRef": { "name": "orders-dev" } },
+        "classRef": { "name": "pxc" },
+        "storageRef": { "name": "minio" }
+      },
+      "status": {
+        "state": "Succeeded",
+        "size": "1289748",
+        "startedAt": "2026-08-24T09:15:00Z"
+      }
+    },
+    {
+      "metadata": { "name": "orders-dev-20260825132201" },
+      "spec": {
+        "origin": { "type": "Instance", "instanceRef": { "name": "orders-dev" } },
+        "classRef": { "name": "pxc" },
+        "storageRef": { "name": "minio" }
+      },
+      "status": { "state": "Running" }
+    }
+  ]
+}

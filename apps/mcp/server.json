@@ -1,0 +1,45 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.percona/pds-mcp",
+  "title": "Percona Database Service",
+  "description": "Manage Percona databases and environments from an AI agent",
+  "version": "0.0.0-dev",
+  "websiteUrl": "https://pds.percona.com",
+  "repository": {
+    "url": "https://github.com/percona/pds",
+    "source": "github",
+    "subfolder": "apps/mcp"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@gas-lab/pds-mcp",
+      "version": "0.0.0-dev",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "PDS_URL",
+          "description": "Address of the control plane. Without it, https://pds.percona.com.",
+          "isRequired": false,
+          "default": "https://pds.percona.com"
+        }
+      ]
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://{host}/mcp",
+      "variables": {
+        "host": {
+          "description": "Host name of the control plane, such as pds.percona.com",
+          "isRequired": true,
+          "default": "pds.percona.com"
+        }
+      }
+    }
+  ]
+}

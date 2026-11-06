@@ -1,0 +1,34 @@
+{{- if .Values.platform.configMap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "pds.fullname" . }}-platform-versions
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: platform
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  # Platform chart versions this release expects. The stack install uses the
+  # same pin; this object is what kubectl can read back.
+  openeverest.chart: {{ .Values.platform.openeverest.chart | quote }}
+  openeverest.repository: {{ .Values.platform.openeverest.repository | quote }}
+  openeverest.version: {{ .Values.platform.openeverest.version | quote }}
+  openeverest.namespace: {{ .Values.platform.openeverest.namespace | default .Release.Namespace | quote }}
+  pxcOperator.install: {{ .Values.platform.pxcOperator.install | quote }}
+  pxcOperator.chart: {{ .Values.platform.pxcOperator.chart | quote }}
+  pxcOperator.repository: {{ .Values.platform.pxcOperator.repository | quote }}
+  pxcOperator.version: {{ .Values.platform.pxcOperator.version | quote }}
+  postgresqlOperator.install: {{ .Values.platform.postgresqlOperator.install | quote }}
+  postgresqlOperator.chart: {{ .Values.platform.postgresqlOperator.chart | quote }}
+  postgresqlOperator.repository: {{ .Values.platform.postgresqlOperator.repository | quote }}
+  postgresqlOperator.version: {{ .Values.platform.postgresqlOperator.version | quote }}
+  pmm.chart: {{ .Values.platform.pmm.chart | quote }}
+  pmm.repository: {{ .Values.platform.pmm.repository | quote }}
+  pmm.version: {{ .Values.platform.pmm.version | quote }}
+  pmm.appVersion: {{ .Values.platform.pmm.appVersion | quote }}
+  pmm.service: {{ .Values.platform.pmm.service | quote }}
+{{- end }}

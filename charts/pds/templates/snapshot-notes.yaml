@@ -1,0 +1,13 @@
+{{- if .Values.snapshotNotes }}
+# Rendered only when chart-snapshot.sh sets snapshotNotes. Helm 3
+# `helm install --dry-run` still contacts a cluster, so NOTES cannot be
+# checked that way on the lint job.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "pds.fullname" . }}-snapshot-notes
+  namespace: {{ .Release.Namespace }}
+data:
+  notes: |
+{{ include "pds.notes" . | nindent 4 }}
+{{- end }}

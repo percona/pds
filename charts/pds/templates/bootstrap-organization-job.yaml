@@ -1,0 +1,121 @@
+{{/*
+The development organization.
+
+Login is required in every mode, and kind, scripts/up.sh and the Playwright run
+all have to sign in. None of them can click an invite link, so this seeds one
+organization with a password the chart already knows.
+
+It is a post-install hook rather than a pre-install one, because it talks to
+the adapter database through the same image the adapter runs: the Secret the
+operator mints and the schema the adapter reconciles both have to exist first.
+
+This is a development convenience and nothing else. Turning it on hands one
+known credential to anybody who can reach the deployment, and the password is a
+value, so it lands in the release Secret. A customer deployment gets an organization
+from `adapter organization create` and leaves this off.
+*/}}
+{{- if .Values.adapter.auth.bootstrapOrganization.enabled }}
+{{- if not .Values.adapter.database.enabled }}
+{{- fail "adapter.auth.bootstrapOrganization.enabled needs adapter.database.enabled: the organization is a row in the adapter database" }}
+{{- end }}
+{{/*
+The organization seeded is the one the adapter serves. Seeding any other id would
+write a credential that signs in and is then refused on the next request,
+because a session for another organization reads as signed out.
+
+A star pin serves every organization that has a row. There is no one id to put a
+password on, so this hook cannot run then. The star is refused here, before
+the DNS-label check, because that check would only say it has to start with
+a letter.
+*/}}
+{{- $id := include "pds.hub.organization" . }}
+{{- if eq $id "*" }}
+{{- fail "adapter.auth.bootstrapOrganization.enabled cannot be used when adapter.state.organization is *: seeding a development organization only makes sense for one named organization" }}
+{{- end }}
+{{- if not (regexMatch "^[a-z]([-a-z0-9]*[a-z0-9])?$" $id) }}
+{{- fail "adapter.state.organization has to start with a letter and hold only lower case letters, digits and hyphens for the development organization to be able to sign in" }}
+{{- end }}
+{{- if lt (len $id) 3 }}
+{{- fail "adapter.state.organization needs at least 3 characters for the development organization to be able to sign in" }}
+{{- end }}
+{{- $hook := include "pds.auth.bootstrapHookName" . }}
+{{- $secret := include "pds.auth.bootstrapSecretName" . }}
+{{- if not .Values.adapter.auth.bootstrapOrganization.existingSecret }}
+{{- if lt (len .Values.adapter.auth.bootstrapOrganization.password) 12 }}
+{{- fail "adapter.auth.bootstrapOrganization.password needs at least 12 characters, or point existingSecret at a Secret holding BOOTSTRAP_PASSWORD" }}
+{{- end }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secret }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bootstrap-organization
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+type: Opaque
+stringData:
+  BOOTSTRAP_PASSWORD: {{ .Values.adapter.auth.bootstrapOrganization.password | quote }}
+---
+{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $hook }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bootstrap-organization
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  # The database may still be starting when this first runs, so it retries
+  # rather than failing the release.
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 120
+  template:
+    metadata:
+      labels:
+        {{- include "pds.labels" . | nindent 8 }}
+        app.kubernetes.io/component: bootstrap-organization
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: {{ include "pds.serviceAccountName" . }}
+      containers:
+        - name: seed
+          image: {{ include "pds.image" (dict "image" .Values.adapter.image "root" .) }}
+          imagePullPolicy: {{ .Values.adapter.image.pullPolicy }}
+          args:
+            - organization
+            - bootstrap
+            - {{ $id | quote }}
+          env:
+            {{- include "pds.adapter.env" . | nindent 12 }}
+            - name: BOOTSTRAP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: BOOTSTRAP_PASSWORD
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+{{- end }}

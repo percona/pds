@@ -1,0 +1,323 @@
+name: compose
+
+# Gates the single host deployment. The stack is brought up against a
+# throwaway PostgreSQL and checked the way the deploy checks it, so a broken
+# compose file, a broken proxy or a stale env template is caught here rather
+# than on the host.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/**"
+      - ".github/workflows/compose.yml"
+      # What the stack runs and what it copies: an adapter change can refuse
+      # the template, and the chart owns the nginx block and the surface list.
+      - "adapter/**"
+      - "apps/mcp/**"
+      - "apps/ui/Dockerfile"
+      - "landing/**"
+      - "scripts/build-landing.sh"
+      - "charts/pds/templates/ui-configmap.yaml"
+      - "charts/pds/tests/template.hosted-ui.snap.yaml"
+      - "charts/pds/values.yaml"
+  pull_request:
+    paths:
+      - "deploy/**"
+      - ".github/workflows/compose.yml"
+      # What the stack runs and what it copies: an adapter change can refuse
+      # the template, and the chart owns the nginx block and the surface list.
+      - "adapter/**"
+      - "apps/mcp/**"
+      - "apps/ui/Dockerfile"
+      - "landing/**"
+      - "scripts/build-landing.sh"
+      - "charts/pds/templates/ui-configmap.yaml"
+      - "charts/pds/tests/template.hosted-ui.snap.yaml"
+      - "charts/pds/values.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PDS_IMAGE_TAG: smoke
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Both files are copies of something the chart owns. Comparing them here
+      # is what keeps a chart change from silently forking this deployment.
+      - name: the nginx config matches the chart
+        run: |
+          set -euo pipefail
+          diff -u \
+            <(yq 'select(.kind == "ConfigMap" and .metadata.name == "pds-ui-nginx") | .data["default.conf"]' \
+              charts/pds/tests/template.hosted-ui.snap.yaml | sed -e '/^$/{$d;}') \
+            deploy/compose/nginx/default.conf
+
+      - name: the surfaces match the chart's hub profile
+        run: |
+          set -euo pipefail
+          diff -u \
+            <(yq '.adapter.features | to_entries | .[] | "ADAPTER_FEATURE_" + (.key | upcase | sub("-", "_")) + "=" + (.value | tostring)' \
+              charts/pds/values.yaml | sort) \
+            <(grep '^ADAPTER_FEATURE_' deploy/compose/pds.env.example | sort)
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+          check-latest: true
+          cache: npm
+
+      # The published images are private and a pull request has no tag of its
+      # own, so the stack runs images built from this checkout.
+      - name: build the images
+        run: |
+          set -euo pipefail
+          npm ci
+          npm -w @pds/ui run build
+          scripts/build-landing.sh apps/ui/dist/landing
+          docker build -f adapter/Dockerfile -t "ghcr.io/percona/percona-services-adapter:${PDS_IMAGE_TAG}" .
+          docker build -t "ghcr.io/percona/percona-services-ui:${PDS_IMAGE_TAG}" apps/ui
+
+      # Derived from the committed template rather than written by hand, so a
+      # surface named wrongly in the template fails here: the adapter refuses
+      # to start on an ADAPTER_FEATURE_ variable that names nothing.
+      - name: write the environment
+        working-directory: deploy/compose
+        run: |
+          set -euo pipefail
+          key="$(openssl rand -base64 32)"
+          sed \
+            -e "s|^DATABASE_URL=.*|DATABASE_URL=postgres://pds:pds@postgres:5432/pds?sslmode=disable|" \
+            -e "s|^STATE_ENCRYPTION_KEY=.*|STATE_ENCRYPTION_KEY=${key}|" \
+            -e "s|^HUB_PUBLIC_URL=.*|HUB_PUBLIC_URL=http://localhost|" \
+            -e "s|^HUB_GITHUB_TOKEN=.*|HUB_GITHUB_TOKEN=smoke-not-a-real-token|" \
+            -e "s|^HUB_OPERATOR_TOKEN=.*|HUB_OPERATOR_TOKEN=smoke-not-a-real-token|" \
+            pds.env.example > pds.env
+          echo "PDS_IMAGE_TAG=${PDS_IMAGE_TAG}" > version.env
+
+      - name: compose config
+        working-directory: deploy/compose
+        run: docker compose --env-file version.env --profile local-db config >/dev/null
+
+      - name: up
+        working-directory: deploy/compose
+        run: docker compose --env-file version.env --profile local-db up -d
+
+      # The adapter opens its database connection in the background and
+      # retries, so readiness is the real signal: it goes green only once the
+      # schema has reconciled.
+      - name: wait for readiness
+        working-directory: deploy/compose
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 60); do
+            if curl -fsS -o /dev/null http://127.0.0.1:8080/readyz; then
+              echo "ready"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "the adapter did not become ready" >&2
+          exit 1
+
+      - name: the landing page and the console are served
+        working-directory: deploy/compose
+        run: |
+          set -euo pipefail
+          # The landing page's description is in its index.html, the console's is not.
+          grep -q 'MySQL and PostgreSQL on Amazon EKS in your AWS account' <<<"$(curl -fsS http://127.0.0.1/)"
+          grep -q '<div id="root"' <<<"$(curl -fsS http://127.0.0.1/app/)"
+          # Links from before the console moved keep their query.
+          location="$(curl -s -o /dev/null -w '%{redirect_url}' 'http://127.0.0.1/claim?token=t')"
+          [ "${location}" = "http://127.0.0.1/app/claim?token=t" ] || { echo "got ${location}" >&2; exit 1; }
+
+      # A 401 proves the request reached the adapter. The SPA fallback answers
+      # 200 with index.html, so this is what tells a wired proxy from an
+      # unwired one.
+      - name: /api reaches the adapter on the same origin
+        working-directory: deploy/compose
+        run: |
+          set -euo pipefail
+          code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/api/auth/session)"
+          if [ "${code}" != "401" ]; then
+            echo "expected 401 from /api/auth/session, got ${code}" >&2
+            exit 1
+          fi
+
+      # The hub serves every organization, so the operator token has none to act
+      # in and the API refuses it. The organization gets a password through its
+      # invite link, the way a customer sets one, and signs in with it. The
+      # session cookie from that sign in is what the next step presents. The
+      # password is a throwaway value on a throwaway stack.
+      - name: organization create prints an invite link
+        working-directory: deploy/compose
+        run: |
+          set -euo pipefail
+          out="$(docker compose --env-file version.env run --rm --no-deps pds-adapter organization create smoke-organization)"
+          echo "${out}"
+          grep -q 'http://localhost/app/claim?token=' <<<"${out}"
+          claim="$(sed -n 's|.*claim?token=\([A-Za-z0-9_-]*\).*|\1|p' <<<"${out}" | head -1)"
+          password="$(openssl rand -hex 16)"
+          curl -fsS -o /dev/null -X POST -H 'Content-Type: application/json' \
+            -d "{\"token\":\"${claim}\",\"password\":\"${password}\"}" \
+            http://127.0.0.1/api/auth/invite
+          curl -fsS -o /dev/null -c "${RUNNER_TEMP}/session.jar" -X POST \
+            -H 'Content-Type: application/json' \
+            -d "{\"username\":\"smoke-organization\",\"password\":\"${password}\"}" \
+            http://127.0.0.1/api/auth/login
+
+      # The expected set is the flags the adapter publishes, with the hub
+      # defaults from values.yaml applied. A key the file sets has that
+      # value. A key it does not set stays on. A name the response does not
+      # include is not served. A false key left in the file does not have to
+      # be present. alert-analysis, logs, investigate, recommendations,
+      # platform-status and alerts are retired, so any value for one of them
+      # in the response fails. A key the file sets true still has to come back
+      # on. A missing retired key is not treated as required-on.
+      # support-access is off on a hub without the private network whatever the
+      # file says, and this hub has none, so it has to come back off.
+      # The flags do not depend on an organization, but the route sits behind
+      # the session guard. This is the endpoint the UI seeds its own flags from.
+      - name: the adapter serves the hub profile
+        working-directory: deploy/compose
+        run: |
+          set -euo pipefail
+          flags="$(curl -fsS -b "${RUNNER_TEMP}/session.jar" http://127.0.0.1/api/features)"
+          echo "${flags}"
+          overrides="$(yq -o=json '.adapter.features' ../../charts/pds/values.yaml)"
+          jq -e --argjson overrides "${overrides}" '
+            .flags as $flags
+            | [
+                ($flags | to_entries[]
+                  | select(.key == "alert-analysis" or .key == "logs" or .key == "investigate" or .key == "recommendations" or .key == "platform-status" or .key == "alerts")
+                  | "\(.key) is retired and must not be in GET /api/features"),
+                ($flags | to_entries[]
+                  | select(.key != "alert-analysis" and .key != "logs" and .key != "investigate" and .key != "recommendations" and .key != "platform-status" and .key != "alerts")
+                  | .key as $k
+                  | .value as $got
+                  | (if $k == "support-access" then false
+                     elif ($overrides | has($k)) then $overrides[$k]
+                     else true end) as $want
+                  | select($got != $want)
+                  | "\($k) is \($got) and the hub file wants \($want)"),
+                ($overrides | to_entries[]
+                  | select(.value == true)
+                  | .key as $k
+                  | select($flags[$k] != true)
+                  | "\($k) is on in the hub file and not on in GET /api/features")
+              ] as $bad
+            | if ($bad | length) == 0 then true
+              else ($bad | join("\n")) | halt_error(1)
+              end
+          ' <<<"${flags}" >/dev/null
+
+      - name: logs
+        if: always()
+        working-directory: deploy/compose
+        run: docker compose --env-file version.env --profile local-db logs --tail=200
+
+      - name: down
+        if: always()
+        working-directory: deploy/compose
+        run: docker compose --env-file version.env --profile local-db down -v
+
+  # The MCP binary's tests drive it against a control plane built for the test. This job runs the
+  # contract tests against the real adapter on a hub with no environments, signed in the way a
+  # person signs in: through the authorize and consent routes, as the Organization's user. A
+  # route the fake answers differently from the adapter fails here. The tests skip without
+  # PDS_REAL_URL.
+  mcp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PDS_IMAGE_TAG: smoke
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.10"
+          cache-dependency-path: apps/mcp/go.mod
+
+      - name: build the adapter image
+        run: |
+          set -euo pipefail
+          docker build -f adapter/Dockerfile -t "ghcr.io/percona/percona-services-adapter:${PDS_IMAGE_TAG}" .
+
+      - name: write the environment
+        working-directory: deploy/compose
+        run: |
+          set -euo pipefail
+          key="$(openssl rand -base64 32)"
+          sed \
+            -e "s|^DATABASE_URL=.*|DATABASE_URL=postgres://pds:pds@postgres:5432/pds?sslmode=disable|" \
+            -e "s|^STATE_ENCRYPTION_KEY=.*|STATE_ENCRYPTION_KEY=${key}|" \
+            -e "s|^HUB_PUBLIC_URL=.*|HUB_PUBLIC_URL=http://127.0.0.1:8080|" \
+            -e "s|^HUB_GITHUB_TOKEN=.*|HUB_GITHUB_TOKEN=smoke-not-a-real-token|" \
+            -e "s|^HUB_OPERATOR_TOKEN=.*|HUB_OPERATOR_TOKEN=smoke-not-a-real-token|" \
+            pds.env.example > pds.env
+          echo "PDS_IMAGE_TAG=${PDS_IMAGE_TAG}" > version.env
+
+      # The UI is not needed: the server talks to the adapter directly.
+      - name: up
+        working-directory: deploy/compose
+        run: docker compose --env-file version.env --profile local-db up -d postgres pds-adapter
+
+      - name: wait for readiness
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 60); do
+            if curl -fsS -o /dev/null http://127.0.0.1:8080/readyz; then
+              echo "ready"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "the adapter did not become ready" >&2
+          exit 1
+
+      # The organization gets a password through its invite link, the way a customer
+      # sets one. It is a throwaway value on a throwaway stack. The control plane's address is the
+      # issuer of its authorization server, so the binary is pointed at the same one.
+      - name: the MCP binary against the real adapter
+        working-directory: deploy/compose
+        run: |
+          set -euo pipefail
+          token() {
+            docker compose --env-file version.env run --rm --no-deps pds-adapter organization "$@" \
+              | sed -n 's|.*claim?token=\([A-Za-z0-9_-]*\).*|\1|p' | head -1
+          }
+          require() {
+            if [ -z "$2" ]; then
+              echo "no invite link came back from organization $1" >&2
+              exit 1
+            fi
+          }
+          password="$(openssl rand -hex 16)"
+          claim="$(token create mcp-real)"
+          require create "${claim}"
+          curl -fsS -o /dev/null -X POST -H 'Content-Type: application/json' \
+            -d "{\"token\":\"${claim}\",\"password\":\"${password}\"}" \
+            http://127.0.0.1:8080/api/auth/invite
+          cd ../../apps/mcp
+          PDS_REAL_URL=http://127.0.0.1:8080 \
+            PDS_REAL_USERNAME=mcp-real \
+            PDS_REAL_PASSWORD="${password}" \
+            go test ./contract -count=1 -v
+
+      - name: logs
+        if: always()
+        working-directory: deploy/compose
+        run: docker compose --env-file version.env --profile local-db logs --tail=200
+
+      - name: down
+        if: always()
+        working-directory: deploy/compose
+        run: docker compose --env-file version.env --profile local-db down -v

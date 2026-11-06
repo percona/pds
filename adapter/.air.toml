@@ -1,0 +1,32 @@
+# Hot reload for local adapter development: `cd adapter && air`.
+# Install once with `go install github.com/air-verse/air@latest`.
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -o ./tmp/adapter ./cmd/adapter"
+  bin = "./tmp/adapter"
+  full_bin = ""
+  args_bin = []
+  delay = 300
+  include_ext = ["go", "toml"]
+  exclude_dir = ["tmp", "vendor", "testdata"]
+  exclude_regex = ["_test\\.go"]
+  exclude_unchanged = true
+  follow_symlink = false
+  kill_delay = "2s"
+  send_interrupt = true
+  stop_on_error = true
+  log = "build-errors.log"
+
+[log]
+  time = false
+
+[color]
+  main = "magenta"
+  watcher = "cyan"
+  build = "yellow"
+  runner = "green"
+
+[misc]
+  clean_on_exit = true

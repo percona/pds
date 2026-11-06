@@ -1,0 +1,26 @@
+# Kind-lab overlay on the chart defaults. The hostPath only resolves on the
+# node scripts/up.sh creates. A hub that uses a PVC sets
+# adapter.hub.persistence instead, and a GitHub hub sets github.org and
+# leaves gitDir empty. Do not combine this file with persistence: both
+# would mount gitDir.
+#
+# publicURL and gitURL use host.docker.internal so the connected environment
+# can reach the port-forward and Gitea. 127.0.0.1 inside a pod is the pod.
+# oauthIssuer is the address a person's browser and agent use: the issuer must
+# be https or http on 127.0.0.1, and the port-forward is on the host's loopback.
+adapter:
+  hub:
+    gitDir: /var/lib/hub-git
+    # Lab-only. Production sets operatorTokenExistingSecret instead.
+    operatorToken: lab-hub-operator
+    publicURL: http://host.docker.internal:18080
+    oauthIssuer: http://127.0.0.1:18080
+    gitURL: http://host.docker.internal:3000/hub/pds.git
+  extraVolumeMounts:
+    - name: hub-git
+      mountPath: /var/lib/hub-git
+  extraVolumes:
+    - name: hub-git
+      hostPath:
+        path: /var/lab-git
+        type: DirectoryOrCreate

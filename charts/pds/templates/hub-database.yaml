@@ -1,0 +1,317 @@
+{{/*
+The operator conflict is checked outside adapter.database.enabled on purpose.
+The dependency in Chart.yaml is conditioned on operator.enabled alone, so a
+release that leaves it on while turning the database off would still install a
+second operator over one set of cluster wide CRDs, without reaching a guard
+nested under the database flag.
+*/}}
+{{- if and .Values.adapter.database.operator.enabled .Values.stack.enabled }}
+{{- fail "adapter.database.operator.enabled and stack.enabled both install the Percona PostgreSQL operator, over one set of cluster wide CRDs. Turn the hub operator off on a stack release." }}
+{{- end }}
+{{- if and .Values.adapter.database.operator.enabled (not .Values.adapter.database.enabled) }}
+{{- fail "adapter.database.operator.enabled installs the PostgreSQL operator and its cluster wide CRDs for a database that is turned off. Turn adapter.database.enabled on, or turn the operator off." }}
+{{- end }}
+{{- if .Values.adapter.database.enabled }}
+{{- if and (not .Values.adapter.database.existingSecret) (not .Values.adapter.database.inCluster.enabled) }}
+{{- fail "adapter.database.enabled needs either adapter.database.existingSecret or adapter.database.inCluster.enabled. The adapter has no database to connect to otherwise." }}
+{{- end }}
+{{/*
+A supplied Secret wins over the rendered database, rather than clashing with
+it. inCluster.enabled defaults to on so that an install which sets nothing else
+gets a working database, and naming an external one is how you say you already
+have it.
+*/}}
+{{- if not .Values.adapter.database.existingSecret }}
+{{- if not (or .Values.stack.enabled .Values.adapter.database.operator.enabled) }}
+{{- fail "adapter.database.inCluster needs a PostgreSQL operator to reconcile it. A stack release gets one through the engine provider; set adapter.database.operator.enabled on a release where the stack is off, or point adapter.database.existingSecret at a database you already run." }}
+{{- end }}
+{{- $db := .Values.adapter.database.inCluster }}
+{{/*
+Compare the major version in the image tag with postgresVersion. The operator
+reads the version from the field and the data directory from the image, so a
+mismatch corrupts the data directory rather than failing cleanly.
+
+A digest only reference is immutable and carries no major to read, so it skips
+the comparison. A tag alongside a digest still carries one, so it is compared:
+skipping on the presence of an @ alone would let name:17@sha256:... through
+against postgresVersion 18. An untagged reference is refused rather than
+skipped, because Kubernetes resolves it through latest, which can move to
+another major under a cluster that is already running. A registry port is not a
+tag, which is why the pattern will not match a colon followed by a slash.
+*/}}
+{{- $beforeDigest := first (splitList "@" $db.images.postgres) }}
+{{- $tag := regexFind ":[^:/]+$" $beforeDigest | trimPrefix ":" }}
+{{- if $tag }}
+{{- if ne (printf "%v" $db.postgresVersion) (regexFind "^[0-9]+" $tag) }}
+{{- fail "adapter.database.inCluster.images.postgres has to carry the same major version as postgresVersion. The operator reads the version from the field and the data directory from the image." }}
+{{- end }}
+{{- else if not (contains "@" $db.images.postgres) }}
+{{- fail "adapter.database.inCluster.images.postgres has to carry an explicit tag or digest. An untagged image resolves through latest, which can move to another PostgreSQL major and leave the operator reading a data directory it did not write." }}
+{{- end }}
+{{- $hook := include "pds.hub.databaseHookName" . }}
+{{- $cluster := include "pds.hub.databaseName" . }}
+#
+# The cluster object is applied by a hook Job rather than rendered into the
+# release. Helm resolves every manifest against the API server before it
+# installs the CRDs a subchart carries, so a first install of the operator and
+# a PerconaPGCluster together fails on the kind being unknown. The chart
+# already applies Everest objects this way for the same reason.
+#
+# The hook is pre-install, not post-install. Helm runs post-install hooks only
+# after --wait has finished, and --wait cannot finish: the adapter Deployment
+# reads its connection URL from the Secret the operator mints for this cluster,
+# so nothing would ever create the cluster and the install would time out.
+# Helm applies the CRDs a subchart carries before it runs pre-install hooks, so
+# the kind is registered by the time this Job looks for it.
+#
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $hook }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hub-database
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $hook }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hub-database
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+rules:
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $hook }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hub-database
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $hook }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $hook }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $hook }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hub-database
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+rules:
+  - apiGroups: ["pgv2.percona.com"]
+    resources: ["perconapgclusters"]
+    verbs: ["get", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $hook }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hub-database
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $hook }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $hook }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $hook }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hub-database
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "15"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  # A missing CRD on upgrade is terminal, not transient: Helm never installs a
+  # subchart's CRDs on upgrade, so retrying cannot make one appear. Retrying
+  # anyway turned a clear failure into an eight minute one.
+  backoffLimit: {{ if .Release.IsUpgrade }}0{{ else }}6{{ end }}
+  ttlSecondsAfterFinished: 120
+  template:
+    metadata:
+      labels:
+        {{- include "pds.labels" . | nindent 8 }}
+        app.kubernetes.io/component: hub-database
+    spec:
+      restartPolicy: OnFailure
+      # No priorityClassName. This runs as a pre-install hook, and the chart's
+      # PriorityClass is an ordinary release resource that does not exist yet,
+      # so naming it makes the API server refuse the pod.
+      serviceAccountName: {{ $hook }}
+      containers:
+        - name: apply
+          image: "{{ .Values.stack.applyImage.repository }}:{{ .Values.stack.applyImage.tag }}"
+          imagePullPolicy: {{ .Values.stack.applyImage.pullPolicy }}
+          env:
+            - name: IS_UPGRADE
+              value: {{ .Release.IsUpgrade | quote }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              # A fresh install already has the CRDs: Helm applies a subchart's
+              # crds directory before it runs pre-install hooks, so the only
+              # wait needed there is for propagation. An upgrade never gets
+              # them, so a missing CRD is reported at once rather than waited on.
+              if [ "${IS_UPGRADE}" = "true" ]; then
+                deadline=$(date +%s)
+              else
+                deadline=$(( $(date +%s) + 60 ))
+              fi
+              while ! kubectl get crd perconapgclusters.pgv2.percona.com >/dev/null 2>&1; do
+                if [ "$(date +%s)" -ge "${deadline}" ]; then
+                  echo "The PerconaPGCluster CRD is not registered in this cluster."
+                  echo
+                  echo "Helm installs a subchart's CRDs on install but never on upgrade, so"
+                  echo "turning adapter.database.enabled on for an existing release needs them"
+                  echo "applied once first:"
+                  echo
+                  echo "  helm show crds percona/pg-operator --version 3.0.0 | kubectl apply --server-side -f -"
+                  echo
+                  echo "Then run the same helm upgrade again."
+                  exit 1
+                fi
+                sleep 5
+              done
+              # The object existing is not the same as the API serving it. An
+              # apply that arrives before the CRD is established fails with no
+              # matches for kind, which reads like a missing CRD and is not.
+              kubectl wait --for=condition=established --timeout=60s \
+                crd/perconapgclusters.pgv2.percona.com
+              # The heredoc is quoted so the shell expands nothing in the body.
+              # A label or annotation carrying a dollar sign would otherwise be
+              # mangled, or abort the script under set -u.
+              # The CRD check above is terminal, which is why backoffLimit is 0
+              # on upgrade. The apply is not: an admission webhook or API server
+              # blip should be retried rather than failing the release, so the
+              # retry lives here instead of in the Job.
+              # The manifest is held in a variable rather than piped. A pipe
+              # is consumed by the first attempt, so every retry would read end
+              # of file and fail with no objects passed to apply, which is not
+              # the error that was being retried.
+              manifest=$(cat <<'EOF'
+
+              apiVersion: pgv2.percona.com/v2
+              kind: PerconaPGCluster
+              metadata:
+                name: {{ $cluster }}
+                namespace: {{ .Release.Namespace }}
+                labels:
+                  {{- include "pds.labels" . | nindent 18 }}
+                  app.kubernetes.io/component: hub-database
+              spec:
+                crVersion: 3.0.0
+                image: {{ $db.images.postgres | quote }}
+                postgresVersion: {{ $db.postgresVersion }}
+                # The adapter connects as this role, to this database. The
+                # operator owns the password and writes it to
+                # <cluster>-pguser-<user>, so no credential passes through
+                # values or through a chart rendered Secret.
+                users:
+                  - name: {{ $db.user | quote }}
+                    databases:
+                      - {{ $db.database | quote }}
+                instances:
+                  - name: instance1
+                    replicas: {{ $db.replicas }}
+                    resources:
+                      {{- toYaml $db.resources | nindent 22 }}
+                    dataVolumeClaimSpec:
+                      accessModes:
+                        - ReadWriteOnce
+                      {{- with $db.storageClass }}
+                      storageClassName: {{ . | quote }}
+                      {{- end }}
+                      resources:
+                        requests:
+                          storage: {{ $db.storage }}
+                backups:
+                  pgbackrest:
+                    image: {{ $db.images.pgbackrest | quote }}
+                    repos:
+                      - name: repo1
+                        volume:
+                          volumeClaimSpec:
+                            accessModes:
+                              - ReadWriteOnce
+                            {{- with $db.storageClass }}
+                            storageClassName: {{ . | quote }}
+                            {{- end }}
+                            resources:
+                              requests:
+                                storage: {{ $db.backupStorage }}
+              EOF
+              )
+              attempt=1
+              until printf '%s\n' "${manifest}" | kubectl apply -f -; do
+                if [ "${attempt}" -ge 3 ]; then
+                  echo "could not apply the cluster after ${attempt} attempts"
+                  exit 1
+                fi
+                echo "apply failed, retrying"
+                attempt=$(( attempt + 1 ))
+                sleep 5
+              done
+{{- end }}
+{{- end }}

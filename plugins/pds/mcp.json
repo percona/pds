@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "pds": {
+      "type": "http",
+      "url": "https://pds.percona.com/mcp"
+    },
+    "pds-data": {
+      "command": "npx",
+      "args": ["-y", "@gas-lab/pds-mcp@0.1.0", "data"]
+    }
+  }
+}

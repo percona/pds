@@ -1,0 +1,55 @@
+{{- if .Values.tests.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "pds.fullname" . }}-test-adapter-health
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "1"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  restartPolicy: Never
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  containers:
+    - name: curl
+      image: "{{ .Values.tests.image.repository }}:{{ .Values.tests.image.tag }}"
+      imagePullPolicy: {{ .Values.tests.image.pullPolicy }}
+      # Liveness and readiness must be green, and the features route must
+      # answer. This probe carries no session, so 200 and 401 both count.
+      args:
+        - /bin/sh
+        - -c
+        - |
+          set -eu
+          base={{ include "pds.adapter.url" . | quote }}
+          curl --fail --silent --show-error --max-time 10 "$base/healthz" | grep -q '"status":"ok"'
+          curl --fail --silent --show-error --max-time 10 "$base/readyz" | grep -q '"status":"ok"'
+          # 401 is a pass. The route needs a signed in organization now, and this
+          # probe carries no session, so an answer at all is what proves the
+          # request reached the adapter and its router ran.
+          code=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 "$base/api/features")
+          case "$code" in
+            200|401) echo "features responded $code" ;;
+            *) echo "features responded $code"; exit 1 ;;
+          esac
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        runAsUser: {{ .Values.tests.runAsUser }}
+        capabilities:
+          drop:
+            - ALL
+      resources:
+        {{- toYaml .Values.tests.resources | nindent 8 }}
+{{- end }}

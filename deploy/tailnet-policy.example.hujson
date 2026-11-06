@@ -1,0 +1,49 @@
+// Example policy for the private network behind support access. Merge these
+// entries into the tailnet policy by hand: the hub never edits the policy.
+// Replace the group members, and keep the two tag names equal to
+// SUPPORT_TAILNET_ENVIRONMENT_TAG and SUPPORT_TAILNET_SERVICE_TAG.
+{
+	"groups": {
+		// Percona engineers who may open a support session.
+		"group:pds-support-engineers": ["engineer@example.com"],
+	},
+
+	"tagOwners": {
+		// Devices the hub's key client creates: one per open window.
+		"tag:pds-environment": ["autogroup:admin"],
+		// Private addresses the hub's service client creates: one per environment.
+		"tag:pds-support": ["autogroup:admin"],
+	},
+
+	// A window's device advertises its environment's address on its own, so
+	// opening a window needs no approval in the admin console. The key is the
+	// address tag, not a service name, so it covers every environment's address.
+	"autoApprovers": {
+		"services": {
+			"tag:pds-support": ["tag:pds-environment"],
+		},
+	},
+
+	"grants": [
+		// Engineers reach every support address on the one port the hub allows.
+		// Environments get no grant, and no device carries both tags, so one
+		// environment can never reach another.
+		{
+			"src": ["group:pds-support-engineers"],
+			"dst": ["tag:pds-support"],
+			"ip":  ["tcp:443"],
+		},
+
+		// Engineers arrive in Kubernetes as this group. The destination is the
+		// window's device, the proxy that impersonates them, and not the address.
+		{
+			"src": ["group:pds-support-engineers"],
+			"dst": ["tag:pds-environment"],
+			"app": {
+				"tailscale.com/cap/kubernetes": [
+					{"impersonate": {"groups": ["pds.percona.com:support"]}},
+				],
+			},
+		},
+	],
+}

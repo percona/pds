@@ -1,0 +1,13 @@
+{
+  "name": "pds",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Customer-hosted control plane for MySQL on Kubernetes",
+  "license": "Apache-2.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "engines": {
+    "node": "^22.23.4 || ^24.22.1 || >=26.12.1"
+  }
+}

@@ -1,0 +1,166 @@
+name: mcp
+
+# The filter covers every file that can change the MCP binary or its release: the Go module and
+# its workspace, the lint config at the repo root, and a workflow edit has to test itself.
+# push is limited to main so a pull request branch runs once, through
+# pull_request, instead of once per event.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/mcp/**"
+      - "go.work"
+      - ".golangci.yml"
+      - ".github/workflows/mcp.yml"
+  pull_request:
+    paths:
+      - "apps/mcp/**"
+      - "go.work"
+      - ".golangci.yml"
+      - ".github/workflows/mcp.yml"
+  # A dry run of the release path: builds every target for the given tag, then packs, installs and
+  # runs the tarball without publishing anything.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build, such as mcp-v1.2.3. Leave empty to use a dry run version.
+        required: false
+        type: string
+
+jobs:
+  # The Go module in apps/mcp: the bridge, the login command, the data server and the tests that drive the built
+  # binary against a control plane built for the test. The contract tests skip here, because they
+  # need a real control plane: the compose and smoke workflows run them.
+  go:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mcp
+    # The data server's tests prove what a database does with a write inside a read only
+    # transaction, so they need a real MySQL and a real PostgreSQL. The passwords belong to
+    # throwaway containers that live for this job only.
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: ci-throwaway-mysql
+          MYSQL_DATABASE: app
+        ports:
+          - 33306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pci-throwaway-mysql"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: ci-throwaway-postgres
+          POSTGRES_DB: app
+        ports:
+          - 35432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      PDS_TEST_MYSQL_ADDR: 127.0.0.1:33306
+      PDS_TEST_MYSQL_PASSWORD: ci-throwaway-mysql
+      PDS_TEST_POSTGRES_ADDR: 127.0.0.1:35432
+      PDS_TEST_POSTGRES_PASSWORD: ci-throwaway-postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.10"
+          cache-dependency-path: apps/mcp/go.mod
+
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+
+      # The action major has to track the golangci-lint major, as in the adapter workflow.
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.13
+          working-directory: apps/mcp
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test ./... -race
+
+      - name: go build
+        run: go build ./cmd/pds-mcp
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+          check-latest: true
+
+      # The release scripts and the npm package's launcher. The test builds the binary with a stamped version.
+      - name: release scripts
+        run: node --test npm/release.test.mjs
+
+      # The case table and the pure logic of the manual evaluation. The evaluation itself is run by
+      # a person before a release and never here.
+      - name: evaluation script
+        run: node --test modelcheck/modelcheck.test.mjs
+
+  # The release path without the publish: GoReleaser builds every target, the one npm package
+  # is laid out and packed, then installed into a clean directory and run through npx on macOS
+  # and Linux. Signing needs the release's identity, so it runs only in publish-mcp.
+  release-dry-run:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: apps/mcp
+    env:
+      TAG: ${{ inputs.tag != '' && inputs.tag || 'mcp-v0.0.0-dryrun.1' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.10"
+          cache-dependency-path: apps/mcp/go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+          check-latest: true
+
+      - name: validate the tag
+        run: echo "PDS_MCP_VERSION=$(node npm/release.mjs version "${TAG}")" >>"${GITHUB_ENV}"
+
+      # goreleaser-action v6
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a
+        with:
+          distribution: goreleaser
+          version: v2.12.0
+          workdir: apps/mcp
+          args: release --snapshot --clean --skip=sign
+
+      - name: pack the npm package
+        run: npm/pack.sh "${TAG}" "${RUNNER_TEMP}/npm"
+
+      - name: install the packed package
+        run: npm/check-install.sh "${RUNNER_TEMP}/npm" "${PDS_MCP_VERSION}"
+
+      # The MCP Registry listing for this tag, stamped and checked by the registry without being
+      # published. The registry is a public service, so the check runs once.
+      # sigstore/cosign-installer v3.10.1
+      - if: runner.os == 'Linux'
+        uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5
+        with:
+          cosign-release: v2.6.5
+
+      - name: validate the registry listing
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          npm/install-publisher.sh "${RUNNER_TEMP}/bin"
+          node npm/release.mjs server-json "${TAG}" "${RUNNER_TEMP}/server.json"
+          "${RUNNER_TEMP}/bin/mcp-publisher" validate "${RUNNER_TEMP}/server.json"

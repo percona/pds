@@ -1,0 +1,15 @@
+.git
+**/.git
+**/node_modules
+**/dist
+apps
+docs
+lab
+.claude
+.cursor
+.github
+scripts
+charts/pds/charts
+charts/pds/tmpcharts
+.local
+flux-pmm-monitoring

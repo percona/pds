@@ -1,0 +1,29 @@
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: pds-operator
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+value: 1000000
+globalDefault: false
+preemptionPolicy: PreemptLowerPriority
+description: Database operators take CPU and memory before the rest of the control plane.
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: pds-bulk
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+value: -10
+globalDefault: false
+preemptionPolicy: Never
+description: Adapter, UI, PMM, and MinIO yield to the database operators.

@@ -1,0 +1,276 @@
+{{- if .Values.rbac.create }}
+{{- $name := include "pds.adapter.fullname" . }}
+# Write access for the connection Secrets the connections panel pastes into.
+# resourceNames limits get/update/delete to those names. create cannot use
+# resourceNames, so it is granted on secrets in this namespace only: that is
+# how the first paste creates the Secret.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-connections
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: adapter
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - {{ include "pds.servicenow.secretName" . | quote }}
+      - {{ include "pds.assistant.secretName" . | quote }}
+      - {{ include "pds.cursor.secretName" . | quote }}
+    verbs: ["get", "update", "patch", "delete"]
+  # Hashed join tokens the hub mints. Heartbeats present the plaintext once;
+  # only the hash is stored.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - {{ include "pds.hub.joinSecretName" . | quote }}
+    verbs: ["get", "update", "patch"]
+  # The Everest token is a session that expires, so the adapter logs in again
+  # with the admin account rather than waiting for the next upgrade to mint one.
+  # Reading it is all that takes: the token it gets back is held in memory.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - {{ include "pds.everest.accountsSecretName" . | quote }}
+    verbs: ["get"]
+  # The hub asks this environment's agent for the monitoring admin password when
+  # a customer copies it. Reading it is all that takes: the agent hands the
+  # value over once and keeps nothing.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - {{ include "pds.pmm.adminSecretName" . | quote }}
+    verbs: ["get"]
+  # The agent reports the address the cloud gave monitoring's load balancer, so
+  # the panel can link to it. Reading that one Service is all that takes. The
+  # hub names it monitoring-service in every environment, so the grant does too.
+  - apiGroups: [""]
+    resources: ["services"]
+    resourceNames:
+      - "monitoring-service"
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames:
+      - {{ include "pds.activity.configMapName" . | quote }}
+      - {{ include "pds.hub.workConfigMapName" . | quote }}
+      - {{ include "pds.hub.inventoryConfigMapName" . | quote }}
+      {{- $inv := include "pds.hub.inventoryConfigMapName" . }}
+      {{- range $i := until 16 }}
+      - {{ printf "%s-%d" $inv $i | quote }}
+      {{- end }}
+    verbs: ["get", "update", "patch"]
+  # Create is unrestricted because the first write of a named object cannot
+  # use resourceNames. get/update/patch stay limited to the objects above.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+{{- if .Values.stack.enabled }}
+---
+# Read only access to the events behind one operation. The activity detail
+# reads them to say why a provision, backup, or restore is stuck: a claim that
+# never bound, a node with no room, an image that will not pull. They live in
+# the namespace the databases are in, which is not always the release namespace.
+# The stack creates that namespace. A hub leaves the stack off, and Helm
+# refuses a Role in a namespace that is not there.
+{{- $dbns := include "pds.dbNamespace" . }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-activity
+  namespace: {{ $dbns }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: adapter
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-activity
+  namespace: {{ $dbns }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: adapter
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-activity
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "pds.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+---
+# The PostgreSQL operator leaves Secrets behind when a database is deleted,
+# including the one holding its password. The agent deletes them by name.
+# Database names are not known when the chart renders, so delete is granted
+# for the namespace. It holds no list, get or watch: those return Secret
+# data, and the namespace also holds the backup storage credentials.
+# The agent also writes a new MySQL database's users Secret before the operator
+# generates one, because the operator's passwords can hold characters the
+# monitoring exporter cuts the monitor password at. Create cannot be scoped to
+# a name that does not exist yet, so it covers the namespace too.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-database-secrets
+  namespace: {{ $dbns }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: adapter
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["delete", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-database-secrets
+  namespace: {{ $dbns }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: adapter
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-database-secrets
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "pds.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+---
+# Restoring a PostgreSQL backup into a new database. The provider refuses to
+# restore into a new Instance, so the agent creates the database with its data
+# source first, reading the source's cluster and the backup it restores. Delete
+# lets it remove the database a failed seed left behind.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-database-seeds
+  namespace: {{ $dbns }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: adapter
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+  - apiGroups: ["pgv2.percona.com"]
+    resources: ["perconapgclusters"]
+    verbs: ["get", "create", "delete"]
+  - apiGroups: ["pgv2.percona.com"]
+    resources: ["perconapgbackups"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-database-seeds
+  namespace: {{ $dbns }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: adapter
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-database-seeds
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "pds.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+---
+# CPU and memory for each database. metrics-server answers a namespaced
+# request, and databases are not always in the release namespace, so this
+# grant is cluster-wide.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}-metrics
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: adapter
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-metrics
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: adapter
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}-metrics
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "pds.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-connections
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: adapter
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-connections
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "pds.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

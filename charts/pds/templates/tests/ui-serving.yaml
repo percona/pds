@@ -1,0 +1,56 @@
+{{- if and .Values.tests.enabled .Values.ui.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "pds.fullname" . }}-test-ui-serving
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "2"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  restartPolicy: Never
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  containers:
+    - name: curl
+      image: "{{ .Values.tests.image.repository }}:{{ .Values.tests.image.tag }}"
+      imagePullPolicy: {{ .Values.tests.image.pullPolicy }}
+      args:
+        - /bin/sh
+        - -c
+        - |
+          set -eu
+          base={{ include "pds.ui.url" . | quote }}
+          curl --fail --silent --show-error --max-time 10 "$base/app/" | grep -q '<div id="root">'
+          {{- if .Values.ui.nginxConfig }}
+          # The SPA reaches the adapter through the UI origin, so the proxy rule
+          # is part of the contract this chart ships.
+          # 401 is a pass. The route needs a signed in organization now, and this
+          # probe carries no session, so an answer at all is what proves the
+          # request reached the adapter through the proxy.
+          code=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 "$base/api/features")
+          case "$code" in
+            200|401) echo "api proxy responded $code" ;;
+            *) echo "api proxy responded $code"; exit 1 ;;
+          esac
+          {{- end }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        runAsUser: {{ .Values.tests.runAsUser }}
+        capabilities:
+          drop:
+            - ALL
+      resources:
+        {{- toYaml .Values.tests.resources | nindent 8 }}
+{{- end }}

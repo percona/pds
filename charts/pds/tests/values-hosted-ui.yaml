@@ -1,0 +1,8 @@
+# The hosted pds.percona.com: the landing page at / and the console under
+# /app/. deploy/compose/nginx/default.conf must equal this render's nginx
+# block, which the compose workflow checks.
+adapter:
+  database:
+    existingSecret: hub-db-url
+ui:
+  landingPage: true

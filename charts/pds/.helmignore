@@ -1,0 +1,12 @@
+# Patterns to ignore when building packages.
+.DS_Store
+.git/
+.gitignore
+*.swp
+*.tmp
+*.orig
+*.bak
+
+# Golden `helm template` snapshots at the chart root. They are a CI artifact,
+# not chart content. The leading slash keeps templates/tests/ packaged.
+/tests/

@@ -1,0 +1,196 @@
+name: chart
+
+# helm-deps.sh pulls the subcharts and chart-snapshot.sh is the snapshot gate
+# itself, so a change to either has to rerun the workflow. The installer
+# library is the one-command Helm path, so it is in the same gate.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "charts/**"
+      - "scripts/helm-deps.sh"
+      - "scripts/chart-snapshot.sh"
+      - "scripts/up.sh"
+      - "scripts/lib/hub-install.sh"
+      - "scripts/lib/hub-install_test.sh"
+      - "scripts/lib/helm-install.sh"
+      - "scripts/lib/helm-install_test.sh"
+      - "scripts/lib/bounded.sh"
+      - "scripts/lib/bounded_test.sh"
+      - "scripts/lib/lifecycle.sh"
+      - "scripts/lib/lifecycle_test.sh"
+      - "scripts/lib/lab.sh"
+      - "scripts/lib/lab_test.sh"
+      - "scripts/hub-smoke.sh"
+      - "scripts/hub-smoke_test.sh"
+      - "scripts/smoke-suites.sh"
+      - "scripts/smoke-suites_test.sh"
+      - "scripts/lab-platform.sh"
+      - "scripts/lab-platform_test.sh"
+      - "scripts/check-compatibility.sh"
+      - "scripts/check-compatibility_test.sh"
+      - "docs/compatibility.md"
+      - ".github/workflows/chart.yml"
+  pull_request:
+    paths:
+      - "charts/**"
+      - "scripts/helm-deps.sh"
+      - "scripts/chart-snapshot.sh"
+      - "scripts/up.sh"
+      - "scripts/lib/hub-install.sh"
+      - "scripts/lib/hub-install_test.sh"
+      - "scripts/lib/helm-install.sh"
+      - "scripts/lib/helm-install_test.sh"
+      - "scripts/lib/bounded.sh"
+      - "scripts/lib/bounded_test.sh"
+      - "scripts/lib/lifecycle.sh"
+      - "scripts/lib/lifecycle_test.sh"
+      - "scripts/lib/lab.sh"
+      - "scripts/lib/lab_test.sh"
+      - "scripts/hub-smoke.sh"
+      - "scripts/hub-smoke_test.sh"
+      - "scripts/smoke-suites.sh"
+      - "scripts/smoke-suites_test.sh"
+      - "scripts/lab-platform.sh"
+      - "scripts/lab-platform_test.sh"
+      - "scripts/check-compatibility.sh"
+      - "scripts/check-compatibility_test.sh"
+      - "docs/compatibility.md"
+      - ".github/workflows/chart.yml"
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.17.0
+
+      - name: helm dependencies
+        run: scripts/helm-deps.sh
+
+      - name: helm lint
+        run: helm lint charts/pds --set adapter.hub.publicURL=https://hub.example --set adapter.hub.gitDir=/var/lib/hub-git --set adapter.hub.persistence.enabled=true
+
+      - name: helm template snapshot
+        run: scripts/chart-snapshot.sh
+
+      - name: helm template stack
+        run: helm template pds charts/pds --namespace everest-system -f charts/pds/values-spoke.yaml --set adapter.hub.agentToken=lab-token >/dev/null
+
+      - name: installer unit tests
+        run: |
+          bash scripts/lib/helm-install_test.sh
+          bash scripts/lib/hub-install_test.sh
+          bash scripts/lib/lab_test.sh
+          bash scripts/lib/lifecycle_test.sh
+          bash scripts/lib/bounded_test.sh
+          bash scripts/hub-smoke_test.sh
+          bash scripts/smoke-suites_test.sh
+          bash scripts/lab-platform_test.sh
+          bash scripts/check-compatibility_test.sh
+          bash scripts/check-compatibility.sh
+
+  # Helm 4 server-side apply is what refuses a second writer of
+  # app.kubernetes.io/managed-by on the database namespace. Lint and
+  # template here so the next Helm 4 incompatibility fails this job
+  # rather than a laptop upgrade.
+  lint-helm4:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.2.4
+
+      - name: helm dependencies
+        run: scripts/helm-deps.sh
+
+      - name: helm lint
+        run: helm lint charts/pds --set adapter.hub.publicURL=https://hub.example --set adapter.hub.gitDir=/var/lib/hub-git --set adapter.hub.persistence.enabled=true
+
+      - name: helm template snapshot
+        run: scripts/chart-snapshot.sh
+
+      - name: helm template stack
+        run: helm template pds charts/pds --namespace everest-system -f charts/pds/values-spoke.yaml --set adapter.hub.agentToken=lab-token >/dev/null
+
+  # Lab bring-up for a pull request: a hub and one connected environment.
+  # The agent, Flux Kustomizations instances and platform, and
+  # GET /api/environments are checked, then the lab is brought up again.
+  # No database is created. The lifecycle and the pin contract stay on
+  # nightly hub-smoke, so a pull request does not wait on the operator.
+  kind-platform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      HUB_CLUSTER: hub
+      SPOKE_CLUSTER: spoke-a
+      # The agent rolls forward while the platform is still starting. One
+      # worker keeps that pod from sitting Pending on a full control plane.
+      LAB_SPOKE_WORKERS: "1"
+      KIND_VERSION: v0.27.0
+      K8S_IMAGE: kindest/node:v1.32.2
+    steps:
+      - uses: actions/checkout@v4
+
+      # Two kind clusters plus the platform images exceed the free space on
+      # some hosted runner images. These SDKs are unrelated to this job.
+      - name: free runner disk
+        run: scripts/free-runner-disk.sh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+          check-latest: true
+          cache: npm
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.17.0
+
+      - name: install kind
+        run: |
+          curl -sSLo /tmp/kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+          sudo install -m 0755 /tmp/kind /usr/local/bin/kind
+          kind version
+
+      # The lab refuses to start without the flux client. Connect installs
+      # Flux on the connected environment from its own pin; this binary is the
+      # one the lab checks for on PATH.
+      - name: install flux
+        run: |
+          curl -fsSL -o /tmp/flux.tar.gz \
+            "https://github.com/fluxcd/flux2/releases/download/v2.9.5/flux_2.9.5_linux_amd64.tar.gz"
+          echo "b853df82adfd7736f580692f9f734473d571606307139f8fd20c2a80dd1ff473  /tmp/flux.tar.gz" \
+            | sha256sum -c --quiet
+          tar -C /tmp -xzf /tmp/flux.tar.gz flux
+          sudo install -m 0755 /tmp/flux /usr/local/bin/flux
+          flux version --client
+
+      - name: npm ci
+        run: npm ci
+
+      - name: lab
+        run: scripts/up.sh
+
+      - name: lab checks
+        run: scripts/lab-platform.sh
+
+      - name: rerun lab
+        run: scripts/up.sh
+
+      - name: lab checks after rerun
+        run: scripts/lab-platform.sh
+
+      - name: collect diagnostics
+        if: failure() || cancelled()
+        run: scripts/hub-smoke.sh --dump
+
+      - name: tear the lab down
+        if: always()
+        run: scripts/up.sh --down

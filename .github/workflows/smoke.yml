@@ -1,0 +1,168 @@
+name: smoke
+
+# Nightly and workflow_dispatch, never a pull request. A hub, one connected
+# kind cluster, and a real database lifecycle takes tens of minutes, which
+# is too slow to gate a pull request. Per-PR CI stays unit, lint, build,
+# and the chart lab bring-up. hub-smoke is the pin contract: dispatch it
+# on the branch.
+#
+# One job per suite, each on its own runner with its own lab, so a failure in
+# one suite does not wait for or cancel the others:
+#   mysql        the MySQL lifecycle
+#   postgresql   the PostgreSQL lifecycle
+#   mcp          a lab with a connected environment and no database lifecycle,
+#                then the MCP binary's contract tests against its hub
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      suites:
+        description: "Suites to run, comma separated: mysql, postgresql, mcp"
+        default: "mysql,postgresql,mcp"
+        required: true
+
+jobs:
+  # The schedule has no inputs, so it runs every suite.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      suites: ${{ steps.plan.outputs.suites }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: choose the suites
+        id: plan
+        env:
+          REQUESTED: ${{ inputs.suites || 'mysql,postgresql,mcp' }}
+        run: |
+          suites="$(scripts/smoke-suites.sh "${REQUESTED}")"
+          echo "suites=${suites}" >> "${GITHUB_OUTPUT}"
+
+  # The lab: a hub and one connected kind cluster. Connect installs monitoring
+  # because this runner is amd64. It is the pin contract. It does not run on
+  # pull_request.
+  hub-smoke:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: ${{ fromJSON(needs.plan.outputs.suites) }}
+    env:
+      HUB_CLUSTER: hub
+      SPOKE_CLUSTER: spoke-a
+      NAMESPACE: pds
+      LAB_SPOKE_WORKERS: "4"
+      LIFECYCLE_TIMEOUT: "1200"
+      KIND_VERSION: v0.27.0
+      K8S_IMAGE: kindest/node:v1.32.2
+      SUITE: ${{ matrix.suite }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Two kind clusters plus the platform images exceed the free space on
+      # some hosted runner images.
+      - name: free runner disk
+        run: scripts/free-runner-disk.sh
+
+      # The runner image loads an AppArmor profile for /usr/sbin/mysqld. The
+      # kernel attaches it by path to mysqld inside the kind nodes as well,
+      # where it denies /etc/my.cnf and the server's share files. The
+      # database then starts without its config, never opens the admin port
+      # its probes use, and restarts until the lifecycle times out.
+      - name: unload the runner's mysqld AppArmor profile
+        run: |
+          sudo aa-status | grep -i mysqld || true
+          if [ -f /etc/apparmor.d/usr.sbin.mysqld ]; then
+            sudo apparmor_parser -R /etc/apparmor.d/usr.sbin.mysqld || true
+          fi
+          if sudo aa-status | grep -i mysqld; then
+            echo "a mysqld AppArmor profile is still loaded" >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+          check-latest: true
+          cache: npm
+
+      # The MCP binary's contract tests build and run it.
+      - uses: actions/setup-go@v5
+        if: matrix.suite == 'mcp'
+        with:
+          go-version: "1.26.10"
+          cache-dependency-path: apps/mcp/go.mod
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.17.0
+
+      - name: install kind
+        run: |
+          curl -sSLo /tmp/kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+          sudo install -m 0755 /tmp/kind /usr/local/bin/kind
+          kind version
+
+      # The lab refuses to start without the flux client. Connect installs
+      # Flux on the connected environment from its own pin; this binary is the
+      # one the lab checks for on PATH.
+      - name: install flux
+        run: |
+          curl -fsSL -o /tmp/flux.tar.gz \
+            "https://github.com/fluxcd/flux2/releases/download/v2.9.5/flux_2.9.5_linux_amd64.tar.gz"
+          echo "b853df82adfd7736f580692f9f734473d571606307139f8fd20c2a80dd1ff473  /tmp/flux.tar.gz" \
+            | sha256sum -c --quiet
+          tar -C /tmp -xzf /tmp/flux.tar.gz flux
+          sudo install -m 0755 /tmp/flux /usr/local/bin/flux
+          flux version --client
+
+      - name: npm ci
+        run: npm ci
+
+      # The suite name is the engine. PostgreSQL runs the lifecycle without the
+      # MySQL-only alert and unmodeled-field steps, and includes restore.
+      - name: hub smoke, ${{ matrix.suite }}
+        if: matrix.suite != 'mcp'
+        run: scripts/hub-smoke.sh --engine "${SUITE}"
+
+      - name: hub smoke, lab only
+        if: matrix.suite == 'mcp'
+        run: scripts/hub-smoke.sh --lab-only
+
+      # The lab forwards the hub UI to 127.0.0.1:18080 and seeds organization dev / percona-dev-login.
+      # Its OAuth issuer is that address (adapter.hub.oauthIssuer in values-hub-lab.yaml), while the
+      # hub's public URL stays host.docker.internal for the connected environment, so the binary
+      # uses the loopback address.
+      - name: MCP binary against the hub
+        id: mcp
+        if: matrix.suite == 'mcp'
+        env:
+          PDS_REAL_USERNAME: dev
+          PDS_REAL_PASSWORD: percona-dev-login
+        run: |
+          set -euo pipefail
+          ready=false
+          for _ in $(seq 1 30); do
+            if curl -fsS --max-time 2 -o /dev/null http://127.0.0.1:18080/nginx-health; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "${ready}" != true ]; then
+            echo "the control plane did not answer on 127.0.0.1:18080" >&2
+            exit 1
+          fi
+          cd apps/mcp
+          PDS_REAL_URL=http://127.0.0.1:18080 go test ./contract -count=1 -v
+
+      - name: collect diagnostics
+        if: failure() || cancelled()
+        run: scripts/hub-smoke.sh --dump
+
+      - name: tear the lab down
+        if: always()
+        run: scripts/up.sh --down

@@ -1,0 +1,27 @@
+node_modules/
+dist/
+coverage/
+.env
+bin/
+!apps/mcp/npm/package/bin/
+tmp/
+*.out
+go.work.sum
+adapter/adapter
+.DS_Store
+playwright-report/
+test-results/
+adapter/vendor/
+charts/pds/charts/*.tgz
+charts/pds/tests/template.generated.yaml
+.local/
+
+# Written by apps/mcp/modelcheck
+modelcheck-report-*.md
+modelcheck-transcripts-*/
+
+# Go coverage profile written by scripts/go-coverage.sh
+adapter/cover.out
+
+__pycache__/
+*.pyc

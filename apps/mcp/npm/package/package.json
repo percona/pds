@@ -1,0 +1,27 @@
+{
+  "name": "@gas-lab/pds-mcp",
+  "version": "0.0.0-dev",
+  "description": "Lets AI agents use the Percona Database Service control plane",
+  "mcpName": "io.github.percona/pds-mcp",
+  "license": "Apache-2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/percona/pds.git",
+    "directory": "apps/mcp"
+  },
+  "bin": {
+    "pds-mcp": "bin/pds-mcp.js"
+  },
+  "files": [
+    "bin",
+    "launch.mjs",
+    "platform.mjs"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

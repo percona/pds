@@ -1,0 +1,31 @@
+name: pr
+
+# The repository squash merges, so a pull request title is the commit that
+# lands on main and its body is the only record of how the change was
+# verified. This checks both against AGENTS.md. It also runs on edited, so
+# fixing the title or the body clears it without a new push.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  pr:
+    # Dependabot and the Copilot agent write their own titles and bodies.
+    if: github.event.pull_request.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the pull request lint itself
+        run: bash scripts/check-pr_test.sh
+
+      # Passed through the environment, never interpolated into the script, so
+      # a title or body cannot inject shell.
+      - name: Check this pull request
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: bash scripts/check-pr.sh

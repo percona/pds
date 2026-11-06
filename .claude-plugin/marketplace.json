@@ -1,0 +1,16 @@
+{
+  "name": "percona-pds",
+  "owner": {
+    "name": "Percona"
+  },
+  "plugins": [
+    {
+      "name": "pds",
+      "source": "./plugins/pds",
+      "description": "Create, connect to and look after MySQL and PostgreSQL databases on Percona Database Service from your AI agent."
+    }
+  ],
+  "metadata": {
+    "description": "Plugins for Percona Database Service."
+  }
+}

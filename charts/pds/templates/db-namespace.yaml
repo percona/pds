@@ -1,0 +1,116 @@
+{{- if .Values.stack.enabled }}
+{{- $name := include "pds.fullname" . }}
+{{- $dbns := include "pds.dbNamespace" . }}
+{{- /*
+  Helm injects app.kubernetes.io/managed-by=Helm on every object it owns, so a
+  Namespace in this chart cannot keep managed-by=everest. OpenEverest only
+  reconciles Instances in a namespace labelled everest. This pre-install Job
+  creates that namespace when missing, before PMM and other objects land in
+  it, and is the only writer of the label. Helm does not own the Namespace,
+  so uninstall leaves it (and the PVCs inside it).
+*/}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}-db-namespace
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "4"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded,hook-failed
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}-db-namespace
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "4"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded,hook-failed
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    resourceNames: [{{ $dbns }}]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-db-namespace
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "4"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded,hook-failed
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}-db-namespace
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}-db-namespace
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}-db-namespace
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 120
+  template:
+    metadata:
+      labels:
+        {{- include "pds.labels" . | nindent 8 }}
+        app.kubernetes.io/component: database
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: {{ $name }}-db-namespace
+      containers:
+        - name: ensure
+          image: "{{ .Values.stack.applyImage.repository }}:{{ .Values.stack.applyImage.tag }}"
+          imagePullPolicy: {{ .Values.stack.applyImage.pullPolicy }}
+          env:
+            - name: DB_NAMESPACE
+              value: {{ $dbns | quote }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              kubectl create namespace "${DB_NAMESPACE}" --dry-run=client -o yaml \
+                | kubectl apply -f -
+              kubectl label namespace "${DB_NAMESPACE}" \
+                app.kubernetes.io/managed-by=everest --overwrite
+{{- end }}

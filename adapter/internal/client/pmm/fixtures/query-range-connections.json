@@ -1,0 +1,30 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "matrix",
+    "result": [
+      {
+        "metric": {
+          "__name__": "mysql_global_status_threads_connected",
+          "cluster": "orders-dev",
+          "service_name": "orders-dev-pxc-0"
+        },
+        "values": [
+          [1787655600, "12"],
+          [1787655660, "14"]
+        ]
+      },
+      {
+        "metric": {
+          "__name__": "mysql_global_status_threads_connected",
+          "cluster": "orders-dev",
+          "service_name": "orders-dev-pxc-1"
+        },
+        "values": [
+          [1787655600, "9"],
+          [1787655660, "11"]
+        ]
+      }
+    ]
+  }
+}

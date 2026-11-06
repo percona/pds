@@ -1,0 +1,95 @@
+name: ui
+
+# The filter covers every file that can change the UI result, not just the app
+# tree: the lockfile and the workspace root drive npm ci, the lint and format
+# configs live at the repo root, and a workflow edit has to test itself.
+# push is limited to main so a pull request branch runs once, through
+# pull_request, instead of once per event.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/ui/**"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.base.json"
+      - ".oxlintrc.json"
+      - ".prettierrc"
+      - ".prettierignore"
+      - ".github/workflows/ui.yml"
+  pull_request:
+    paths:
+      - "apps/ui/**"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.base.json"
+      - ".oxlintrc.json"
+      - ".prettierrc"
+      - ".prettierignore"
+      - ".github/workflows/ui.yml"
+  workflow_dispatch:
+
+jobs:
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+          check-latest: true
+          cache: npm
+
+      - run: npm ci
+
+      - name: oxlint
+        run: npm -w @pds/ui run lint:oxlint
+
+      - name: prettier check
+        run: npm -w @pds/ui run lint:prettier
+
+      - name: typecheck
+        run: npm -w @pds/ui run typecheck
+
+      - name: vitest
+        run: npm -w @pds/ui test
+
+      - name: vite build
+        run: npm -w @pds/ui run build
+
+      # Runtime dependencies only, because a dev-only advisory does not ship to
+      # a customer. High and critical fail the build; moderate and low are
+      # reported and triaged.
+      - name: npm audit
+        run: npm audit --omit=dev --audit-level=high
+
+  # Playwright runs as its own job because it needs a browser download, which
+  # is slow and has nothing to do with the unit gates above. The specs stub the
+  # adapter at the network layer, so no backend is needed.
+  ui-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+          check-latest: true
+          cache: npm
+
+      - run: npm ci
+
+      - name: install playwright browsers
+        run: npm exec -w @pds/ui -- playwright install --with-deps chromium
+
+      - name: playwright
+        run: npm -w @pds/ui run e2e
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: apps/ui/playwright-report/
+          retention-days: 7

@@ -1,0 +1,7 @@
+dist
+node_modules
+test-results
+coverage
+*.snap.yaml
+plugins/pds/skills
+plugins/pds/rules

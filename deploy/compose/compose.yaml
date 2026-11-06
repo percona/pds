@@ -1,0 +1,100 @@
+# The hub on a single host: the adapter and the UI, with state in an external
+# PostgreSQL. No OpenEverest, no PMM, no Kubernetes access. Customer environments
+# reach this deployment inbound over /api/internal, so nothing here dials out
+# to an environment and no kubeconfig is needed.
+#
+# Run it from the directory that holds this file:
+#
+#   docker compose --env-file version.env pull
+#   docker compose --env-file version.env up -d
+#
+# version.env carries PDS_IMAGE_TAG and is the only file a deploy rewrites.
+# pds.env carries the configuration and secrets and is owned outside this
+# repository; pds.env.example lists every key it may hold.
+name: pds
+
+# Docker keeps json-file logs forever by default, and every agent heartbeat
+# writes a line to both services. Capped here so the logs cannot fill the disk.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  # The service name is the nginx upstream. nginx/default.conf is a copy of
+  # what the chart renders with ui.landingPage=true, and that file proxies to
+  # http://pds-adapter:8080.
+  pds-adapter:
+    image: ghcr.io/percona/percona-services-adapter:${PDS_IMAGE_TAG:?set PDS_IMAGE_TAG, normally by passing --env-file version.env}
+    restart: unless-stopped
+    env_file:
+      - pds.env
+    environment:
+      # The agent a joining environment installs is the adapter this stack runs,
+      # the same default the chart uses. Set here rather than in pds.env,
+      # which no deploy rewrites, so it follows every release and rollback.
+      HUB_AGENT_IMAGE: ghcr.io/percona/percona-services-adapter:${PDS_IMAGE_TAG:?set PDS_IMAGE_TAG, normally by passing --env-file version.env}
+    logging: *logging
+    # Docker stops a container after 10s by default. The adapter spends up to
+    # ADAPTER_SHUTDOWN_TIMEOUT (15s unless overridden) draining HTTP, so a
+    # shorter grace period SIGKILLs it first. 30s covers that default.
+    stop_grace_period: 30s
+    ports:
+      # Loopback only. A browser reaches the API through the UI proxy on the
+      # same origin; this publish exists so a deploy can poll /readyz, which
+      # is not under /api and so is not proxied.
+      - "127.0.0.1:${PDS_ADAPTER_PORT:-8080}:8080"
+    # The image is distroless and carries no shell, curl or wget, so it can
+    # hold no healthcheck. Readiness is polled from the host instead, which is
+    # what the compose workflow does.
+
+  pds-ui:
+    image: ghcr.io/percona/percona-services-ui:${PDS_IMAGE_TAG:?set PDS_IMAGE_TAG, normally by passing --env-file version.env}
+    restart: unless-stopped
+    logging: *logging
+    # Waits for the container to start, not for it to be ready. That is all
+    # this needs: nginx resolves its upstream name once at startup, and the
+    # name exists as soon as the container does.
+    depends_on:
+      - pds-adapter
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      # Plain HTTP. TLS is terminated by whatever fronts this host. The port is
+      # overridable so the stack can be run on a workstation that already has
+      # something on 80; the host serving the public origin leaves it at 80.
+      - "${PDS_HTTP_PORT:-80}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/nginx-health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Off by default. `--profile local-db` brings up a throwaway database so the
+  # stack can be run without RDS, which is how the compose workflow verifies it
+  # and how to try it on a workstation. Point DATABASE_URL at it in pds.env:
+  # postgres://pds:pds@postgres:5432/pds?sslmode=disable
+  #
+  # There is deliberately no depends_on from the adapter: it opens its
+  # connection in the background and retries with backoff, serving HTTP and
+  # reporting /readyz red until the schema reconciles.
+  postgres:
+    profiles: ["local-db"]
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pds
+      POSTGRES_PASSWORD: pds
+      POSTGRES_DB: pds
+    volumes:
+      - local-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pds"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  local-db:
