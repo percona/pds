@@ -1,6 +1,7 @@
 package oauth_test
 
 import (
+	"context"
 	"errors"
 	"net"
 	"net/http"
@@ -173,12 +174,17 @@ func login(t *testing.T, cp *fakecp.Server, b *browser, scopes ...string) (oauth
 func TestLoginSendsPKCEStateAndTheBuiltInClientAndStoresNothingItShouldNot(t *testing.T) {
 	cp := fakecp.New(t)
 	b := newBrowser()
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		address := <-b.opened
-		if status, err := fakecp.Browse(t.Context(), address); err != nil || status != http.StatusOK {
+		// Login returns once the token exchange is done, which can be before the browser has
+		// read the callback page, so the browser outlives the test's context and the test waits.
+		if status, err := fakecp.Browse(context.WithoutCancel(t.Context()), address); err != nil || status != http.StatusOK {
 			t.Errorf("the callback answered %d, %v", status, err)
 		}
 	}()
+	t.Cleanup(func() { <-done })
 
 	tokens, err := login(t, cp, b)
 	if err != nil {

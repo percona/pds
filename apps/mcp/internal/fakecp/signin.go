@@ -1,6 +1,7 @@
 package fakecp
 
 import (
+	"context"
 	"net/http"
 	"testing"
 	"time"
@@ -19,11 +20,16 @@ func SignIn(t testing.TB, cp *Server, store *tokenstore.Store, scopes ...string)
 		t.Fatal(err)
 	}
 	opened := make(chan string, 1)
+	done := make(chan struct{})
 	go func() {
-		if status, err := Browse(t.Context(), <-opened); err != nil || status != http.StatusOK {
+		defer close(done)
+		// Login returns before the browser has necessarily read the callback page, so the
+		// browser outlives the test's context and the test waits for it.
+		if status, err := Browse(context.WithoutCancel(t.Context()), <-opened); err != nil || status != http.StatusOK {
 			t.Errorf("browse: %d %v", status, err)
 		}
 	}()
+	t.Cleanup(func() { <-done })
 	tokens, err := oauth.Login(t.Context(), oauth.LoginOptions{
 		Server: server, HTTP: hc, Scopes: scopes, Timeout: 20 * time.Second,
 		Open: func(address string) error { opened <- address; return nil },
