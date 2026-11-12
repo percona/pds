@@ -3,7 +3,7 @@ version: 2
 
 # The release is a GitHub Release tagged mcp-v1.2.3, which GoReleaser does not read as a
 # version, so the workflow passes the version in PDS_MCP_VERSION and the names below use it.
-# GoReleaser builds and signs; publish-mcp.yml attaches the files and publishes to npm.
+# GoReleaser builds and signs; the release pipeline attaches the files and publishes to npm.
 project_name: pds-mcp
 
 dist: dist/goreleaser

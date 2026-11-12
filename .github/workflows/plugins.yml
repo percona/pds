@@ -28,7 +28,7 @@ on:
       - ".github/workflows/plugins.yml"
 
   # The release pull request is opened with the built-in token, which starts no pull_request
-  # workflow, so the release workflow starts this one on its branch.
+  # workflow, so the release pipeline starts this one on its branch.
   workflow_dispatch:
 
 permissions:
