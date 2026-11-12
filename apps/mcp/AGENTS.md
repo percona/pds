@@ -139,29 +139,18 @@ is its usage text, and `--list` prints the cases without a control plane.
 
 ## Publishing
 
-`.github/workflows/publish-mcp.yml` publishes from a GitHub Release tagged `mcp-v1.2.3`; the control
-plane's `v1.2.3` releases do not touch it, and `publish.yml` skips `mcp-v` tags. A tag with a
-prerelease part (`mcp-v1.2.3-rc.1`) goes to the `next` dist-tag and never moves `latest`. Bad versions
-are deprecated, never unpublished.
+A GitHub Release tagged `mcp-v1.2.3` is published by Percona's release pipeline, not by a workflow
+here: `publish.yml` sends it the tag and the version, and it checks out this repository at the tag.
+The control plane's `v1.2.3` releases do not start it. A tag with a prerelease part
+(`mcp-v1.2.3-rc.1`) goes to the `next` dist-tag and never moves `latest`. Bad versions are
+deprecated, never unpublished.
 
-1. `build` runs the Go gates, then GoReleaser builds the four binaries and signs the checksum file
-   with keyless cosign. The binaries, checksums, signature and certificate are attached to the
-   release, and the one npm tarball is packed once. It carries the four binaries, each in
-   `bin/<os>-<cpu>/`, and a launcher that runs the one for the machine.
-2. `install` installs that tarball and runs `npx pds-mcp version` on a macOS and a Linux runner.
-3. `publish` waits for a reviewer of the `npm-publish` environment, then publishes
-   `@gas-lab/pds-mcp` with npm trusted publishing. There is no npm token. npm adds provenance
-   when the repository is public; from a private one the workflow leaves `--provenance` off, because
-   npm refuses it.
-4. `verify` runs `npx @gas-lab/pds-mcp@<version> version` from the registry on both systems, and
-   `npm audit signatures` when the repository is public.
-5. `registry` runs after `publish`, in a public repository only, and lists the server in the MCP
-   Registry. It stamps `apps/mcp/server.json` with the release version through
-   `node npm/release.mjs server-json`, runs `mcp-publisher validate`, signs in with
-   `mcp-publisher login github-oidc` and publishes. The registry reads the published package to
-   check that its `mcpName` is the listing's name, which is why it runs after the npm publish. `verify` does not wait for it: a registry failure leaves npm published and is fixed by re-running that one job, which also covers the registry reading the package before npm serves it.
-   There is no token. `npm/install-publisher.sh` installs the pinned `mcp-publisher` after
-   verifying its signature.
+What the pipeline runs lives here: `.goreleaser.yaml`, the scripts in `npm/` (`release.mjs`,
+`pack.sh`, `check-install.sh`, `install-publisher.sh`), `server.json` and the package's
+`package.json`. The manifest's `repository.url` names the repository that publishes, because npm
+trusted publishing accepts a publish only from it. GoReleaser does not read the `mcp-v` prefix as a
+version, so the pipeline sets `GORELEASER_CURRENT_TAG=v<version>` and passes `--skip=validate`, and it
+installs cosign 2, because the signing flags in `.goreleaser.yaml` are the cosign 2 ones.
 
 The listing is `apps/mcp/server.json`: one entry with the `@gas-lab/pds-mcp` package (stdio) and a
 remote at `https://{host}/mcp` (streamable HTTP), whose `host` variable defaults to
@@ -175,10 +164,6 @@ rerun the tests. The committed version, `0.0.0-dev`, is a placeholder like the o
 `mcp` workflow runs it in `release-dry-run` on every pull request, against the public registry's
 validation service.
 
-5. `plugin` runs for a stable release only, after `verify`: it opens a pull request that moves the
-   `pds` plugin's version and its pinned `@gas-lab/pds-mcp` to the release. See
-   [plugins/AGENTS.md](../../plugins/AGENTS.md).
-
 The `mcp` workflow runs the same build and pack without signing or publishing on every pull request
 (`release-dry-run`), on macOS and Linux. To run it locally, install GoReleaser v2.12.0 and:
 
@@ -188,26 +173,6 @@ PDS_MCP_VERSION=1.2.3-rc.1 goreleaser release --snapshot --clean --skip=sign
 npm/pack.sh mcp-v1.2.3-rc.1 dist/npm-tarballs
 npm/check-install.sh dist/npm-tarballs 1.2.3-rc.1
 ```
-
-It cannot publish until a person has arranged, once:
-
-- Publish rights on the `@gas-lab` npm scope, confirmed for `@gas-lab/pds-mcp`, and its trusted
-  publisher on npmjs.com naming this repository, the workflow file `publish-mcp.yml` and the
-  environment `npm-publish`. The package already exists, the TypeScript package this release
-  replaces, so its trusted publisher is edited rather than created. No other package is published.
-- The GitHub environment `npm-publish` with a required reviewer, self-review off, and deployment
-  limited to release tags.
-- Code owners for the workflow and this package in `.github/CODEOWNERS`.
-- For the listing: the repository public (the registry lists public servers only, and the `registry`
-  job is skipped while it is private), and the published `@gas-lab/pds-mcp` carrying `mcpName`.
-  The name `io.github.percona/pds-mcp` is in the namespace of the `percona` GitHub organization. The
-  workflow signs in through GitHub OIDC, which the registry accepts for the organization that owns
-  the repository, so there is nothing to verify by hand and no DNS record or token to keep. A
-  prerelease such as `mcp-v1.2.3-rc.1` is listed too, at its own version. Publishing a version
-  twice fails, so a rerun after a success reports that the version exists.
-
-Actions in that workflow are pinned by commit hash: bump the hash and its version comment together.
-GoReleaser and cosign are pinned by version.
 
 ## Gates
 

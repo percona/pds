@@ -137,6 +137,14 @@ describe("the package", () => {
     expect(manifest.bin).toEqual({ "pds-mcp": "bin/pds-mcp.js" });
   });
 
+  // npm trusted publishing accepts a publish only from the repository the manifest names.
+  it("names the repository that publishes it", () => {
+    const manifest = readManifest(buildPackage(distOptions()).dir);
+    expect(manifest.repository.url, "repository url").toBe(
+      "git+https://github.com/percona/pds-ops.git",
+    );
+  });
+
   it("ships the launcher and the licence", () => {
     const { dir } = buildPackage(distOptions());
     for (const path of ["bin/pds-mcp.js", "launch.mjs", "platform.mjs", "LICENSE"]) {

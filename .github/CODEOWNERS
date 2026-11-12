@@ -1,5 +1,4 @@
-# The MCP package publishes to npm, so changes to it and to its release workflow need review
-# from an owner.
+# The MCP package publishes to npm, so changes to it need review from an owner.
 /apps/mcp/ @maxbube
-/.github/workflows/publish-mcp.yml @maxbube
+/.github/workflows/publish.yml @maxbube
 /.github/CODEOWNERS @maxbube

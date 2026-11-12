@@ -47,27 +47,19 @@ What a person sees is in [plugins/pds/README.md](pds/README.md).
 ## Release
 
 The plugin ships with each stable `@gas-lab/pds-mcp` release, so the plugin and the data server it runs
-never drift. The `plugin` job of `.github/workflows/publish-mcp.yml` runs after `verify`:
-
-1. `node plugins/release.mjs stamp mcp-v<version>` waits until npm serves
-   `@gas-lab/pds-mcp@<version>`, then writes that version into both manifests and that exact
-   `@gas-lab/pds-mcp@<version>` into both MCP files, and runs the plugin checks on the result. It uses
-   `versionFromTag` and `distTag` from `apps/mcp/npm/release.mjs`.
-2. It opens a pull request `plugins/release-<version>` against the default branch with the built-in
-   token and starts the `plugins` workflow on that branch, because a pull request opened with the built-in
-   token starts no `pull_request` workflow. Nothing merges it but a person, and nothing pushes to `main`.
-
-A prerelease (`mcp-v1.2.3-rc.1`) changes nothing: a client keeps the plugin until its version changes, and the
-stable plugin must not point at a build npm serves only under `next`. A release older than the plugin's
-version fails the job: the plugin is ahead because its own files changed, so cut a higher release.
-Re-running the job after the branch exists does nothing; close the pull request and delete the branch first.
+never drift. A published `mcp-v` release is published by Percona's release pipeline, which runs
+`node plugins/release.mjs stamp mcp-v<version>` and opens a pull request `plugins/release-<version>` that moves
+the version in both manifests and the exact `@gas-lab/pds-mcp@<version>` in both MCP files. Nothing merges it but
+a person, and nothing pushes to `main`. A prerelease (`mcp-v1.2.3-rc.1`) changes nothing: a client keeps the
+plugin until its version changes, and the stable plugin must not point at a build npm serves only under `next`. A
+release older than the plugin's version fails the stamp: the plugin is ahead because its own files changed, so cut a
+higher release. Re-running after the branch exists does nothing; close the pull request and delete the branch first.
 
 The `plugins` workflow also runs `node plugins/release.mjs published <base>` on a pull request, which fails
 when the pinned version differs from the base's and npm does not serve it. A rename of the package at the same version does not count as a change.
 
 Once, by a person:
 
-- Settings, Actions, General: allow GitHub Actions to create pull requests.
 - Submit the plugin to the Cursor Marketplace at cursor.com/marketplace/publish, and record the date and the
   review result in the pull request. Cursor reviews each new version by hand and does not update from this
   repository, so submit a new version after a release PR merges. That review never blocks an npm release.

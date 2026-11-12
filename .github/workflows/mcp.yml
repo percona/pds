@@ -107,7 +107,7 @@ jobs:
 
   # The release path without the publish: GoReleaser builds every target, the one npm package
   # is laid out and packed, then installed into a clean directory and run through npx on macOS
-  # and Linux. Signing needs the release's identity, so it runs only in publish-mcp.
+  # and Linux. Signing needs the release's identity, so it runs only in the release pipeline.
   release-dry-run:
     strategy:
       fail-fast: false

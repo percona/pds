@@ -1,6 +1,7 @@
 name: publish
 
-# A published GitHub Release builds the tag it names. Pushes to main do not
+# A published GitHub Release builds the tag it names, except an mcp-v tag, which
+# only tells the MCP release pipeline that it exists. Pushes to main do not
 # publish images or the chart. The workflow file is read from the default
 # branch, so checkout the release tag rather than that branch tip.
 on:
@@ -14,7 +15,7 @@ permissions:
 
 jobs:
   publish:
-    # An mcp-v tag releases the MCP server alone; publish-mcp.yml handles it.
+    # An mcp-v tag releases the MCP server alone; dispatch-mcp hands it to the release pipeline.
     if: ${{ !startsWith(github.event.release.tag_name, 'mcp-v') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -106,4 +107,32 @@ jobs:
           set -euo pipefail
           jq -n --arg tag "${TAG}" --arg version "${VERSION}" \
             '{event_type: "release-published", client_payload: {tag: $tag, version: $version}}' |
+            gh api --method POST repos/percona/pds-ops/dispatches --input -
+
+  # The MCP server and the pds plugin are published by the pipeline in percona/pds-ops, which
+  # checks out this repository at the tag. This job only tells it that a release exists: the tag
+  # is checked here so a malformed one never starts a publish. OPS_DISPATCH_TOKEN is the token
+  # the deploy dispatch above uses. The ops workflow listens for event type mcp-release-published
+  # and reads client_payload.tag and client_payload.version.
+  dispatch-mcp:
+    if: ${{ startsWith(github.event.release.tag_name, 'mcp-v') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      # No checkout: the token below never runs next to code from the tag.
+      - name: dispatch the MCP release to ops
+        env:
+          GH_TOKEN: ${{ secrets.OPS_DISPATCH_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#mcp-v}"
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "release tag ${TAG} is not mcp-v followed by a SemVer version" >&2
+            exit 1
+          fi
+          jq -n --arg tag "${TAG}" --arg version "${version}" \
+            '{event_type: "mcp-release-published", client_payload: {tag: $tag, version: $version}}' |
             gh api --method POST repos/percona/pds-ops/dispatches --input -

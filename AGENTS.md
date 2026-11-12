@@ -186,8 +186,7 @@ Scripts: `shellcheck --severity=warning` on what you touched, and its
 | `landing` | Landing page changes | oxlint, Prettier, typecheck, Vitest, build, `npm audit` |
 | `naming`, `pr` | Every PR | Dead product names, and a connected environment called a cluster; the PR title and body |
 | `smoke` | Nightly, dispatch | `hub-smoke`, one parallel job per suite, each with its own lab: `mysql` and `postgresql` run the lifecycle, `mcp` runs the MCP binary's contract tests against a lab with a connected environment. It never gates a PR |
-| `publish` | A published GitHub Release | Images (the UI image carries the landing page) and chart, then a `repository_dispatch` of `release-published` to the deploy repository (secret `OPS_DISPATCH_TOKEN`) |
-| `publish-mcp` | A published GitHub Release tagged `mcp-v` | The Go module's gates, GoReleaser with a cosign signature, a clean install on macOS and Linux, then the npm publish of the one package `@gas-lab/pds-mcp` by trusted publishing, behind the `npm-publish` environment, then a pull request that moves the `pds` plugin to the release |
+| `publish` | A published GitHub Release | Images (the UI image carries the landing page) and chart, then a `repository_dispatch` of `release-published` to the deploy repository (secret `OPS_DISPATCH_TOKEN`). A release tagged `mcp-v` builds nothing here: it sends `mcp-release-published` instead, and Percona's release pipeline publishes the MCP server and the `pds` plugin |
 
 `hub-smoke` runs in `smoke` on the nightly schedule and on dispatch, as three
 suites in parallel. Each brings up its own lab, a hub and one connected
