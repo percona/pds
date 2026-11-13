@@ -70,7 +70,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
           cache-dependency-path: apps/mcp/go.mod
 
       - name: gofmt
@@ -124,7 +124,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
           cache-dependency-path: apps/mcp/go.mod
 
       - uses: actions/setup-node@v4
