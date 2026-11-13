@@ -95,7 +95,7 @@ docs/             Architecture, deployment and the compatibility contract
 
 | To | You need |
 |----|----------|
-| Develop the UI or the adapter | Go 1.26.10+, Node.js 22.23.4, 24.22.1 or 26.12.1 or later, Docker |
+| Develop the UI or the adapter | Go 1.26.11+, Node.js 22.23.4, 24.22.1 or 26.12.1 or later, Docker |
 | Run the lab on a laptop | Docker with about 8 GB of memory, kind 0.27+, kubectl, Helm 3.17+ or 4, flux, and Node for the first image build |
 | Install a hub on a cluster | Kubernetes 1.27+ and a default StorageClass |
 | Join an environment | `kubectl` and `helm`, plus `aws` and `eksctl` unless you pass `--local` |
