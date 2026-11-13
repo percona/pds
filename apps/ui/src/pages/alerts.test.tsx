@@ -163,7 +163,17 @@ describe("AlertsPage", () => {
   });
 
   it("shows when each row was last read", async () => {
-    stubAlerts(twoEnvironments);
+    // A fixed date drifts past the 30 day cutoff, where the age becomes a date.
+    const readAt = new Date(Date.now() - 5 * 60_000).toISOString();
+    stubAlerts(
+      createMockAlertReport({
+        alerts: [critical, warning],
+        environments: [
+          createMockAlertEnvironment({ name: "spoke-a", total: 1, shown: 1, readAt }),
+          createMockAlertEnvironment({ name: "spoke-b", total: 1, shown: 1, readAt }),
+        ],
+      }),
+    );
 
     renderPage();
 
