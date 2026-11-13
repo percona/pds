@@ -76,6 +76,96 @@ state and design decisions in depth.
 [docs/mcp-server-tool-catalog.md](docs/mcp-server-tool-catalog.md) describe the
 MCP server.
 
+## Quick start on local Kubernetes
+
+The lab is a full PDS on one machine: a hub and one connected environment, each
+in its own kind cluster.
+
+| Piece | What it is |
+|-------|------------|
+| kind cluster `hub` | The UI, the adapter and the adapter database |
+| kind cluster `spoke-a` | One connected environment, joined with the command a customer runs plus `--local`, so nothing is created in AWS |
+| Gitea, in Docker on port 3000 | Serves the Git tree the hub writes and Flux reads |
+| `cloud-provider-kind`, in Docker | Gives each database's `LoadBalancer` Service an address. Without one a database never reaches ready |
+| A port-forward on `127.0.0.1:18080` | The UI |
+
+### 1. Check what you need
+
+- Docker with about 8 GB of memory given to the daemon. The script refuses to
+  start below that.
+- kind 0.27+, kubectl, Helm 3.17+ or 4, flux, git, curl and python3.
+- Node.js and npm, for the first image build.
+- Ports 18080 and 3000 free, or `UI_PORT` and `GITEA_PORT` set to others.
+
+### 2. Bring it up
+
+From the repository root:
+
+```bash
+npm install
+scripts/up.sh
+```
+
+The first run builds the two images, pulls the platform images and takes a
+while. It ends with "Percona Database Service lab is running." and the
+sign-in. Later runs can reuse the images:
+
+```bash
+scripts/up.sh --no-build
+```
+
+### 3. Sign in
+
+Open http://127.0.0.1:18080/app/ and sign in as `dev` with `percona-dev-login`.
+Those credentials are throwaway: anyone who can reach the UI can sign in with
+them. `BOOTSTRAP_ORGANIZATION` and `BOOTSTRAP_PASSWORD` (at least 12
+characters) change them.
+
+### 4. Check it
+
+Environments lists `spoke-a` as connected. The same from a terminal:
+
+```bash
+kubectl --context kind-hub -n everest-system get pods
+kubectl --context kind-spoke-a -n everest-system rollout status deploy/pds-adapter
+kubectl --context kind-spoke-a -n flux-system get kustomizations
+```
+
+The `instances` Kustomization is Ready. `platform`, which installs monitoring,
+exists only on an amd64 machine.
+
+### 5. Create a database
+
+Create a database on `spoke-a` with the Dev profile, and watch its pods:
+
+```bash
+kubectl --context kind-spoke-a -n pds get pods -w
+```
+
+Staging and Prod need three schedulable nodes, and the lab has one.
+`LAB_SPOKE_WORKERS=4 scripts/up.sh` adds workers when it creates `spoke-a`, and
+needs more memory.
+
+### 6. Tear it down
+
+```bash
+scripts/up.sh --down
+```
+
+It deletes both kind clusters, the Gitea container and the port-forward.
+
+### What the lab leaves out
+
+- **Monitoring** on Apple Silicon, because that image is amd64 only. The script
+  says so and continues, and metrics stay pending.
+- **A backup bucket.** Backups go to the MinIO the chart installs.
+- **A Chat key.** Paste an Anthropic or Cursor key under Connections.
+- **Support cases**, unless `SN_API_KEY` and `SN_URL` are set before
+  `scripts/up.sh`.
+
+[docs/deployment.md](docs/deployment.md#laptop) has the lab's other settings
+and what to do when the UI tab goes blank.
+
 ## Repository layout
 
 ```text
@@ -96,7 +186,7 @@ docs/             Architecture, deployment and the compatibility contract
 | To | You need |
 |----|----------|
 | Develop the UI or the adapter | Go 1.26.11+, Node.js 22.23.4, 24.22.1 or 26.12.1 or later, Docker |
-| Run the lab on a laptop | Docker with about 8 GB of memory, kind 0.27+, kubectl, Helm 3.17+ or 4, flux, and Node for the first image build |
+| Run the lab on a laptop | See [Quick start on local Kubernetes](#quick-start-on-local-kubernetes) |
 | Install a hub on a cluster | Kubernetes 1.27+ and a default StorageClass |
 | Join an environment | `kubectl` and `helm`, plus `aws` and `eksctl` unless you pass `--local` |
 
@@ -109,7 +199,7 @@ load balancer per database.
 
 The control plane runs as a hub. The HTTP process refuses to start without
 `HUB_GIT_DIR` (or a GitHub org and token) and `HUB_PUBLIC_URL`. Database
-screens need the lab: a database id is `<environment>/<namespace>.<name>`, and
+screens need [the lab](#quick-start-on-local-kubernetes): a database id is `<environment>/<namespace>.<name>`, and
 this loop has no environment that runs databases. Sign-in, Environments, and
 Connect an environment work here. The environment list stays empty until one is
 connected.
@@ -153,25 +243,6 @@ npm run dev           # http://localhost:5174
 ```
 
 Sign in on that page goes to the console at `/app/`.
-
-### Lab on a laptop
-
-```bash
-scripts/up.sh
-scripts/up.sh --no-build    # reuse images already loaded into kind
-scripts/up.sh --down        # delete both kind clusters, Gitea, and the port-forward
-```
-
-A kind hub and one connected environment, joined through Connect with `--local`.
-The hub runs the UI, the adapter, and its database. Git is a host directory
-served by Gitea. Open http://127.0.0.1:18080/app/ and sign in as `dev` with
-`percona-dev-login`. Those credentials are throwaway: anyone who can reach the
-UI can sign in with them.
-
-Docker needs about 8 GB of memory. The script refuses to start below that.
-On Apple Silicon the connected environment runs without monitoring, and the script
-says so and continues. The first run pulls platform images and takes a while.
-`--down` deletes both kind clusters, the Gitea container, and the port-forward.
 
 ### A self-hosted hub
 
