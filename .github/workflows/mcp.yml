@@ -77,7 +77,7 @@ jobs:
         run: test -z "$(gofmt -l .)"
 
       # The action major has to track the golangci-lint major, as in the adapter workflow.
-      - uses: golangci/golangci-lint-action@v9
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.13
           working-directory: apps/mcp
