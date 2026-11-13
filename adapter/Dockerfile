@@ -1,7 +1,7 @@
 # Adapter image. Build from the repository root so the Connect chart can be
 # packaged into the binary before go build:
 #   docker build -f adapter/Dockerfile -t ghcr.io/percona/percona-services-adapter:dev .
-FROM golang:1.26.11-alpine AS build
+FROM golang:1.26.10-alpine AS build
 
 WORKDIR /src
 

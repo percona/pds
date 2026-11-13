@@ -1,6 +1,6 @@
 module github.com/percona/pds/apps/mcp
 
-go 1.26.11
+go 1.26.10
 
 require (
 	github.com/go-sql-driver/mysql v1.10.0
