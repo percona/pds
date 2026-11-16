@@ -3,7 +3,8 @@ import { consoleUrl, productName, sectionIds } from "@/lib/site";
 import { ThemeToggle } from "./theme-toggle";
 
 const navItems = [
-  { href: `#${sectionIds.howItWorks}`, label: "How it works" },
+  { href: `#${sectionIds.tryIt}`, label: "Try it" },
+  { href: `#${sectionIds.proof}`, label: "Built on" },
   { href: `#${sectionIds.operations}`, label: "Operations" },
   { href: `#${sectionIds.pricing}`, label: "Pricing" },
   { href: `#${sectionIds.faq}`, label: "FAQ" },

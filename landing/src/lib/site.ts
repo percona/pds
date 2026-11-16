@@ -9,8 +9,9 @@ export const consoleUrl = import.meta.env.VITE_CONSOLE_URL || "/app/";
 
 /** In-page anchors, shared by the header nav and the sections they point at. */
 export const sectionIds = {
-  howItWorks: "how-it-works",
+  tryIt: "try-it",
   operations: "operations",
+  proof: "proof",
   pricing: "pricing",
   faq: "faq",
 } as const;

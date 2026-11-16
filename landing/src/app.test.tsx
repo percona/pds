@@ -8,8 +8,8 @@ describe("App", () => {
 
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     for (const name of [
-      "How it works",
       "Day two, handled",
+      "Built on open source",
       "Plans built around your own infrastructure",
       "Questions",
     ]) {
@@ -47,7 +47,7 @@ describe("App", () => {
     const outsidePricing = (container.textContent ?? "").replace(pricing?.textContent ?? "", "");
 
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("MySQL and PostgreSQL");
-    expect(outsidePricing).toContain("Percona Operators for MySQL and PostgreSQL");
+    expect(outsidePricing).toContain("MySQL or PostgreSQL on prod-us-west-2");
     expect(outsidePricing).toContain("PostgreSQL");
     expect(outsidePricing).not.toMatch(/MongoDB/);
   });
@@ -68,20 +68,17 @@ describe("App", () => {
     const { container } = render(<App />);
     const text = container.textContent ?? "";
 
-    expect(text).toContain("Environments");
     expect(text).toContain("Back to environments");
     expect(text).toContain("pds.percona.com/app/environments/prod-us-west-2");
     expect(text).toContain("What happens if I disconnect an environment?");
-    expect(text).toContain("Percona Operators for MySQL and PostgreSQL");
-    expect(text).toContain("Alpha");
+    expect(text).toContain("aws, eksctl, kubectl, helm, and python3");
+    expect(text).toContain("Experimental");
     expect(text).toContain("is in alpha");
     expect(text).toContain("What does alpha mean for my databases?");
     expect(text).toContain("There is no backward compatibility yet");
     expect(text).toContain("recreate your setup from scratch");
     expect(text).not.toMatch(/\bpreview\b/i);
     expect(text).toContain("your database context");
-    expect(text).toContain("with the context attached");
-    expect(text).toContain("From EKS cluster to database");
     expect(text).not.toContain("PMM");
     expect(text).not.toContain("example.com");
     expect(text).not.toContain("Back to Clusters");
@@ -90,12 +87,12 @@ describe("App", () => {
     expect(text).not.toMatch(/private alpha|by invitation|single-use invite|request access/i);
   });
 
-  it("offers Amazon EKS and an existing Kubernetes cluster, and no other place to run", () => {
+  it("offers Amazon EKS and no other place to run, existing Kubernetes clusters included", () => {
     const { container } = render(<App />);
     const text = container.textContent ?? "";
 
     expect(text).toContain("Amazon EKS");
-    expect(text).toContain("Kubernetes cluster you already have");
+    expect(text).not.toMatch(/already have|already run|--local|join a Kubernetes/i);
     expect(text).not.toMatch(
       /\b(GKE|AKS|Azure|Google Cloud|kind)\b|on premises|hybrid|data center/i,
     );
@@ -109,5 +106,13 @@ describe("App", () => {
     expect(text).toContain("AI agents");
     expect(text).not.toMatch(/\blogs?\b|investigate|recommendation|platform status/i);
     expect(text).not.toMatch(/roadmap|where we're going/i);
+  });
+
+  it("puts the AI agents highlight above pricing", () => {
+    const { container } = render(<App />);
+
+    const agents = container.querySelector("#ai-agents")!;
+    const pricing = container.querySelector("#pricing")!;
+    expect(agents.compareDocumentPosition(pricing) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
