@@ -1,0 +1,50 @@
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  annotations:
+    openeverest.io/instance-preset: pds-mysql-dev
+  labels:
+    app.kubernetes.io/managed-by: pds
+    pds.percona.com/engine: mysql
+    pds.percona.com/environment: spoke-a
+    pds.percona.com/profile: dev
+  name: poc-dev
+  namespace: pds
+spec:
+  backup:
+    classRef:
+      name: pxc
+    enabled: true
+    storages:
+    - storageRef:
+        name: minio
+  components:
+    engine:
+      replicas: 1
+      resources:
+        limits:
+          cpu: "2"
+          memory: 4Gi
+      storage:
+        size: 20Gi
+    monitoring:
+      parameters:
+        monitoringConfigName: pmm
+      type: pmm
+    proxy:
+      replicas: 1
+      service:
+        annotations:
+          service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+          service.beta.kubernetes.io/aws-load-balancer-scheme: internal
+        loadBalancerService:
+          sourceRanges:
+          - 10.0.0.0/8
+          - 172.16.0.0/12
+          - 192.168.0.0/16
+        serviceType: LoadBalancer
+      type: haproxy
+  providerRef:
+    name: percona-xtradb-cluster
+  topology:
+    type: cluster
