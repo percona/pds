@@ -3,6 +3,16 @@ import { consoleUrl, productName } from "@/lib/site";
 export function SiteFooter() {
   return (
     <footer className="border-t border-border">
+      <div className="mx-auto max-w-6xl space-y-1 px-6 pt-10 text-xs text-muted-foreground">
+        <p className="font-medium text-foreground">
+          Percona Database Service is an experimental project.
+        </p>
+        <p>
+          PDS is not a generally available product, is not covered by Percona support commitments,
+          and may change or be discontinued.
+        </p>
+        <p>Please use it for testing and evaluation, not production workloads.</p>
+      </div>
       <div className="mx-auto flex max-w-6xl flex-col gap-6 px-6 py-10 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
           <img src="/percona-mark.svg" alt="" className="size-5" />

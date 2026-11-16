@@ -9,7 +9,7 @@ describe("App", () => {
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     for (const name of [
       "Day two, handled",
-      "Built on open source",
+      "No lock-in",
       "Plans built around your own infrastructure",
       "Questions",
     ]) {
@@ -79,7 +79,6 @@ describe("App", () => {
     expect(text).toContain("recreate your setup from scratch");
     expect(text).not.toMatch(/\bpreview\b/i);
     expect(text).toContain("your database context");
-    expect(text).not.toContain("PMM");
     expect(text).not.toContain("example.com");
     expect(text).not.toContain("Back to Clusters");
     expect(text).not.toContain("disconnect a cluster");

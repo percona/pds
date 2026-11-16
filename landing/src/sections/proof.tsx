@@ -35,6 +35,9 @@ const facts = [
   "+3,000 consulting and support customers",
 ];
 
+const textLink =
+  "rounded-sm font-medium text-foreground underline underline-offset-4 hover:text-primary";
+
 export function Proof() {
   return (
     <section
@@ -43,9 +46,32 @@ export function Proof() {
       className="border-y border-border bg-muted/40 px-6 py-14 sm:py-16"
     >
       <div className="mx-auto max-w-6xl space-y-8">
-        <SectionHeading id="proof-title" title="Built on open source" />
+        <SectionHeading id="proof-title" title="No lock-in" />
 
-        <ul className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-3 text-base">
+          <p className="font-medium">Built on open source:</p>
+          <ul className="list-disc space-y-2 pl-6 text-muted-foreground">
+            <li>
+              <a href="https://www.percona.com/cloud-native/" rel="noreferrer" className={textLink}>
+                Percona Operators
+              </a>{" "}
+              for MySQL and PostgreSQL, and{" "}
+              <a href="https://www.percona.com/monitoring/" rel="noreferrer" className={textLink}>
+                PMM
+              </a>{" "}
+              for monitoring.
+            </li>
+            <li>
+              <a href="http://openeverest.io" rel="noreferrer" className={textLink}>
+                OpenEverest
+              </a>
+              , the open-source database management platform that provides the underlying
+              Kubernetes-based database provisioning and management capabilities.
+            </li>
+          </ul>
+        </div>
+
+        <ul aria-label="Open source projects" className="grid gap-4 md:grid-cols-2">
           {integrations.map((item) => (
             <li key={item.name} className={cn(item.lead && "md:col-span-2")}>
               <a
@@ -120,9 +146,6 @@ export function Proof() {
             <h3 className="text-2xl font-semibold tracking-tight text-balance">
               Let an AI agent work on your databases
             </h3>
-            <p className="text-base text-muted-foreground">
-              An agent can read your databases and, if you allow it, change them.
-            </p>
           </div>
           <figure className="overflow-hidden rounded-lg border border-border bg-muted/40">
             <figcaption className="sr-only">

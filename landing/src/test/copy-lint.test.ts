@@ -67,7 +67,9 @@ describe("copy lint", () => {
   // text only, so a comment, an import, an identifier or a route can say them.
   it("names no component the customer is not told about", () => {
     const offenders = visibleSources().flatMap(({ file, texts }) =>
-      bannedNameHits(texts).map((found) => ({ file, found })),
+      bannedNameHits(texts)
+        .filter((found) => found !== "PMM")
+        .map((found) => ({ file, found })),
     );
 
     expect(offenders).toEqual([]);
@@ -120,7 +122,20 @@ describe("copy lint", () => {
     const text = container.textContent ?? "";
 
     expect(bareClusterHits([text])).toEqual([]);
-    expect(bannedNameHits([text])).toEqual([]);
+    expect(bannedNameHits([text]).filter((found) => found !== "PMM")).toEqual([]);
+  });
+
+  // The landing page may name PMM once, as the open source monitoring project in
+  // the Built on list. Nowhere else may it.
+  it("names PMM only as the linked monitoring project", () => {
+    const { container } = render(createElement(App));
+    const named = [...container.querySelectorAll("a")].filter((link) =>
+      /\bPMM\b/.test(link.textContent ?? ""),
+    );
+
+    expect(named).toHaveLength(1);
+    expect(named[0]).toHaveAttribute("href", "https://www.percona.com/monitoring/");
+    expect((container.textContent ?? "").match(/\bPMM\b/g)).toHaveLength(1);
   });
 });
 

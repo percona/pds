@@ -117,8 +117,8 @@ export function Hero() {
                 )}
               </div>
               <p className="text-sm text-muted-foreground">
-                Run this on a machine with aws, eksctl, kubectl, helm, and python3. It asks which
-                AWS region to use.
+                Needs aws, eksctl, kubectl, helm, and python3 on your machine. It asks for an AWS
+                region.
               </p>
               <pre className="rounded-md bg-muted px-3 py-2 font-mono text-xs break-words whitespace-pre-wrap">
                 {joinCommand.split("/").map((part, index, parts) => (

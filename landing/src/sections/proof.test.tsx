@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { Proof } from "./proof";
 
@@ -31,10 +31,11 @@ describe("Proof", () => {
     render(<Proof />);
 
     const names = ["OpenEverest", "Percona Operator for MySQL", "Percona Operator for PostgreSQL"];
-    const text = document.body.textContent ?? "";
+    const cards = screen.getByRole("list", { name: "Open source projects" });
+    const text = cards.textContent ?? "";
     const positions = names.map((name) => text.indexOf(name));
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
-    expect(screen.getByText("OpenEverest").className).toMatch(/text-2xl/);
+    expect(within(cards).getByText("OpenEverest").className).toMatch(/text-2xl/);
   });
 
   it("states only sourced figures, and no license it did not confirm", () => {

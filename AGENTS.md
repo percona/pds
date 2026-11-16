@@ -399,6 +399,9 @@ PMM, Flux, the hub, the adapter, spoke, and a bare cluster or clusters.
 Kubernetes cluster and EKS cluster stay allowed, and a command offered for
 copying is skipped. The same helpers also read the rendered page, because
 some landing sentences sit on props the reader does not treat as text.
+One exception holds on the landing page only: the "No lock-in" list may name
+PMM once, as a link to the open source monitoring project. The console and
+every other string still say monitoring.
 
 ## Design locks
 

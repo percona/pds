@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 
@@ -79,5 +79,41 @@ describe("Landing page text and motion", () => {
     render(<App />);
 
     expect(screen.getByRole("button", { name: "Replay the preview" })).toBeInTheDocument();
+  });
+
+  it("carries the experimental disclaimer in the footer", () => {
+    const { container } = render(<App />);
+    const footer = container.querySelector("footer")!;
+
+    expect(footer).toHaveTextContent("Percona Database Service is an experimental project.");
+    expect(footer).toHaveTextContent(
+      "PDS is not a generally available product, is not covered by Percona support commitments, and may change or be discontinued.",
+    );
+    expect(footer).toHaveTextContent(
+      "Please use it for testing and evaluation, not production workloads.",
+    );
+  });
+
+  it("lists the open source it is built on under No lock-in, with links", () => {
+    render(<App />);
+    const section = screen
+      .getByRole("heading", { level: 2, name: "No lock-in" })
+      .closest("section")!;
+
+    expect(within(section).getByRole("link", { name: "Percona Operators" })).toHaveAttribute(
+      "href",
+      "https://www.percona.com/cloud-native/",
+    );
+    expect(within(section).getByRole("link", { name: "PMM" })).toHaveAttribute(
+      "href",
+      "https://www.percona.com/monitoring/",
+    );
+    expect(within(section).getByRole("link", { name: "OpenEverest" })).toHaveAttribute(
+      "href",
+      "http://openeverest.io",
+    );
+    expect(section).toHaveTextContent(
+      "the open-source database management platform that provides the underlying Kubernetes-based database provisioning and management capabilities",
+    );
   });
 });
