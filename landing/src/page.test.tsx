@@ -81,6 +81,18 @@ describe("Landing page text and motion", () => {
     expect(screen.getByRole("button", { name: "Replay the preview" })).toBeInTheDocument();
   });
 
+  it("links to the public repository from the header and the footer", () => {
+    const { container } = render(<App />);
+    const links = [...container.querySelectorAll("header a, footer a")].filter(
+      (link) => link.textContent === "GitHub",
+    );
+
+    expect(links).toHaveLength(2);
+    for (const link of links) {
+      expect(link).toHaveAttribute("href", "https://github.com/percona/pds");
+    }
+  });
+
   it("carries the experimental disclaimer in the footer", () => {
     const { container } = render(<App />);
     const footer = container.querySelector("footer")!;

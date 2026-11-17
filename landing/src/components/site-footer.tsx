@@ -1,4 +1,4 @@
-import { consoleUrl, productName } from "@/lib/site";
+import { consoleUrl, githubUrl, productName } from "@/lib/site";
 
 export function SiteFooter() {
   return (
@@ -23,6 +23,13 @@ export function SiteFooter() {
         <nav aria-label="Footer" className="flex flex-wrap gap-x-6 gap-y-2 text-xs">
           <a href={consoleUrl} className="text-muted-foreground hover:text-foreground">
             Sign in
+          </a>
+          <a
+            href={githubUrl}
+            rel="noreferrer"
+            className="text-muted-foreground hover:text-foreground"
+          >
+            GitHub
           </a>
           <a href="https://www.percona.com" className="text-muted-foreground hover:text-foreground">
             percona.com
