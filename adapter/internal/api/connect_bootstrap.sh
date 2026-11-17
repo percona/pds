@@ -271,29 +271,21 @@ delete_tagged_users() {
 
 # delete_connect_kubectl points kubectl at the EKS cluster with a kubeconfig of
 # this run's own, so no other Kubernetes cluster is reached by mistake, and sets
-# KUBE_READY when it can reach it. It only reads: it saves the IDs of the EBS
-# volumes Kubernetes provisioned for the EKS cluster's claims. Only a volume
-# whose reclaim policy is Delete and which the EBS CSI driver provisioned is
-# saved, which is exactly what Kubernetes would delete with its claim, and an
-# ID that is not a volume ID is dropped.
+# KUBE_READY when it can reach it.
 delete_connect_kubectl() {
   local name="$1" region="$2"
   KUBE_READY=0
   if ! command -v kubectl >/dev/null; then
-    echo "kubectl is not installed, so the databases and load balancers on EKS cluster ${name} are not deleted first, and the EBS volumes of its databases may stay in your account. Carrying on." >&2
+    echo "kubectl is not installed, so the databases and load balancers on EKS cluster ${name} are not deleted first. Carrying on." >&2
     return 0
   fi
   export KUBECONFIG="${DELETE_TMP}/kubeconfig"
   if ! aws eks update-kubeconfig --name "$name" --region "$region" >/dev/null 2>&1 \
     || ! kubectl get namespaces --request-timeout=20s >/dev/null 2>&1; then
-    echo "cannot reach EKS cluster ${name} with kubectl, so its databases and load balancers are not deleted first, and the EBS volumes of its databases may stay in your account. Carrying on." >&2
+    echo "cannot reach EKS cluster ${name} with kubectl, so its databases and load balancers are not deleted first. Carrying on." >&2
     return 0
   fi
   KUBE_READY=1
-  kubectl get pv -o jsonpath='{range .items[?(@.spec.persistentVolumeReclaimPolicy=="Delete")]}{.spec.csi.driver}{" "}{.spec.csi.volumeHandle}{" "}{.metadata.annotations.pv\.kubernetes\.io/provisioned-by}{"\n"}{end}' \
-    | awk '$1 == "ebs.csi.aws.com" && $3 == "ebs.csi.aws.com" && $2 ~ /^vol-[0-9a-f]+$/ {print $2}' \
-    >"${DELETE_TMP}/volumes.txt" \
-    || echo "could not list the EBS volumes, so any the EKS cluster leaves stay in your account. Carrying on." >&2
 }
 
 # delete_workloads deletes the databases and every load balancer while the EKS
@@ -319,47 +311,49 @@ delete_workloads() {
   done <<<"$services"
 }
 
-# delete_recorded_volumes deletes the EBS volumes delete_connect_kubectl saved,
-# once the nodes are gone and the volumes have detached. A volume that is
-# already gone was deleted by Kubernetes. One that is still in use, or that
-# cannot be deleted, is left and printed with the command that deletes it,
-# because a rerun finds nothing tagged and never retries it.
-delete_recorded_volumes() {
-  local region="$1" volume state attempt status=0
-  [[ -s "${DELETE_TMP}/volumes.txt" ]] || return 0
-  while read -r volume; do
-    [[ -n "$volume" ]] || continue
-    state=unread
-    for attempt in 1 2 3 4 5 6; do
-      if ! state="$(aws ec2 describe-volumes --region "$region" --volume-ids "$volume" \
-        --query 'Volumes[0].State' --output text 2>"${DELETE_TMP}/volume.err")"; then
-        if grep -q "InvalidVolume.NotFound" "${DELETE_TMP}/volume.err"; then
-          state=gone
-        else
-          state=unread
-        fi
-        break
-      fi
-      [[ "$state" == in-use ]] || break
-      sleep "$WAIT_INTERVAL"
-    done
-    case "$state" in
-      gone) ;;
-      available)
-        echo "deleting EBS volume ${volume}"
-        if ! aws ec2 delete-volume --region "$region" --volume-id "$volume"; then
-          echo "could not delete EBS volume ${volume}. Delete it yourself:" >&2
-          echo "  aws ec2 delete-volume --region ${region} --volume-id ${volume}" >&2
-          status=1
-        fi
-        ;;
-      *)
-        echo "EBS volume ${volume} is ${state}, so it is not deleted. Delete it yourself when it is available:" >&2
-        echo "  aws ec2 delete-volume --region ${region} --volume-id ${volume}" >&2
-        status=1
-        ;;
-    esac
-  done <"${DELETE_TMP}/volumes.txt"
+# cluster_volumes prints one line per EBS volume the EBS CSI driver tagged for
+# an EKS cluster, as "id size state". The tag is the only link between a volume
+# and its cluster that outlives the nodes, and it is read from AWS, so a volume
+# created after anything was written down is found too. A volume tagged for
+# another EKS cluster is never named by the filter.
+cluster_volumes() {
+  local name="$1" region="$2" volumes
+  volumes="$(aws ec2 describe-volumes --region "$region" \
+    --filters "Name=tag:kubernetes.io/cluster/${name},Values=owned" \
+    --query 'Volumes[].[VolumeId,Size,State]' --output text)" || return 1
+  awk -F'\t' '$1 ~ /^vol-[0-9a-f]+$/ {print $1, $2, $3}' <<<"$volumes"
+}
+
+# delete_cluster_volumes deletes the volumes cluster_volumes finds, once the
+# nodes are gone. They are read again here because the plan can be minutes old.
+# A volume that is still in use is waited on while it detaches. One that stays
+# in use, or cannot be deleted, is printed with the command that deletes it,
+# because a run that finds the EKS cluster gone has no other way to name it.
+delete_cluster_volumes() {
+  local name="$1" region="$2" volumes volume size state attempt status=0
+  for attempt in 1 2 3 4 5 6; do
+    volumes="$(cluster_volumes "$name" "$region")" || {
+      echo "could not list the EBS volumes tagged for EKS cluster ${name}, so any it left stay in your account." >&2
+      return 1
+    }
+    grep -q ' in-use$' <<<"$volumes" || break
+    [[ "$attempt" == 6 ]] || sleep "$WAIT_INTERVAL"
+  done
+  while read -r volume size state; do
+    [[ -n "$volume" && "$state" != deleting ]] || continue
+    if [[ "$state" != available ]]; then
+      echo "EBS volume ${volume} is ${state}, so it is not deleted. Delete it yourself when it is available:" >&2
+      echo "  aws ec2 delete-volume --region ${region} --volume-id ${volume}" >&2
+      status=1
+      continue
+    fi
+    echo "deleting EBS volume ${volume}"
+    if ! aws ec2 delete-volume --region "$region" --volume-id "$volume"; then
+      echo "could not delete EBS volume ${volume}. Delete it yourself:" >&2
+      echo "  aws ec2 delete-volume --region ${region} --volume-id ${volume}" >&2
+      status=1
+    fi
+  done <<<"$volumes"
   return "$status"
 }
 
@@ -416,10 +410,9 @@ delete_environment() {
   done
   DELETE_TMP="$(mktemp -d)"
   trap 'rm -rf "${DELETE_TMP:-}"' EXIT
-  : >"${DELETE_TMP}/volumes.txt"
   KUBE_READY=0
 
-  local account buckets users bucket user volume stack arn answer failed=0 leftovers
+  local account buckets users bucket user volumes volume size state stack arn answer failed=0 leftovers
   local csi_stack="eksctl-${name}-addon-iamserviceaccount-kube-system-ebs-csi-controller-sa"
   local cluster_stack="eksctl-${name}-cluster" has_csi=0 has_stack=0
   account="$(aws sts get-caller-identity --query Account --output text)" || {
@@ -453,6 +446,10 @@ delete_environment() {
     echo "could not read the IAM users' tags. Nothing was deleted." >&2
     return 1
   }
+  volumes="$(cluster_volumes "$name" "$region")" || {
+    echo "could not list the EBS volumes tagged for EKS cluster ${name}. Nothing was deleted." >&2
+    return 1
+  }
   for stack in "$csi_stack" "$cluster_stack"; do
     delete_read_stack "$stack" "$region" "$name"
     if [[ "$STACK_STATE" == unreadable ]]; then
@@ -467,7 +464,7 @@ delete_environment() {
     fi
   done
 
-  if [[ "$CLUSTER_STATE" == absent && -z "$buckets" && -z "$users" && "$has_csi" == 0 && "$has_stack" == 0 ]]; then
+  if [[ "$CLUSTER_STATE" == absent && -z "$buckets" && -z "$users" && -z "$volumes" && "$has_csi" == 0 && "$has_stack" == 0 ]]; then
     echo "nothing in AWS account ${account}, region ${region} carries the tag percona.com/pds=${name}, so there is nothing to delete. Check the name and the region." >&2
     return 1
   fi
@@ -478,12 +475,13 @@ delete_environment() {
   echo "This deletes the following in AWS account ${account}, region ${region}:"
   if [[ "$CLUSTER_STATE" == present ]]; then
     echo "  EKS cluster ${name}, with its nodes, its VPC and every database on it"
-    for volume in $(cat "${DELETE_TMP}/volumes.txt"); do
-      echo "  EBS volume ${volume}, which Kubernetes provisioned for a database claim, once the nodes are gone"
-    done
   elif [[ "$has_stack" == 1 ]]; then
     echo "  CloudFormation stack ${cluster_stack}, what is left of EKS cluster ${name} with its nodes and its VPC"
   fi
+  while read -r volume size state; do
+    [[ -n "$volume" ]] || continue
+    echo "  EBS volume ${volume}, ${size} GiB, tagged for EKS cluster ${name}, deleted once the nodes are gone if it is available"
+  done <<<"$volumes"
   for bucket in $buckets; do
     echo "  S3 bucket ${bucket}, with every backup in it"
   done
@@ -539,8 +537,8 @@ delete_environment() {
       echo "EKS cluster ${name} is still there after the delete, or its stack cannot be read. The backup bucket and the IAM user were kept. Run the same command again." >&2
       return 1
     fi
-    delete_recorded_volumes "$region" || failed=1
   fi
+  delete_cluster_volumes "$name" "$region" || failed=1
   delete_read_stack "$csi_stack" "$region" "$name"
   if [[ "$STACK_OWNED" == 1 ]]; then
     echo "deleting EBS CSI role stack ${csi_stack}"
@@ -1277,8 +1275,15 @@ on_exit() {
   echo "bootstrap failed. Deleting resources this run created." >&2
   if [[ "$CREATED_CLUSTER" == 1 ]]; then
     echo "deleting EKS cluster ${NAME}" >&2
-    rollback_try eksctl delete cluster --name "$NAME" --region "$REGION" --wait --force \
-      --disable-nodegroup-eviction --timeout "$CLUSTER_DELETE_TIMEOUT"
+    if eksctl delete cluster --name "$NAME" --region "$REGION" --wait --force \
+      --disable-nodegroup-eviction --timeout "$CLUSTER_DELETE_TIMEOUT"; then
+      # The volumes behind the databases and monitoring outlive the nodes, and
+      # only an EKS cluster this run created may lose them. While the EKS
+      # cluster still stands they are still its volumes.
+      rollback_try delete_cluster_volumes "$NAME" "$REGION" >&2
+    else
+      ROLLBACK_FAILED=1
+    fi
   else
     if [[ "$INSTALLED_PLATFORM" == 1 ]]; then
       echo "uninstalling Helm release ${PLATFORM_RELEASE}" >&2

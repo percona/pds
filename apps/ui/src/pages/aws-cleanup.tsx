@@ -35,7 +35,10 @@ export function AwsCleanupPage() {
         <p className="text-sm text-muted-foreground">
           It finds what the join created by the tag <Mono>{joinOwnershipTag}</Mono> set to{" "}
           <Mono>{name}</Mono>: the EKS cluster and its node group, the backup bucket, the backup IAM
-          user and the EBS CSI role.
+          user and the EBS CSI role. It also deletes the EBS volumes the EKS cluster left behind,
+          found by the tag <Mono>kubernetes.io/cluster/{name}</Mono> set to <Mono>owned</Mono>, so a
+          database added later is included. It deletes only volumes that are available, once the
+          nodes are gone, and never one that is attached or tagged for another EKS cluster.
         </p>
         <p className="flex items-center gap-2 text-sm font-medium text-destructive">
           <TriangleAlert className="size-4" strokeWidth={1.5} aria-hidden="true" />
