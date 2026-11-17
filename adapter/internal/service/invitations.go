@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/percona/pds/adapter/internal/auth"
-	"github.com/percona/pds/adapter/internal/client/resend"
 	"github.com/percona/pds/adapter/internal/log"
 	"github.com/percona/pds/adapter/internal/store"
 )
@@ -71,9 +70,17 @@ type InvitationStore interface {
 	ClaimInvitation(ctx context.Context, claim store.Claim, now time.Time) (store.Placement, error)
 }
 
-// InvitationMailer sends one email. *resend.Client is one.
+// InvitationEmail is the message an invitation sends.
+type InvitationEmail struct {
+	From    string
+	To      []string
+	Subject string
+	Text    string
+}
+
+// InvitationMailer sends one email.
 type InvitationMailer interface {
-	Send(ctx context.Context, email resend.Email) error
+	Send(ctx context.Context, email InvitationEmail) error
 }
 
 // InvitationRecorder takes the activity an invitation leaves. *Activity is one.
@@ -398,7 +405,7 @@ func (i *Invitations) deliver(ctx context.Context, view store.InvitationView, to
 		return out
 	}
 
-	err := i.mailer.Send(ctx, resend.Email{
+	err := i.mailer.Send(ctx, InvitationEmail{
 		From:    i.from,
 		To:      []string{view.Email},
 		Subject: "You are invited to " + view.OrganizationName + " on Percona Database Service",

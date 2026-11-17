@@ -144,6 +144,13 @@ adapter:
     # -- Public origin a spoke reaches the hub on. Required on a hub. The join
     # command is built from it; request Host is never used.
     publicURL: ""
+    # -- Sender of the invitation email, a verified Amazon SES identity. With
+    # sesRegion, an invitation is emailed; without either, the admin shares the
+    # link. The hub's AWS credentials come from its instance or pod role, never
+    # from values.
+    invitationFrom: ""
+    # -- Amazon SES region the sender is verified in.
+    sesRegion: ""
     # -- Address agents and people reach the authorization server at, which is its
     # issuer and the origin of /mcp. Leave empty to use publicURL, which is what
     # almost every hub wants. Set it only when the address spokes use is not one a

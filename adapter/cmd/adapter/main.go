@@ -22,7 +22,7 @@ import (
 	"github.com/percona/pds/adapter/internal/client/github"
 	"github.com/percona/pds/adapter/internal/client/kube"
 	"github.com/percona/pds/adapter/internal/client/pmm"
-	"github.com/percona/pds/adapter/internal/client/resend"
+	"github.com/percona/pds/adapter/internal/client/ses"
 	"github.com/percona/pds/adapter/internal/client/tailnet"
 	"github.com/percona/pds/adapter/internal/config"
 	"github.com/percona/pds/adapter/internal/engine"
@@ -210,7 +210,7 @@ func run() error {
 	// to keep sessions in.
 	oidcClient := newOIDCClient(ctx, cfg, logger)
 
-	invitations, err := newInvitationService(cfg, db, activity, oidcClient != nil, logger)
+	invitations, err := newInvitationService(ctx, cfg, db, activity, oidcClient != nil, logger)
 	if err != nil {
 		return err
 	}
@@ -501,10 +501,11 @@ func newIdentityService(
 
 // newInvitationService builds how people join an Organization. It is nil
 // without a database, where there is no login either. Email goes out only when
-// both the Resend key and a sender are set; otherwise the admin shares the
+// both SES_REGION and a sender are set; otherwise the admin shares the
 // link. A password may claim an invitation only where no issuer verifies the
 // address and the deployment serves every Organization.
 func newInvitationService(
+	ctx context.Context,
 	cfg config.Config,
 	db *store.Starter,
 	activity *service.Activity,
@@ -521,17 +522,24 @@ func newInvitationService(
 		service.WithInvitationRecorder(activity),
 		service.WithInvitationPasswords(!issuerOn && cfg.ServesEveryOrganization()),
 	}
-	if cfg.ResendAPIKey != "" && cfg.InvitationFrom != "" {
-		mailer, err := resend.New(resend.Options{APIKey: cfg.ResendAPIKey})
+	if cfg.SESRegion != "" && cfg.InvitationFrom != "" {
+		client, err := ses.New(ctx, ses.Options{Region: cfg.SESRegion})
 		if err != nil {
 			return nil, fmt.Errorf("invitation email: %w", err)
 		}
-		opts = append(opts, service.WithInvitationMailer(mailer, cfg.InvitationFrom))
+		opts = append(opts, service.WithInvitationMailer(sesMailer{client}, cfg.InvitationFrom))
 	} else {
 		logger.Info("invitation email is not configured, admins share the invitation link")
 	}
 
 	return service.NewInvitations(store.NewLazyIdentity(db), opts...), nil
+}
+
+// sesMailer sends an invitation's email through SES.
+type sesMailer struct{ client *ses.Client }
+
+func (m sesMailer) Send(ctx context.Context, email service.InvitationEmail) error {
+	return m.client.Send(ctx, ses.Email(email))
 }
 
 // newEverestClient builds the shared OpenEverest client. Without EVEREST_URL
