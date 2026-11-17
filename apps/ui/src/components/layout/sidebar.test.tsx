@@ -96,4 +96,12 @@ describe("Sidebar organization", () => {
 
     expect(await screen.findByText("Ada Lovelace")).toBeVisible();
   });
+
+  it("shows the Experimental label to a user, not only to an admin", async () => {
+    stubSession({ username: "acme", user: "Grace", organization: "Acme", role: "user" });
+
+    renderWithProviders(<Sidebar />);
+
+    expect(await screen.findByRole("button", { name: /Experimental/ })).toBeVisible();
+  });
 });
