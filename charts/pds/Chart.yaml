@@ -44,7 +44,7 @@ dependencies:
     alias: provider-pxc
     condition: stack.enabled
   - name: provider-percona-postgresql
-    version: 0.5.0
+    version: 0.6.0
     repository: oci://ghcr.io/openeverest/charts
     alias: provider-postgresql
     condition: stack.enabled
@@ -67,6 +67,6 @@ annotations:
   pds.percona.com/platform-charts: |
     openeverest/openeverest 2.0.0-dev.4
     oci://ghcr.io/openeverest/charts/provider-percona-xtradb-cluster 0.3.1
-    oci://ghcr.io/openeverest/charts/provider-percona-postgresql 0.5.0
+    oci://ghcr.io/openeverest/charts/provider-percona-postgresql 0.6.0
     percona/pg-operator 3.0.0
     percona/pmm 1.9.1 (PMM 3.9.1)
