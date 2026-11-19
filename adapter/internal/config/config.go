@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"net/url"
 	"os"
 	"regexp"
@@ -57,9 +58,20 @@ type Config struct {
 	// CloudPrincipalARN is the role or user the control plane assumes customer roles
 	// from, and the one their trust policies name. Empty turns cloud connections off.
 	CloudPrincipalARN string
-	HubGitURL         string
-	HubGitHubOrg      string
-	HubGitHubToken    string
+	// ManagedOutgoingCIDRs are the addresses this deployment's AWS calls to a
+	// managed environment's Kubernetes API come from. Only they may reach the
+	// endpoint while an Access window is open. Empty refuses managed
+	// environments, and 0.0.0.0/0 is accepted when the operator chooses it.
+	ManagedOutgoingCIDRs []string
+	// ProvisionLeaseTTL is how long a provisioning run's lease lasts unrenewed.
+	ProvisionLeaseTTL time.Duration
+	// ProvisionMaxAttempts caps the automatic attempts of one step.
+	ProvisionMaxAttempts int
+	// ProvisionWindowMaxAge is how long an Access window may stay open.
+	ProvisionWindowMaxAge time.Duration
+	HubGitURL             string
+	HubGitHubOrg          string
+	HubGitHubToken        string
 	// The GitHub App credentials replace HubGitHubToken. The private key is
 	// PEM text, read from a value or a file.
 	HubGitHubAppID             string
@@ -598,6 +610,10 @@ func Load() (Config, error) {
 		cfg.HubOperatorToken = token
 	}
 
+	if err := loadProvisioning(&cfg, lookup); err != nil {
+		return Config{}, err
+	}
+
 	// A join token is printed in a command an operator pastes around, so it
 	// outlives the join unless it is given an end. Zero keeps a token valid
 	// forever, which is what tokens minted before this did.
@@ -1078,4 +1094,42 @@ func validateDatabaseURL(raw string) error {
 
 // cloudPrincipalARN is a role or user ARN. An account root is refused: a trust
 // policy that names one lets anyone in that account assume the role.
+// loadProvisioning reads the settings of provisioning runs and the Access
+// window. Each value that is set must be usable: a typo would otherwise turn
+// into a run that never gets a lease or a window that never closes.
+func loadProvisioning(cfg *Config, lookup func(key, fallback string) string) error {
+	for _, raw := range splitList(lookup("HUB_MANAGED_OUTGOING_CIDRS", "")) {
+		if _, err := netip.ParsePrefix(raw); err != nil {
+			return fmt.Errorf("HUB_MANAGED_OUTGOING_CIDRS: %q is not a CIDR such as 203.0.113.7/32", raw)
+		}
+		cfg.ManagedOutgoingCIDRs = append(cfg.ManagedOutgoingCIDRs, raw)
+	}
+
+	for _, d := range []struct {
+		name     string
+		fallback string
+		into     *time.Duration
+	}{
+		{"HUB_PROVISION_LEASE_TTL", "1m", &cfg.ProvisionLeaseTTL},
+		{"HUB_PROVISION_WINDOW_MAX_AGE", "30m", &cfg.ProvisionWindowMaxAge},
+	} {
+		value, err := time.ParseDuration(lookup(d.name, d.fallback))
+		if err != nil {
+			return fmt.Errorf("%s: %w", d.name, err)
+		}
+		if value <= 0 {
+			return fmt.Errorf("%s must be positive, got %s", d.name, value)
+		}
+		*d.into = value
+	}
+
+	attempts, err := strconv.Atoi(lookup("HUB_PROVISION_MAX_ATTEMPTS", "5"))
+	if err != nil || attempts < 1 {
+		return errors.New("HUB_PROVISION_MAX_ATTEMPTS must be a whole number of at least 1")
+	}
+	cfg.ProvisionMaxAttempts = attempts
+
+	return nil
+}
+
 var cloudPrincipalARN = regexp.MustCompile(`^arn:aws:iam::[0-9]{12}:(role|user)/[A-Za-z0-9+=,.@_/-]+$`)

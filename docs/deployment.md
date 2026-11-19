@@ -493,6 +493,24 @@ association with that role. The role needs `sts:AssumeRole` and
 template, the connect script and how a connection is checked are in
 [architecture.md](architecture.md#cloud-connections).
 
+## Managed environments
+
+A control plane builds managed environments only when it can reach their
+Kubernetes API from addresses it declares. These settings go through the chart's
+`adapter.extraEnv`:
+
+| Variable | Default | Value |
+|----------|---------|-------|
+| `HUB_MANAGED_OUTGOING_CIDRS` | none | The addresses this control plane's AWS calls come from, as comma separated CIDRs such as `203.0.113.7/32`. Only they may reach an environment's endpoint while it is open. `0.0.0.0/0` is accepted when you choose it and leaves IAM as the only protection. Empty refuses managed environments |
+| `HUB_PROVISION_LEASE_TTL` | `1m` | How long a provisioning run's lease lasts unrenewed. A worker that dies is replaced after it |
+| `HUB_PROVISION_MAX_ATTEMPTS` | `5` | Automatic attempts of one step before the run fails and waits for Retry |
+| `HUB_PROVISION_WINDOW_MAX_AGE` | `30m` | How long an Access window may stay open before the sweeper closes it |
+
+A managed environment installs the published chart and agent image, so a build
+whose version is `dev` cannot create one. The hub's Git write credentials act as
+cluster-admin on every managed environment it serves. See
+[architecture.md](architecture.md#managed-environments).
+
 ## Connected environments left running
 
 The laptop command is the lab. See [Laptop](#laptop).

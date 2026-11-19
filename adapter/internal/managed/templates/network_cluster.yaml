@@ -1,0 +1,408 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  The network and the Kubernetes cluster of one Percona Database Service managed
+  environment: a dedicated VPC, an EKS cluster with a private endpoint, a node
+  group and the EBS CSI driver. Run only by the control plane through the
+  connection's service role. Every resource carries the percona.com/pds tag.
+
+Parameters:
+  EnvironmentId:
+    Type: String
+    Description: The environment's id. It is the value of the percona.com/pds tag.
+    AllowedPattern: "^[0-9a-f]{12}$"
+  EksName:
+    Type: String
+    Description: The EKS cluster's name.
+    AllowedPattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$"
+  KubernetesVersion:
+    Type: String
+    Default: "1.33"
+    Description: The Kubernetes version a new environment starts on. Existing stacks keep theirs.
+  VpcCidr:
+    Type: String
+    Default: "10.42.0.0/16"
+    Description: The environment's own network.
+  EksRoleArn:
+    Type: String
+    Description: The cloud connection's EKS cluster role.
+  NodeRoleArn:
+    Type: String
+    Description: The cloud connection's node role.
+  EbsCsiRoleArn:
+    Type: String
+    Description: The cloud connection's EBS CSI Pod Identity role.
+  NodeInstanceType:
+    Type: String
+    Default: "m6i.xlarge"
+    Description: The instance type of the node group.
+  NodeCount:
+    Type: Number
+    Default: 3
+    MinValue: 3
+    MaxValue: 12
+    Description: The number of nodes. Three keeps a database's members apart.
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock:
+        Ref: VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: "percona.com/pds"
+          Value:
+            Ref: EnvironmentId
+        - Key: Name
+          Value:
+            Fn::Sub: "pds-${EnvironmentId}-vpc"
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: "percona.com/pds"
+          Value:
+            Ref: EnvironmentId
+        - Key: Name
+          Value:
+            Fn::Sub: "pds-${EnvironmentId}-igw"
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: Vpc
+      InternetGatewayId:
+        Ref: InternetGateway
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: Vpc
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Fn::Cidr:
+              - Fn::GetAtt: [Vpc, CidrBlock]
+              - 4
+              - 14
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: "percona.com/pds"
+          Value:
+            Ref: EnvironmentId
+        - Key: Name
+          Value:
+            Fn::Sub: "pds-${EnvironmentId}-publicsubneta"
+        - Key: "kubernetes.io/role/elb"
+          Value: "1"
+        - Key:
+            Fn::Sub: "kubernetes.io/cluster/${EksName}"
+          Value: "shared"
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: Vpc
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Fn::Cidr:
+              - Fn::GetAtt: [Vpc, CidrBlock]
+              - 4
+              - 14
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: "percona.com/pds"
+          Value:
+            Ref: EnvironmentId
+        - Key: Name
+          Value:
+            Fn::Sub: "pds-${EnvironmentId}-publicsubnetb"
+        - Key: "kubernetes.io/role/elb"
+          Value: "1"
+        - Key:
+            Fn::Sub: "kubernetes.io/cluster/${EksName}"
+          Value: "shared"
+
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: Vpc
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      CidrBlock:
+        Fn::Select:
+          - 2
+          - Fn::Cidr:
+              - Fn::GetAtt: [Vpc, CidrBlock]
+              - 4
+              - 14
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: "percona.com/pds"
+          Value:
+            Ref: EnvironmentId
+        - Key: Name
+          Value:
+            Fn::Sub: "pds-${EnvironmentId}-privatesubneta"
+        - Key: "kubernetes.io/role/internal-elb"
+          Value: "1"
+        - Key:
+            Fn::Sub: "kubernetes.io/cluster/${EksName}"
+          Value: "shared"
+
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: Vpc
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      CidrBlock:
+        Fn::Select:
+          - 3
+          - Fn::Cidr:
+              - Fn::GetAtt: [Vpc, CidrBlock]
+              - 4
+              - 14
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: "percona.com/pds"
+          Value:
+            Ref: EnvironmentId
+        - Key: Name
+          Value:
+            Fn::Sub: "pds-${EnvironmentId}-privatesubnetb"
+        - Key: "kubernetes.io/role/internal-elb"
+          Value: "1"
+        - Key:
+            Fn::Sub: "kubernetes.io/cluster/${EksName}"
+          Value: "shared"
+
+  NatAddress:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: "percona.com/pds"
+          Value:
+            Ref: EnvironmentId
+        - Key: Name
+          Value:
+            Fn::Sub: "pds-${EnvironmentId}-nat"
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId:
+        Fn::GetAtt: [NatAddress, AllocationId]
+      SubnetId:
+        Ref: PublicSubnetA
+      Tags:
+        - Key: "percona.com/pds"
+          Value:
+            Ref: EnvironmentId
+        - Key: Name
+          Value:
+            Fn::Sub: "pds-${EnvironmentId}-nat"
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: Vpc
+      Tags:
+        - Key: "percona.com/pds"
+          Value:
+            Ref: EnvironmentId
+        - Key: Name
+          Value:
+            Fn::Sub: "pds-${EnvironmentId}-public"
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId:
+        Ref: PublicRouteTable
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId:
+        Ref: InternetGateway
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: Vpc
+      Tags:
+        - Key: "percona.com/pds"
+          Value:
+            Ref: EnvironmentId
+        - Key: Name
+          Value:
+            Fn::Sub: "pds-${EnvironmentId}-private"
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Ref: PrivateRouteTable
+      DestinationCidrBlock: "0.0.0.0/0"
+      NatGatewayId:
+        Ref: NatGateway
+
+  PublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PublicSubnetA
+      RouteTableId:
+        Ref: PublicRouteTable
+
+  PublicSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PublicSubnetB
+      RouteTableId:
+        Ref: PublicRouteTable
+
+  PrivateSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnetA
+      RouteTableId:
+        Ref: PrivateRouteTable
+
+  PrivateSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnetB
+      RouteTableId:
+        Ref: PrivateRouteTable
+
+  Cluster:
+    Type: AWS::EKS::Cluster
+    Properties:
+      Name:
+        Ref: EksName
+      Version:
+        Ref: KubernetesVersion
+      RoleArn:
+        Ref: EksRoleArn
+      AccessConfig:
+        AuthenticationMode: API
+        BootstrapClusterCreatorAdminPermissions: false
+      ResourcesVpcConfig:
+        EndpointPrivateAccess: true
+        EndpointPublicAccess: false
+        SubnetIds:
+          - Ref: PrivateSubnetA
+          - Ref: PrivateSubnetB
+          - Ref: PublicSubnetA
+          - Ref: PublicSubnetB
+      Tags:
+        - Key: "percona.com/pds"
+          Value:
+            Ref: EnvironmentId
+
+  NodeGroup:
+    Type: AWS::EKS::Nodegroup
+    Properties:
+      ClusterName:
+        Ref: Cluster
+      NodegroupName: "pds-nodes"
+      NodeRole:
+        Ref: NodeRoleArn
+      Subnets:
+        - Ref: PrivateSubnetA
+        - Ref: PrivateSubnetB
+      InstanceTypes:
+        - Ref: NodeInstanceType
+      ScalingConfig:
+        MinSize:
+          Ref: NodeCount
+        DesiredSize:
+          Ref: NodeCount
+        MaxSize:
+          Ref: NodeCount
+      Tags:
+        percona.com/pds:
+          Ref: EnvironmentId
+
+  PodIdentityAgentAddon:
+    Type: AWS::EKS::Addon
+    DependsOn: NodeGroup
+    Properties:
+      ClusterName:
+        Ref: Cluster
+      AddonName: eks-pod-identity-agent
+      ResolveConflicts: OVERWRITE
+      Tags:
+        - Key: "percona.com/pds"
+          Value:
+            Ref: EnvironmentId
+
+  CoreDnsAddon:
+    Type: AWS::EKS::Addon
+    DependsOn: NodeGroup
+    Properties:
+      ClusterName:
+        Ref: Cluster
+      AddonName: coredns
+      ResolveConflicts: OVERWRITE
+      Tags:
+        - Key: "percona.com/pds"
+          Value:
+            Ref: EnvironmentId
+
+  EbsCsiAddon:
+    Type: AWS::EKS::Addon
+    DependsOn: PodIdentityAgentAddon
+    Properties:
+      ClusterName:
+        Ref: Cluster
+      AddonName: aws-ebs-csi-driver
+      ResolveConflicts: OVERWRITE
+      PodIdentityAssociations:
+        - ServiceAccount: ebs-csi-controller-sa
+          RoleArn:
+            Ref: EbsCsiRoleArn
+      ConfigurationValues:
+        Fn::Sub: '{"controller":{"extraVolumeTags":{"percona.com/pds":"${EnvironmentId}"}}}'
+      Tags:
+        - Key: "percona.com/pds"
+          Value:
+            Ref: EnvironmentId
+
+Outputs:
+  TemplateRevision:
+    Description: The revision of this template. A control plane upgrade never changes a stack that carries an older one.
+    Value: "1"
+  ClusterName:
+    Value:
+      Ref: Cluster
+  VpcId:
+    Value:
+      Ref: Vpc

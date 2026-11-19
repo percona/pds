@@ -1,0 +1,35 @@
+# Connected-environment overlay. The chart snapshot renders this file. The lab
+# does not install it for the join: Connect writes these values into the
+# agent release, and passes the hub address and the environment name.
+#
+# OpenEverest, the providers, MinIO and monitoring stay because this file
+# sets the stack on. The adapter is an agent, with no UI and no database.
+stack:
+  enabled: true
+
+ui:
+  enabled: false
+  replicaCount: 0
+
+adapter:
+  role: agent
+  # The agent calls the OpenEverest Service in this Kubernetes cluster.
+  everestURL: http://everest.everest-system.svc.cluster.local:8080
+  # The chart default names s3, which is what a hub records. Empty selects
+  # the MinIO store this file installs.
+  everestBackupStorage: ""
+  # The agent polls the hub and never serves the customer API, so it has no
+  # sessions to keep and needs no database. Leaving this on would provision
+  # a PostgreSQL cluster the agent never reads, and the pod would wait on a
+  # Secret it does not need.
+  database:
+    enabled: false
+    # The stack's PostgreSQL provider installs this operator. Turning it on
+    # as well installs a second one, and the chart refuses the pair.
+    operator:
+      enabled: false
+  hub:
+    # The Connect script sets the address a real environment dials. This value is
+    # only here so the chart tests have a hub URL to render.
+    url: http://host.docker.internal:18081
+    environmentName: spoke-a

@@ -724,6 +724,58 @@ kubeconfig is stored, only what makes the next assume possible.
   Ready stays Pending while it fails the check, and one that was Ready becomes
   Unreachable. It runs from the script, on Verify and every hour.
 
+### Managed environments
+
+A managed environment is an environment the control plane builds in a customer's
+AWS account through a cloud connection, and then runs the same agent as a
+connected one. `internal/managed` holds the create run, and
+`internal/client/aws` the calls it makes, each through a role assumed afresh.
+
+- **Request.** `managed.Creator` refuses before anything exists in AWS: no
+  declared outgoing addresses (`HUB_MANAGED_OUTGOING_CIDRS`), no published chart
+  or agent image, a name that is not an environment name, a region the
+  connection does not allow, or a connection whose check fails. Then it records
+  the environment (`hub_managed_environments`: its id, connection and region)
+  and queues the create run. The id is the value of the `percona.com/pds` tag
+  on everything the environment owns, and part of its stack name
+  `pds-env-<id>` and its Kubernetes cluster name `pds-<id>`.
+- **Stack.** `internal/managed/templates/network_cluster.yaml` is embedded and
+  run only through the connection's service role: a dedicated VPC, an EKS
+  cluster with `authenticationMode` API, no creator admin rights and a private
+  endpoint, a node group, and the Pod Identity agent, CoreDNS and EBS CSI
+  add-ons. Every resource carries `percona.com/pds`, and the EBS CSI driver tags
+  its volumes. The stack records `managed.TemplateRevision` as a tag and an
+  output, and a test holds it equal to `managedTemplate.revision` in
+  `charts/pds/compatibility.yaml`.
+- **Steps.** `assume-role`, `create-stack`, `wait-stack`, `open-access`,
+  `install-flux`, `write-release`, `join`, `close-access` and `wait-heartbeat`,
+  shown under four phases: Creating network and Kubernetes cluster, Connecting
+  to the environment, Installing PDS, and Finishing. A failed stack is reported
+  once and left in place. The next attempt deletes it and makes it again,
+  because CloudFormation cannot resume a failed create. An environment that
+  never reports fails in Finishing, and Retry only waits again.
+- **Access window.** The public endpoint is open only to the declared outgoing
+  addresses, with the control plane's access entry, while a step needs the
+  Kubernetes API. A step that needs it opens the window again, since a run that
+  waited for a lease holds none. The window is recorded before it opens, so the
+  sweeper closes it when the worker dies, and `close-access` closes it after
+  reading the real endpoint. Without declared addresses a create is refused.
+- **Release.** The agent runs as one `pds` HelmRelease committed under
+  `clusters/<environment>/platform/pds`, from the published chart, applied by a
+  ServiceAccount made when Flux is installed. `managed.RenderRelease` builds it
+  from `charts/pds/values-spoke.yaml` (`internal/managed/values-spoke.yaml` is a
+  copy a test keeps equal) plus the hub address, the environment name, the agent
+  image and the name of the Secret that holds the agent's token, which never
+  reaches Git. `go test ./internal/managed -run Release -update` rewrites the
+  golden after an intended change. The hub's Git write credentials act as
+  cluster-admin on every managed environment it serves. The join script refuses
+  an environment whose `pds` release a HelmRelease owns.
+- **Refusals.** AWS errors become a step that fails with a typed reason (quota,
+  permission, region not enabled) and one sentence that names the AWS account
+  and the Kubernetes cluster and shows no raw AWS text. Throttling and role
+  propagation retry by themselves, a failed `AssumeRole` pauses the run, and
+  anything else gets a generic sentence that points to Percona support.
+
 ### Support access windows
 
 An environment has one support access record, kept per Team in

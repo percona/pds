@@ -475,6 +475,7 @@ func Models() []any {
 		&CloudEvent{},
 		&ProvisioningRun{},
 		&ProvisioningStep{},
+		&ManagedEnvironment{},
 	}
 }
 

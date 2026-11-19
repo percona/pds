@@ -74,6 +74,10 @@ func clearEnv(t *testing.T) {
 		"HUB_PUBLIC_URL",
 		"HUB_OAUTH_ISSUER",
 		"HUB_CLOUD_PRINCIPAL_ARN",
+		"HUB_MANAGED_OUTGOING_CIDRS",
+		"HUB_PROVISION_LEASE_TTL",
+		"HUB_PROVISION_MAX_ATTEMPTS",
+		"HUB_PROVISION_WINDOW_MAX_AGE",
 		"HUB_GIT_URL",
 		"HUB_GITHUB_ORG",
 		"HUB_GITHUB_TOKEN",
@@ -1485,6 +1489,55 @@ func TestLoadReadsTheCloudPrincipalAndRefusesAnAccountRoot(t *testing.T) {
 		_, err = config.Load()
 		require.Error(t, err, bad)
 		assert.Contains(t, err.Error(), "HUB_CLOUD_PRINCIPAL_ARN")
+	}
+}
+
+func TestLoadReadsTheProvisioningSettings(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("HUB_GIT_DIR", "/tmp/hub-git")
+	t.Setenv("HUB_OPERATOR_TOKEN", "op-secret")
+	t.Setenv("HUB_PUBLIC_URL", "https://hub.example")
+
+	got, err := config.Load()
+	require.NoError(t, err)
+	assert.Empty(t, got.ManagedOutgoingCIDRs, "no declared addresses refuses managed environments")
+	assert.Equal(t, time.Minute, got.ProvisionLeaseTTL)
+	assert.Equal(t, 5, got.ProvisionMaxAttempts)
+	assert.Equal(t, 30*time.Minute, got.ProvisionWindowMaxAge)
+
+	t.Setenv("HUB_MANAGED_OUTGOING_CIDRS", " 203.0.113.7/32 , 198.51.100.0/24,")
+	t.Setenv("HUB_PROVISION_LEASE_TTL", "2m")
+	t.Setenv("HUB_PROVISION_MAX_ATTEMPTS", "8")
+	t.Setenv("HUB_PROVISION_WINDOW_MAX_AGE", "10m")
+	got, err = config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"203.0.113.7/32", "198.51.100.0/24"}, got.ManagedOutgoingCIDRs)
+	assert.Equal(t, 2*time.Minute, got.ProvisionLeaseTTL)
+	assert.Equal(t, 8, got.ProvisionMaxAttempts)
+	assert.Equal(t, 10*time.Minute, got.ProvisionWindowMaxAge)
+
+	t.Setenv("HUB_MANAGED_OUTGOING_CIDRS", "0.0.0.0/0")
+	got, err = config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"0.0.0.0/0"}, got.ManagedOutgoingCIDRs, "open to everyone is accepted when chosen")
+}
+
+func TestLoadRefusesBadProvisioningSettings(t *testing.T) {
+	for name, value := range map[string]string{
+		"HUB_MANAGED_OUTGOING_CIDRS":   "203.0.113.7",
+		"HUB_PROVISION_LEASE_TTL":      "soon",
+		"HUB_PROVISION_MAX_ATTEMPTS":   "0",
+		"HUB_PROVISION_WINDOW_MAX_AGE": "-1m",
+	} {
+		clearEnv(t)
+		t.Setenv("HUB_GIT_DIR", "/tmp/hub-git")
+		t.Setenv("HUB_OPERATOR_TOKEN", "op-secret")
+		t.Setenv("HUB_PUBLIC_URL", "https://hub.example")
+		t.Setenv(name, value)
+
+		_, err := config.Load()
+		require.Error(t, err, name)
+		assert.Contains(t, err.Error(), name)
 	}
 }
 

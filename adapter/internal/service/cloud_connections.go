@@ -209,7 +209,7 @@ func (c *CloudConnections) Enroll(ctx context.Context, token string, account Clo
 	return CloudEnrollment{
 		ConnectionID: row.ID, ExternalID: row.ExternalID, StackName: row.StackName, StackRegion: row.StackRegion,
 		AllowedRegions: row.AllowedRegions, PrincipalARN: c.opts.PrincipalARN,
-		ControlPlaneRoleARN: cloudRoleARN(row.AccountID, row.ID, "control-plane"), TemplateVersion: CloudTemplateVersion,
+		ControlPlaneRoleARN: aws.RoleARN(row.AccountID, row.ID, "control-plane"), TemplateVersion: CloudTemplateVersion,
 	}, nil
 }
 
@@ -347,9 +347,9 @@ func (c *CloudConnections) liveToken(ctx context.Context, token string) (store.C
 // never simulates policies, since a simulation misses service control policies.
 func (c *CloudConnections) check(ctx context.Context, row store.CloudConnection, sourceIdentity string) (store.CloudConnection, error) {
 	inspection, err := c.inspector.Inspect(ctx, aws.InspectRequest{
-		RoleARN: cloudRoleARN(row.AccountID, row.ID, "control-plane"), ExternalID: row.ExternalID,
+		RoleARN: aws.RoleARN(row.AccountID, row.ID, "control-plane"), ExternalID: row.ExternalID,
 		SourceIdentity: sourceIdentity, Region: row.StackRegion, StackName: row.StackName,
-		RoleNames: []string{cloudRoleName(row.ID, "cloudformation"), cloudRoleName(row.ID, "eks-cluster"), cloudRoleName(row.ID, "node"), cloudRoleName(row.ID, "ebs-csi")},
+		RoleNames: []string{aws.RoleName(row.ID, "cloudformation"), aws.RoleName(row.ID, "eks-cluster"), aws.RoleName(row.ID, "node"), aws.RoleName(row.ID, "ebs-csi")},
 	})
 	result := judgeCloudCheck(row, inspection, err)
 	if err != nil && !errors.Is(err, aws.ErrAssumeDenied) {
@@ -394,14 +394,6 @@ func judgeCloudCheck(row store.CloudConnection, in aws.Inspection, err error) st
 	}
 
 	return store.CloudCheck{State: store.CloudReady, TemplateVersion: in.TemplateVersion}
-}
-
-func cloudRoleName(id, role string) string { return "pds-" + id + "-" + role }
-
-// cloudRoleARN is the deterministic ARN of one of a connection's roles. They
-// all sit under the path /pds/<id>/.
-func cloudRoleARN(account, id, role string) string {
-	return "arn:aws:iam::" + account + ":role/pds/" + id + "/" + cloudRoleName(id, role)
 }
 
 func randomHex(n int) (string, error) {
