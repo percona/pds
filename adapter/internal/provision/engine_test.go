@@ -505,3 +505,35 @@ func TestARunOfAnotherTeamIsNotAffected(t *testing.T) {
 	_, err = e.Start(t.Context(), other.team, l.env, l.kind)
 	require.NoError(t, err, "two Teams may name an environment the same")
 }
+
+func TestWorkersNeverClaimTheSameRun(t *testing.T) {
+	l := newLab(t)
+	engines := make([]*provision.Engine, 3)
+	for i := range engines {
+		owner := fmt.Sprintf("worker-%d", i)
+		engines[i] = l.engine(func(o *provision.Options) { o.Owner = owner }, "role")
+	}
+	const runs = 6
+	for i := range runs {
+		_, err := engines[0].Start(t.Context(), l.team, fmt.Sprintf("env-%d", i), l.kind)
+		require.NoError(t, err)
+	}
+
+	var wg sync.WaitGroup
+	for _, e := range engines {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				ran, err := e.RunOnce(t.Context())
+				assert.NoError(t, err)
+				if !ran {
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	assert.Len(t, l.steps.ranList(), runs, "each run's step ran once across all the workers")
+}
