@@ -5,7 +5,7 @@ import "time"
 // SchemaRevision is bumped whenever the models change in a way an operator
 // needs to be able to see from the database. GORM reconciles the shape on its
 // own; this is the number a running deployment reports back.
-const SchemaRevision = 19
+const SchemaRevision = 20
 
 // schemaStateID is the primary key of the single marker row. The table holds
 // one row by construction, so the key is a constant rather than a sequence.
@@ -470,6 +470,8 @@ func Models() []any {
 		&OAuthCode{},
 		&AgentSession{},
 		&OAuthToken{},
+		&ProvisioningRun{},
+		&ProvisioningStep{},
 	}
 }
 
