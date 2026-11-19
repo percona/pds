@@ -32,6 +32,10 @@ type fakeCloud struct {
 	failAt    map[string][]error
 	stacks    []aws.StackState
 	closeNote string
+	preflight *aws.Refusal
+	needs     aws.Needs
+	buckets   []string
+	tags      []map[string]string
 }
 
 func (f *fakeCloud) record(name string, t aws.Target) error {
@@ -64,6 +68,27 @@ func (f *fakeCloud) count(name string) int {
 
 func (f *fakeCloud) CheckRole(_ context.Context, t aws.Target) error {
 	return f.record("check-role", t)
+}
+
+func (f *fakeCloud) Preflight(_ context.Context, t aws.Target, needs aws.Needs) (aws.Refusal, bool) {
+	_ = f.record("preflight", t)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.needs = needs
+	if f.preflight == nil {
+		return aws.Refusal{}, false
+	}
+
+	return *f.preflight, true
+}
+
+func (f *fakeCloud) EnsureBucket(_ context.Context, t aws.Target, bucket string, tags map[string]string) error {
+	f.mu.Lock()
+	f.buckets = append(f.buckets, bucket)
+	f.tags = append(f.tags, tags)
+	f.mu.Unlock()
+
+	return f.record("ensure-bucket", t)
 }
 
 func (f *fakeCloud) EnsureStack(_ context.Context, t aws.Target, spec aws.StackSpec) error {
@@ -153,7 +178,7 @@ func (f *fakeHub) Join(_ context.Context, _ uint, environment string) (managed.J
 	defer f.mu.Unlock()
 	f.joins++
 
-	return managed.Join{Environment: environment, AgentToken: "agt_secret", GitURL: "ssh://git@github.com/o/r.git"}, nil
+	return managed.Join{Environment: environment, AgentToken: "agt_secret", GitURL: "ssh://git@github.com/o/r.git", Namespace: "pds"}, nil
 }
 
 func (f *fakeHub) WriteRelease(_ context.Context, _ uint, _ string, files map[string][]byte) error {
@@ -362,6 +387,57 @@ func TestAQuotaRefusalFailsTheStepWithASentenceThatNamesTheAccount(t *testing.T)
 	assert.Contains(t, step.Failure, "eu-west-1")
 	assert.NotContains(t, step.Failure, "arn:")
 	assert.Equal(t, step.Failure, got.Message)
+}
+
+func TestAPreflightRefusalFailsBeforeAnythingIsBuilt(t *testing.T) {
+	l := newLab(t)
+	l.cloud.preflight = &aws.Refusal{Reason: aws.ReasonQuota, Service: "Amazon EC2", Item: "Elastic IP addresses per Region", Region: "eu-west-1"}
+	e := l.engine()
+	run := l.start(e)
+
+	_, err := e.RunOnce(t.Context())
+	require.NoError(t, err)
+
+	got := l.run(run.ID)
+	assert.Equal(t, store.RunFailed, got.Status)
+	step := l.steps(run.ID)["assume-role"]
+	assert.Equal(t, store.StepFailed, step.Status)
+	assert.Contains(t, step.Failure, "Elastic IP addresses per Region")
+	assert.Contains(t, step.Failure, "111122223333")
+	assert.Equal(t, 0, l.cloud.count("ensure-stack"), "nothing exists in AWS yet")
+	assert.Equal(t, 12, l.cloud.needs.VCPUs, "three m6i.xlarge nodes")
+}
+
+func TestTheBackupBucketIsMadeInTheAccountAndTaggedWithTheEnvironment(t *testing.T) {
+	l := newLab(t)
+	l.hub.connected.Store(true)
+	e := l.engine()
+	run := l.start(e)
+
+	_, err := e.RunOnce(t.Context())
+	require.NoError(t, err)
+
+	require.Equal(t, store.RunSucceeded, l.run(run.ID).Status)
+	assert.Equal(t, []string{"pds-111122223333-" + l.envID}, l.cloud.buckets)
+	assert.Equal(t, l.envID, l.cloud.tags[0]["percona.com/pds"])
+	release := string(l.hub.written["clusters/orders/platform/pds/helmrelease.yaml"])
+	assert.Contains(t, release, "bucket: pds-111122223333-"+l.envID)
+	assert.Contains(t, release, "region: eu-west-1")
+}
+
+func TestABucketRefusalFailsTheStepWithATypedSentence(t *testing.T) {
+	l := newLab(t)
+	l.cloud.failAt["ensure-bucket"] = []error{apiErr("AccessDenied", "User: arn:aws:sts::1:assumed-role/x is not authorized to perform: s3:CreateBucket")}
+	e := l.engine()
+	run := l.start(e)
+
+	_, err := e.RunOnce(t.Context())
+	require.NoError(t, err)
+
+	step := l.steps(run.ID)["create-bucket"]
+	assert.Equal(t, store.StepFailed, step.Status)
+	assert.Contains(t, step.Failure, "s3:CreateBucket")
+	assert.NotContains(t, step.Failure, "arn:")
 }
 
 func TestThrottlingRetriesTheStepByItself(t *testing.T) {

@@ -25,6 +25,12 @@ const (
 	// ones the join script uses for a connected environment.
 	ReleaseName      = "pds"
 	ReleaseNamespace = "everest-system"
+	// BackupStorage names the BackupStorage the release registers for the
+	// bucket, and BackupSecret the Secret with its access key. The agent
+	// creates the key in the environment and writes the Secret itself, so the
+	// key never reaches the control plane.
+	BackupStorage = "s3"
+	BackupSecret  = "pds-s3"
 	// HelmServiceAccount applies the release with cluster-admin equivalent
 	// rights, and is created once when Flux is bootstrapped.
 	HelmServiceAccount = "pds-helm"
@@ -42,6 +48,9 @@ type ReleaseInput struct {
 	EnvironmentName string
 	ImageRepository string
 	ImageTag        string
+	// Bucket and Region are the environment's backup store.
+	Bucket string
+	Region string
 }
 
 // RenderRelease renders the HelmRelease Flux applies for the whole agent
@@ -50,6 +59,7 @@ func RenderRelease(in ReleaseInput) ([]byte, error) {
 	for name, value := range map[string]string{
 		"chart version": in.ChartVersion, "hub address": in.HubURL,
 		"environment name": in.EnvironmentName, "agent image": in.ImageRepository,
+		"backup bucket": in.Bucket, "backup region": in.Region,
 	} {
 		if value == "" {
 			return nil, fmt.Errorf("render the pds release: the %s is empty", name)
@@ -70,9 +80,18 @@ func RenderRelease(in ReleaseInput) ([]byte, error) {
 			// The hub annotates each Instance with the preset a create resolves
 			// against, so the environment has to have them.
 			"installInstancePresets": true,
+			// The bucket's backup store replaces the MinIO a connected overlay starts from.
+			"everestBackupStorage": BackupStorage,
 		},
-		// Flux installs PMM from the environment's Git, so the release leaves it out.
-		"stack": map[string]any{"pmm": map[string]any{"subchart": false}},
+		"stack": map[string]any{
+			// Flux installs PMM from the environment's Git, so the release leaves it out.
+			"pmm":   map[string]any{"subchart": false},
+			"minio": map[string]any{"enabled": false},
+			"s3": map[string]any{
+				"enabled": true, "bucket": in.Bucket, "region": in.Region,
+				"storageName": BackupStorage, "existingSecret": BackupSecret,
+			},
+		},
 		"openeverest": map[string]any{
 			"upgrade": map[string]any{"preflightChecks": false},
 		},
