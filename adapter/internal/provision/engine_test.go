@@ -585,3 +585,37 @@ func TestAStepKeepsWhatItNotedOnceItSucceeds(t *testing.T) {
 	assert.Equal(t, "Removed EBS volume vol-1.", rows[0].Detail)
 	assert.Empty(t, rows[1].Detail, "a note belongs to the step that made it")
 }
+
+func TestAStepReadsTheParametersItsRunWasStartedWith(t *testing.T) {
+	l := newLab(t)
+	var seen string
+	l.steps.hooks["role"] = func(_ context.Context, env provision.Env) error {
+		seen = env.Run.Params
+
+		return nil
+	}
+	e := l.engine(nil, "role")
+
+	_, err := e.StartWith(t.Context(), l.team, l.env, l.kind, `{"version":"0.2.0"}`)
+	require.NoError(t, err)
+	ran, err := e.RunOnce(t.Context())
+	require.NoError(t, err)
+	require.True(t, ran)
+
+	assert.JSONEq(t, `{"version":"0.2.0"}`, seen)
+}
+
+func TestBusyReportsAnEnvironmentWithARunInHand(t *testing.T) {
+	l := newLab(t)
+	e := l.engine(nil, "role")
+
+	busy, err := e.Busy(t.Context(), l.team, l.env)
+	require.NoError(t, err)
+	assert.False(t, busy)
+
+	_, err = e.Start(t.Context(), l.team, l.env, l.kind)
+	require.NoError(t, err)
+	busy, err = e.Busy(t.Context(), l.team, l.env)
+	require.NoError(t, err)
+	assert.True(t, busy)
+}

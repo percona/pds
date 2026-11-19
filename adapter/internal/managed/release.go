@@ -127,9 +127,11 @@ func RenderRelease(in ReleaseInput) ([]byte, error) {
 				"createNamespace": true,
 				"remediation":     map[string]any{"retries": 3},
 			},
-			// A failed upgrade rolls back once and stops retrying.
+			// A failed upgrade is attempted once, rolled back and not retried.
+			// Retries counts the attempts after the first, and a rollback after
+			// the last failure has to be asked for when there are none.
 			"upgrade": map[string]any{
-				"remediation":   map[string]any{"retries": 1, "remediateLastFailure": true},
+				"remediation":   map[string]any{"retries": 0, "remediateLastFailure": true, "strategy": "rollback"},
 				"cleanupOnFail": true,
 			},
 			"values": values,

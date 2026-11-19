@@ -23,6 +23,7 @@ type fakeTeamHub struct {
 	connected map[string]bool
 	forgotten []string
 	forgetErr error
+	releases  map[string]hub.HeartbeatRelease
 }
 
 func (f *fakeTeamHub) EnrollManaged(_ context.Context, name string) (hub.ManagedEnrollment, error) {
@@ -44,6 +45,12 @@ func (f *fakeTeamHub) Disconnect(_ context.Context, environment string) (bool, e
 }
 
 func (f *fakeTeamHub) EnvironmentConnected(environment string) bool { return f.connected[environment] }
+
+func (f *fakeTeamHub) EnvironmentRelease(environment string) (hub.HeartbeatRelease, bool) {
+	release, ok := f.releases[environment]
+
+	return release, ok
+}
 
 func newHubSide(t *testing.T, teams map[uint]*fakeTeamHub) *managed.HubSide {
 	t.Helper()
@@ -132,4 +139,21 @@ func TestHubSideDisconnectIsDoneForAnEnvironmentTheHubDoesNotKnow(t *testing.T) 
 
 	team.forgetErr = errors.New("the Git host is down")
 	require.Error(t, side.Disconnect(t.Context(), 7, "orders"))
+}
+
+func TestHubSideReadsTheReleaseTheTeamsEnvironmentReported(t *testing.T) {
+	mine := &fakeTeamHub{releases: map[string]hub.HeartbeatRelease{"orders": {Version: "0.2.0", State: hub.ReleaseReady}}}
+	side := newHubSide(t, map[uint]*fakeTeamHub{7: mine, 8: {}})
+
+	got, ok, err := side.Release(t.Context(), 7, "orders")
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, "0.2.0", got.Version)
+
+	_, ok, err = side.Release(t.Context(), 8, "orders")
+	require.NoError(t, err)
+	assert.False(t, ok, "another Team's environment of the same name reported nothing")
+
+	_, _, err = side.Release(t.Context(), 9, "orders")
+	assert.Error(t, err)
 }

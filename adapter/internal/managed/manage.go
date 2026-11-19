@@ -12,14 +12,6 @@ import (
 	"github.com/percona/pds/adapter/internal/store"
 )
 
-// The run kinds a person starts on a managed environment besides create and
-// delete.
-const (
-	KindUpgradePDS        = "upgrade_pds"
-	KindUpgradeKubernetes = "upgrade_kubernetes"
-	KindRebuild           = "rebuild"
-)
-
 // Progress says where the latest run of an environment stands.
 const (
 	ProgressInProgress = "in_progress"
@@ -316,7 +308,7 @@ func (m *Manager) Has(ctx context.Context, team uint, name string) bool {
 // Start queues a run on one of the Team's managed environments. A second run
 // while one is unfinished is store.ErrRunActive.
 func (m *Manager) Start(ctx context.Context, scope auth.Scope, name, kind string) (store.ProvisioningRun, error) {
-	if !slices.Contains([]string{KindUpgradePDS, KindUpgradeKubernetes, KindRebuild}, kind) {
+	if !slices.Contains([]string{KindUpgradePDS, KindKubernetes, KindRebuild}, kind) {
 		return store.ProvisioningRun{}, fmt.Errorf("%w: %q is not a run kind a person starts", ErrInvalid, kind)
 	}
 	if _, err := m.roster.Get(ctx, scope.Team.ID, name); err != nil {

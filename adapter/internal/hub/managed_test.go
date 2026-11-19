@@ -112,3 +112,35 @@ func TestEnvironmentConnectedFollowsTheFirstHeartbeat(t *testing.T) {
 	assert.True(t, svc.EnvironmentConnected("orders"))
 	assert.False(t, svc.EnvironmentConnected("billing"))
 }
+
+func TestEnvironmentReleaseIsWhatTheLastHeartbeatReported(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := managedHub(t)
+	_, err := svc.EnrollManaged(ctx, "orders")
+	require.NoError(t, err)
+	_, ok := svc.EnvironmentRelease("orders")
+	assert.False(t, ok, "no beat has reported a release")
+
+	at := time.Now()
+	svc.ApplyHeartbeat(hub.Heartbeat{Environment: "orders", Namespace: "pds", At: at,
+		Release: &hub.HeartbeatRelease{Version: "0.1.0", Attempted: "0.2.0", State: hub.ReleaseRolledBack}})
+
+	got, ok := svc.EnvironmentRelease("orders")
+	require.True(t, ok)
+	assert.Equal(t, "0.1.0", got.Version)
+	assert.Equal(t, "0.2.0", got.Attempted)
+	assert.Equal(t, hub.ReleaseRolledBack, got.State)
+	assert.WithinDuration(t, at, got.At, time.Second, "the time the hub received the beat")
+}
+
+func TestAnAgentThatPredatesTheReleaseReportLeavesItUnknown(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := managedHub(t)
+	_, err := svc.EnrollManaged(ctx, "orders")
+	require.NoError(t, err)
+
+	svc.ApplyHeartbeat(hub.Heartbeat{Environment: "orders", Namespace: "pds", At: time.Now()})
+
+	_, ok := svc.EnvironmentRelease("orders")
+	assert.False(t, ok)
+}

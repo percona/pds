@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/percona/pds/adapter/internal/client/aws"
+	"github.com/percona/pds/adapter/internal/hub"
 	"github.com/percona/pds/adapter/internal/provision"
 	"github.com/percona/pds/adapter/internal/store"
 )
@@ -18,6 +19,7 @@ const KindCreate = "create"
 // The names of the create steps, in order.
 const (
 	stepAssumeRole    = "assume-role"
+	stepClearStack    = "clear-stack"
 	stepCreateStack   = "create-stack"
 	stepWaitStack     = "wait-stack"
 	stepCreateBucket  = "create-bucket"
@@ -39,7 +41,7 @@ var CreateStepNames = []string{
 // a name that is not a create step.
 func Phase(step string) string {
 	switch step {
-	case stepAssumeRole, stepCreateStack, stepWaitStack, stepCreateBucket:
+	case stepAssumeRole, stepClearStack, stepCreateStack, stepWaitStack, stepCreateBucket:
 		return "Creating network and Kubernetes cluster"
 	case stepOpenAccess:
 		return "Connecting to the environment"
@@ -66,6 +68,9 @@ const (
 type Records interface {
 	Get(ctx context.Context, team uint, name string) (store.ManagedEnvironment, error)
 	SetStackFailureSeen(ctx context.Context, team uint, name string, seen bool) error
+	SetChartVersion(ctx context.Context, team uint, name, version string) error
+	SetSkippedVersion(ctx context.Context, team uint, name, version string) error
+	MarkReady(ctx context.Context, team uint, name string, now time.Time) error
 }
 
 // Connections reads the cloud connection an environment was created through.
@@ -85,6 +90,11 @@ type Cloud interface {
 	OpenAccess(ctx context.Context, t aws.Target, cidrs []string) (aws.ClusterAccess, error)
 	CloseAccess(ctx context.Context, t aws.Target) (string, error)
 	KubeToken(ctx context.Context, t aws.Target) (string, error)
+	PlanUpdate(ctx context.Context, t aws.Target, spec aws.UpdateSpec) (aws.ChangePlan, error)
+	ApplyPlan(ctx context.Context, t aws.Target, name string) error
+	DiscardPlan(ctx context.Context, t aws.Target, name string) error
+	DetectDrift(ctx context.Context, t aws.Target) ([]aws.Drift, error)
+	Cluster(ctx context.Context, t aws.Target) (aws.KubernetesState, error)
 }
 
 // KubeAccess is what the control plane calls an environment's Kubernetes API
@@ -128,6 +138,9 @@ type Hub interface {
 	WriteRelease(ctx context.Context, team uint, environment string, files map[string][]byte) error
 	// Connected reports whether the environment's agent has sent a heartbeat.
 	Connected(ctx context.Context, team uint, environment string) (bool, error)
+	// Release returns what the environment's agent last reported of its pds
+	// release, and false while it has reported none.
+	Release(ctx context.Context, team uint, environment string) (hub.HeartbeatRelease, bool, error)
 }
 
 // Settings are what the steps take from the deployment.
@@ -146,6 +159,8 @@ type Settings struct {
 	PollEvery time.Duration
 	StackWait time.Duration
 	JoinWait  time.Duration
+	// ReleaseWait bounds the wait for an upgrade's outcome.
+	ReleaseWait time.Duration
 	// DeleteWait bounds how long a delete waits for AWS to release what holds
 	// the environment's network, DrainWait how long it waits for databases and
 	// volume claims to leave the environment, and APIWait how long it keeps
@@ -164,6 +179,9 @@ func (s Settings) withDefaults() Settings {
 	}
 	if s.JoinWait <= 0 {
 		s.JoinWait = 20 * time.Minute
+	}
+	if s.ReleaseWait <= 0 {
+		s.ReleaseWait = 30 * time.Minute
 	}
 	if s.DeleteWait <= 0 {
 		s.DeleteWait = 30 * time.Minute
@@ -205,14 +223,20 @@ type scope struct {
 }
 
 func (d Deps) scope(ctx context.Context, run store.ProvisioningRun) (scope, error) {
-	rec, err := d.Records.Get(ctx, run.TeamID, run.Environment)
+	return d.scopeFor(ctx, run.TeamID, run.Environment, "pds-job-provision-"+strconv.FormatUint(uint64(run.ID), 10))
+}
+
+// scopeFor reads an environment and its connection, and says where a call for it
+// goes and who it is made as. Nothing here calls AWS.
+func (d Deps) scopeFor(ctx context.Context, team uint, environment, sourceIdentity string) (scope, error) {
+	rec, err := d.Records.Get(ctx, team, environment)
 	if errors.Is(err, store.ErrManagedEnvironmentUnknown) {
 		return scope{}, provision.Permanent(err, "This environment is not a managed environment. Contact Percona support.")
 	}
 	if err != nil {
 		return scope{}, provision.Retryable(err, genericSentence)
 	}
-	conn, err := d.Connections.Get(ctx, run.TeamID, rec.ConnectionID)
+	conn, err := d.Connections.Get(ctx, team, rec.ConnectionID)
 	if err != nil {
 		return scope{}, provision.Retryable(err, genericSentence)
 	}
@@ -223,12 +247,12 @@ func (d Deps) scope(ctx context.Context, run store.ProvisioningRun) (scope, erro
 		target: aws.Target{
 			RoleARN:        aws.RoleARN(conn.AccountID, conn.ID, "control-plane"),
 			ExternalID:     conn.ExternalID,
-			SourceIdentity: "pds-job-provision-" + strconv.FormatUint(uint64(run.ID), 10),
+			SourceIdentity: sourceIdentity,
 			Region:         rec.Region,
 			StackName:      "pds-env-" + rec.ID,
 			EKSName:        cluster,
 		},
-		where: aws.Where{Account: conn.AccountID, Region: rec.Region, Cluster: run.Environment, Granted: d.Granted},
+		where: aws.Where{Account: conn.AccountID, Region: rec.Region, Cluster: environment, Granted: d.Granted},
 	}, nil
 }
 
@@ -256,12 +280,19 @@ func refused(err error, refusal aws.Refusal, where aws.Where) error {
 	})
 }
 
+type stepFunc func(context.Context, provision.Env, scope) error
+
 // CreateKind is the run that builds a managed environment, step by step. Every
 // step is idempotent, and any step that needs the Kubernetes API opens the
 // Access window again, because a run that waited for a lease holds none.
 func CreateKind(d Deps) provision.Kind {
 	d.Settings = d.Settings.withDefaults()
-	steps := map[string]func(context.Context, provision.Env, scope) error{
+
+	return d.kind(KindCreate, CreateStepNames, d.createSteps())
+}
+
+func (d Deps) createSteps() map[string]stepFunc {
+	return map[string]stepFunc{
 		stepAssumeRole:    d.assumeRole,
 		stepCreateStack:   d.createStack,
 		stepWaitStack:     d.waitStack,
@@ -273,10 +304,15 @@ func CreateKind(d Deps) provision.Kind {
 		stepCloseAccess:   d.closeAccess,
 		stepWaitHeartbeat: d.waitHeartbeat,
 	}
-	kind := provision.Kind{Name: KindCreate}
-	for _, name := range CreateStepNames {
-		run := steps[name]
-		kind.Steps = append(kind.Steps, provision.Step{Name: name, Run: func(ctx context.Context, env provision.Env) error {
+}
+
+// kind turns an ordered list of step names into a run kind whose steps each
+// read the environment they work on.
+func (d Deps) kind(name string, order []string, steps map[string]stepFunc) provision.Kind {
+	kind := provision.Kind{Name: name}
+	for _, stepName := range order {
+		run := steps[stepName]
+		kind.Steps = append(kind.Steps, provision.Step{Name: stepName, Run: func(ctx context.Context, env provision.Env) error {
 			s, err := d.scope(ctx, env.Run)
 			if err != nil {
 				return err
@@ -311,12 +347,9 @@ func ConnectionReady(d Deps) func(ctx context.Context, run store.ProvisioningRun
 	}
 }
 
-func (d Deps) assumeRole(ctx context.Context, _ provision.Env, s scope) error {
-	if s.conn.State != store.CloudReady {
-		return fmt.Errorf("%w: the connection is %s", provision.ErrConnectionUnavailable, s.conn.State)
-	}
-	if err := d.Cloud.CheckRole(ctx, s.target); err != nil {
-		return s.fail(err)
+func (d Deps) assumeRole(ctx context.Context, env provision.Env, s scope) error {
+	if err := d.checkRole(ctx, env, s); err != nil {
+		return err
 	}
 	if refusal, found := d.Cloud.Preflight(ctx, s.target, aws.Needs{VCPUs: NodeVCPUs}); found {
 		return refused(errors.New("the preflight found the account cannot build the environment"), refusal, s.where)
@@ -466,8 +499,26 @@ func (d Deps) installFlux(ctx context.Context, env provision.Env, s scope) error
 }
 
 func (d Deps) writeRelease(ctx context.Context, _ provision.Env, s scope) error {
+	// A rebuild installs the version the environment ran, not the newest one.
+	version := s.rec.ChartVersion
+	if version == "" {
+		version = d.Settings.ChartVersion
+	}
+	if err := d.commitRelease(ctx, s, version); err != nil {
+		return err
+	}
+	if err := d.Records.SetChartVersion(ctx, s.rec.TeamID, s.rec.Name, version); err != nil {
+		return provision.Retryable(err, genericSentence)
+	}
+
+	return nil
+}
+
+// commitRelease writes the pds release of a chart version into the
+// environment's Git repository, where Flux applies it.
+func (d Deps) commitRelease(ctx context.Context, s scope, version string) error {
 	files, err := ReleaseFiles(s.rec.Name, ReleaseInput{
-		ChartVersion: d.Settings.ChartVersion, HubURL: d.Settings.HubURL, EnvironmentName: s.rec.Name, EnvironmentID: s.rec.ID,
+		ChartVersion: version, HubURL: d.Settings.HubURL, EnvironmentName: s.rec.Name, EnvironmentID: s.rec.ID,
 		ImageRepository: d.Settings.ImageRepository, ImageTag: d.Settings.ImageTag,
 		Bucket: bucketName(s), Region: s.rec.Region,
 	})
@@ -514,6 +565,10 @@ func (d Deps) waitHeartbeat(ctx context.Context, _ provision.Env, s scope) error
 			return provision.Retryable(err, genericSentence)
 		}
 		if connected {
+			if err := d.Records.MarkReady(ctx, s.rec.TeamID, s.rec.Name, time.Now()); err != nil {
+				return provision.Retryable(err, genericSentence)
+			}
+
 			return nil
 		}
 		if time.Now().After(deadline) {

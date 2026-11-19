@@ -82,3 +82,9 @@ func (s *Service) EnvironmentConnected(environment string) bool {
 
 	return ok && got.Status == StatusConnected
 }
+
+// EnvironmentRelease returns the pds release state the environment's agent
+// last reported, and false while it has reported none.
+func (s *Service) EnvironmentRelease(environment string) (HeartbeatRelease, bool) {
+	return s.inv.Release(environment)
+}

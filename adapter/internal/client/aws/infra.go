@@ -63,6 +63,8 @@ type StackState struct {
 	Exists  bool
 	Status  string
 	Outputs map[string]string
+	// Parameters are the values the stack runs with.
+	Parameters map[string]string
 	// FailureReason is the first failed resource's raw text, kept so it can be
 	// classified. It is never shown to a person.
 	FailureReason string
@@ -119,6 +121,10 @@ type Infra struct {
 	quotas  func(sdkaws.Config) quotasAPI
 	regions func(sdkaws.Config) regionsAPI
 	buckets func(sdkaws.Config) bucketAPI
+	// changes and nodes are the calls an update, a drift check and a read of the
+	// node groups use besides the create steps' own.
+	changes func(sdkaws.Config) changeAPI
+	nodes   func(sdkaws.Config) nodegroupAPI
 	// tagging, ec2, elb and emptyBuckets are the calls a delete finds and
 	// removes what the environment owns with.
 	tagging      func(sdkaws.Config) taggingAPI
@@ -138,6 +144,8 @@ func NewInfra(base sdkaws.Config) *Infra {
 		quotas:       func(cfg sdkaws.Config) quotasAPI { return servicequotas.NewFromConfig(cfg) },
 		regions:      func(cfg sdkaws.Config) regionsAPI { return ec2.NewFromConfig(cfg) },
 		buckets:      func(cfg sdkaws.Config) bucketAPI { return s3.NewFromConfig(cfg) },
+		changes:      func(cfg sdkaws.Config) changeAPI { return cloudformation.NewFromConfig(cfg) },
+		nodes:        func(cfg sdkaws.Config) nodegroupAPI { return eks.NewFromConfig(cfg) },
 		tagging:      func(cfg sdkaws.Config) taggingAPI { return resourcegroupstaggingapi.NewFromConfig(cfg) },
 		ec2:          func(cfg sdkaws.Config) ec2SweepAPI { return ec2.NewFromConfig(cfg) },
 		elb:          func(cfg sdkaws.Config) elbAPI { return elasticloadbalancingv2.NewFromConfig(cfg) },
@@ -244,11 +252,14 @@ func (i *Infra) Stack(ctx context.Context, t Target) (StackState, error) {
 		return StackState{}, nil
 	}
 	stack := described.Stacks[0]
-	out := StackState{Exists: true, Status: string(stack.StackStatus), Outputs: map[string]string{}}
+	out := StackState{Exists: true, Status: string(stack.StackStatus), Outputs: map[string]string{}, Parameters: map[string]string{}}
+	for _, p := range stack.Parameters {
+		out.Parameters[sdkaws.ToString(p.ParameterKey)] = sdkaws.ToString(p.ParameterValue)
+	}
 	for _, o := range stack.Outputs {
 		out.Outputs[sdkaws.ToString(o.OutputKey)] = sdkaws.ToString(o.OutputValue)
 	}
-	if out.Failed() {
+	if out.Failed() || strings.HasPrefix(out.Status, "UPDATE_ROLLBACK") {
 		events, err := client.DescribeStackEvents(ctx, &cloudformation.DescribeStackEventsInput{StackName: &t.StackName})
 		if err != nil {
 			return StackState{}, fmt.Errorf("describe stack events: %w", err)

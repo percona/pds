@@ -17,7 +17,7 @@ Parameters:
   KubernetesVersion:
     Type: String
     Default: "1.33"
-    Description: The Kubernetes version a new environment starts on. Existing stacks keep theirs.
+    Description: The Kubernetes version of the cluster and its node group. A new environment starts on the default, and an upgrade run moves an existing stack one minor version at a time.
   VpcCidr:
     Type: String
     Default: "10.42.0.0/16"
@@ -333,6 +333,8 @@ Resources:
       ClusterName:
         Ref: Cluster
       NodegroupName: "pds-nodes"
+      Version:
+        Ref: KubernetesVersion
       NodeRole:
         Ref: NodeRoleArn
       Subnets:

@@ -27,6 +27,14 @@ import (
 // resumes paused runs and prunes old ones.
 const provisionSweepEvery = time.Minute
 
+// lifecycleUpgradeEvery is how often a replica looks for environments whose
+// maintenance window is open, and lifecycleCheckEvery how often it reads their
+// infrastructure for drift and loss.
+const (
+	lifecycleUpgradeEvery = 10 * time.Minute
+	lifecycleCheckEvery   = time.Hour
+)
+
 // managedSettings turns the deployment's configuration into what the create
 // steps and the request that starts them depend on.
 func managedSettings(cfg config.Config) (managed.Settings, managed.CreatorSettings) {
@@ -264,7 +272,10 @@ func runProvisioning(ctx context.Context, cfg config.Config, db *store.Starter, 
 		}
 	}
 
-	engine, err := provision.New(st.Provisioning(), []provision.Kind{managed.CreateKind(deps), managed.DeleteKind(deps)}, provision.Options{
+	engine, err := provision.New(st.Provisioning(), []provision.Kind{
+		managed.CreateKind(deps), managed.DeleteKind(deps),
+		managed.UpgradeKind(deps), managed.KubernetesKind(deps), managed.RebuildKind(deps),
+	}, provision.Options{
 		Owner: workerOwner(), LeaseTTL: cfg.ProvisionLeaseTTL, MaxAttempts: cfg.ProvisionMaxAttempts,
 		WindowMaxAge:    cfg.ProvisionWindowMaxAge,
 		ConnectionReady: managed.ConnectionReady(deps),
@@ -277,6 +288,14 @@ func runProvisioning(ctx context.Context, cfg config.Config, db *store.Starter, 
 		return
 	}
 	late.set(runBook{engine: engine, reads: st.Provisioning()})
+
+	paths, err := managed.PinnedUpgrades()
+	if err != nil {
+		logger.ErrorContext(ctx, "managed upgrades are off", slog.String("cause", log.RedactText(err.Error())))
+	} else {
+		life := managed.NewLifecycle(deps, st.ManagedEnvironments(), engine, paths, managed.LifecycleOptions{Logger: logger})
+		go life.Run(ctx, lifecycleUpgradeEvery, lifecycleCheckEvery)
+	}
 
 	go func() {
 		ticker := time.NewTicker(provisionSweepEvery)
