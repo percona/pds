@@ -19,6 +19,7 @@ another module needs to import something. Tests sit next to the code.
 | `internal/engine` | The engine plugin contract, the registry, and engine errors. `oe` is the shared OpenEverest implementation; `mysql` and `postgresql` are its two flavors |
 | `internal/hub` | Hub state: environment inventory, join tokens, the work queue, and the two Git stores (GitHub, or a local directory) |
 | `internal/agent` | The `agent` role: the heartbeat loop and the work it runs locally |
+| `internal/provision` | Provisioning runs: the lease-based worker, step retry and backoff, pause and resume, the Access window sweeper and run retention. It knows no cloud: a run kind brings its steps |
 | `internal/store` | The adapter's own PostgreSQL: GORM models, migration, sealing |
 | `internal/auth` | Password hashing, invite and session tokens, the signed cookie, request identity |
 | `internal/config` | Environment configuration: every setting is read and validated here |
