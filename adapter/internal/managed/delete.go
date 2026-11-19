@@ -145,7 +145,7 @@ func (d Deps) insideEnvironment(
 	remove func(KubeAccess) (int, error),
 ) error {
 	access, err := d.open(ctx, env, s)
-	if aws.ClusterMissing(err) {
+	if aws.EKSMissing(err) {
 		env.Note("The Kubernetes cluster was already gone, so nothing was removed from inside it.")
 
 		return nil

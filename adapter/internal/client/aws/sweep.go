@@ -24,10 +24,10 @@ var ErrNotRemovable = errors.New("this kind of resource is not removed by the sw
 // a controller. Its value is the environment's ID.
 const ownershipTag = "percona.com/pds"
 
-// ClusterMissing reports whether err says the EKS cluster does not exist, as
+// EKSMissing reports whether err says the EKS cluster does not exist, as
 // it does for a create that stopped before the cluster or a delete that ran
 // before.
-func ClusterMissing(err error) bool {
+func EKSMissing(err error) bool {
 	return err != nil && errorCode(err) == "ResourceNotFoundException"
 }
 

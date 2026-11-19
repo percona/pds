@@ -108,7 +108,7 @@ func sweepInfra(tagging *fakeTagging, e *fakeEC2Sweep, l *fakeELB) *Infra {
 	return infra
 }
 
-func TestOwnedFindsWhatIsTaggedOrOwnedByTheCluster(t *testing.T) {
+func TestOwnedFindsWhatIsTaggedOrOwnedByTheEKS(t *testing.T) {
 	tagging := &fakeTagging{byKey: map[string][]string{
 		"percona.com/pds":                        {volumeARN, snapARN, vpcARN, bucketARN},
 		"kubernetes.io/cluster/pds-0123456789ab": {volumeARN, eniARN, sgARN},
@@ -258,8 +258,8 @@ func TestDeleteBucketIsDoneWhenThereIsNoBucket(t *testing.T) {
 	assert.False(t, removed)
 }
 
-func TestClusterMissingRecognisesAnAbsentCluster(t *testing.T) {
-	assert.True(t, ClusterMissing(fmt.Errorf("create access entry: %w", apiErr("ResourceNotFoundException"))))
-	assert.False(t, ClusterMissing(fmt.Errorf("create access entry: %w", apiErr("AccessDeniedException"))))
-	assert.False(t, ClusterMissing(nil))
+func TestEKSMissingRecognisesAnAbsentEKS(t *testing.T) {
+	assert.True(t, EKSMissing(fmt.Errorf("create access entry: %w", apiErr("ResourceNotFoundException"))))
+	assert.False(t, EKSMissing(fmt.Errorf("create access entry: %w", apiErr("AccessDeniedException"))))
+	assert.False(t, EKSMissing(nil))
 }

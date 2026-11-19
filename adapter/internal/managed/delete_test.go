@@ -215,7 +215,7 @@ func TestDeleteWaitsForDatabasesToLeaveBeforeGoingOn(t *testing.T) {
 	assert.Equal(t, 3, strings.Count(strings.Join(d.drainer.calls, ","), "databases"))
 }
 
-func TestDeleteRecordsAnEnvironmentItCannotReachAndGoesOnToDeleteTheCluster(t *testing.T) {
+func TestDeleteRecordsAnEnvironmentItCannotReachAndGoesOnToDeleteTheEKS(t *testing.T) {
 	d := newDeleteLab(t)
 	d.drainer.err = errors.New("dial tcp: i/o timeout")
 	e := d.engine()
@@ -230,7 +230,7 @@ func TestDeleteRecordsAnEnvironmentItCannotReachAndGoesOnToDeleteTheCluster(t *t
 	assert.Equal(t, 1, d.cloud.count("delete-stack"), "the cluster is deleted anyway and the sweep removes the rest")
 }
 
-func TestDeleteOfAnEnvironmentWhoseClusterWasNeverBuiltSkipsTheInside(t *testing.T) {
+func TestDeleteOfAnEnvironmentWhoseEKSWasNeverBuiltSkipsTheInside(t *testing.T) {
 	d := newDeleteLab(t)
 	d.cloud.stacks = []aws.StackState{{Exists: false}}
 	d.cloud.failAt["open-access"] = []error{apiErr("ResourceNotFoundException", "No cluster found"), apiErr("ResourceNotFoundException", "No cluster found")}
