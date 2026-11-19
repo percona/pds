@@ -55,6 +55,7 @@ jobs:
       SPOKE_CLUSTER: spoke-a
       NAMESPACE: pds
       LAB_SPOKE_WORKERS: "4"
+      LAB_KIND_RETAIN: "1"
       LIFECYCLE_TIMEOUT: "1200"
       KIND_VERSION: v0.27.0
       K8S_IMAGE: kindest/node:v1.32.2
@@ -82,6 +83,15 @@ jobs:
             echo "a mysqld AppArmor profile is still loaded" >&2
             exit 1
           fi
+
+      - name: raise the runner's inotify limits
+        run: |
+          uname -r
+          stat -fc %T /sys/fs/cgroup
+          sysctl fs.inotify.max_user_instances fs.inotify.max_user_watches fs.file-max
+          nproc; free -m
+          sudo sysctl -w fs.inotify.max_user_instances=8192
+          sudo sysctl -w fs.inotify.max_user_watches=1048576
 
       - uses: actions/setup-node@v4
         with:
@@ -158,6 +168,15 @@ jobs:
           fi
           cd apps/mcp
           PDS_REAL_URL=http://127.0.0.1:18080 go test ./contract -count=1 -v
+
+      - name: kubelet journals of the kind nodes
+        if: failure()
+        run: |
+          for n in $(docker ps -a --format '{{.Names}}' | grep -E 'control-plane|worker'); do
+            echo "::group::${n}"
+            docker exec "${n}" journalctl -u kubelet --no-pager 2>&1 | tail -n 80 || true
+            echo "::endgroup::"
+          done
 
       - name: collect diagnostics
         if: failure() || cancelled()

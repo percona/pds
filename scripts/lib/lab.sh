@@ -625,7 +625,7 @@ lab_create_kind() {
     rm -f "${config}"
     return 1
   fi
-  kind create cluster --config "${config}" --wait 180s
+  kind create cluster --config "${config}" --wait 180s ${LAB_KIND_RETAIN:+--retain}
   rm -f "${config}"
 }
 
