@@ -186,7 +186,6 @@ type fakeHub struct {
 	joins     int
 	connected atomic.Bool
 	release   *hub.HeartbeatRelease
-	releases  []string
 }
 
 func (f *fakeHub) Join(_ context.Context, _ uint, environment string) (managed.Join, error) {

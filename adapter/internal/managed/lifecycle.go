@@ -408,7 +408,7 @@ func (l *Lifecycle) UpdateInfrastructure(ctx context.Context, who auth.Scope, na
 	case verdict.ReplacesNodeGroup && !in.ConfirmNodeGroupReplace:
 		return store.ProvisioningRun{}, ErrConfirmRequired
 	}
-	params, err := json.Marshal(KubernetesParams{KubernetesVersion: in.KubernetesVersion, ConfirmNodeGroupReplace: in.ConfirmNodeGroupReplace})
+	params, err := json.Marshal(KubernetesParams(in))
 	if err != nil {
 		return store.ProvisioningRun{}, fmt.Errorf("encode the update: %w", err)
 	}
