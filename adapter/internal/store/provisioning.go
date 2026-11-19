@@ -192,6 +192,43 @@ func (p *Provisioning) Start(ctx context.Context, team uint, environment, kind s
 	return run, nil
 }
 
+// Abandon cancels every unfinished run of the environment and records a delete
+// run that already succeeded with the message, so the environment's runs are
+// kept for the retention and pruned after it. It refuses while a worker holds a
+// live lease on a run: that worker is changing the environment right now.
+func (p *Provisioning) Abandon(ctx context.Context, team uint, environment, message string, now time.Time) (ProvisioningRun, error) {
+	run := ProvisioningRun{
+		TeamID: team, Environment: environment, Kind: KindDelete, Status: RunSucceeded, Message: message,
+		NotBefore: now, CreatedAt: now, UpdatedAt: now, FinishedAt: &now,
+	}
+
+	err := p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockEnvironment(tx, team, environment); err != nil {
+			return err
+		}
+		scope := tx.Model(&ProvisioningRun{}).Where("team_id = ? AND environment = ?", team, environment)
+
+		var live int64
+		if err := scope.Session(&gorm.Session{}).Where("status = 'running' AND lease_expires_at >= ?", now).Count(&live).Error; err != nil {
+			return err
+		}
+		if live > 0 {
+			return ErrRunActive
+		}
+		if err := scope.Session(&gorm.Session{}).Where(unfinished).
+			Updates(map[string]any{"status": RunCancelled, "finished_at": now, "updated_at": now, "lease_owner": "", "lease_expires_at": nil}).Error; err != nil {
+			return err
+		}
+
+		return tx.Create(&run).Error
+	})
+	if err != nil {
+		return ProvisioningRun{}, scrub(err)
+	}
+
+	return run, nil
+}
+
 // Run reads one run.
 func (p *Provisioning) Run(ctx context.Context, id uint) (ProvisioningRun, error) {
 	var run ProvisioningRun
