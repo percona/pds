@@ -12,6 +12,7 @@ import (
 	"github.com/percona/pds/adapter/internal/auth"
 	"github.com/percona/pds/adapter/internal/config"
 	"github.com/percona/pds/adapter/internal/features"
+	"github.com/percona/pds/adapter/internal/managed"
 	"github.com/percona/pds/adapter/internal/mcp"
 	"github.com/percona/pds/adapter/internal/service"
 )
@@ -42,6 +43,9 @@ type Deps struct {
 	// CloudConnections is nil where no control plane principal is configured,
 	// and its routes then answer 501.
 	CloudConnections *service.CloudConnections
+	// ManagedEnvironments starts the creation of a managed environment. It is
+	// nil where this deployment cannot build one.
+	ManagedEnvironments *managed.Creator
 
 	// Connections stores UI-pasted ServiceNow and Anthropic credentials.
 	Connections *service.Connections

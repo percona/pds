@@ -16,12 +16,16 @@ type FluxSource func(ctx context.Context, version string) ([]byte, error)
 // FluxReleases is where Flux publishes its install manifests.
 const FluxReleases = "https://github.com/fluxcd/flux2/releases/download"
 
+// FluxVersion is the Flux release a managed environment bootstraps with. It is
+// the flux version in charts/pds/compatibility.yaml, which a test holds equal.
+const FluxVersion = "2.5.1"
+
 // PinnedFluxDigests are the SHA-256 digests of the install manifests the
 // control plane applies with cluster-admin rights. A release asset can be
 // replaced after it was published, so the digest is what says the bytes are the
 // ones that were reviewed. A version with no entry is refused.
 var PinnedFluxDigests = map[string]string{
-	"2.5.1": "1ab601012b35e0a84c817f839edb2a52f3fabab2a33d5498b29cf96f9feb57b2",
+	FluxVersion: "1ab601012b35e0a84c817f839edb2a52f3fabab2a33d5498b29cf96f9feb57b2",
 }
 
 // maxFluxManifest bounds what is read from the release, which is about 1 MiB.

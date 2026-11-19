@@ -98,6 +98,7 @@ func TestThePinnedFluxVersionHasADigestTheJoinScriptAgreesWith(t *testing.T) {
 	match := regexp.MustCompile(`FLUX_PINNED_SHA256="([0-9a-f]{64})"`).FindSubmatch(script)
 	require.NotNil(t, match)
 
+	assert.Equal(t, managed.FluxVersion, pin.Flux.Version, "bump FluxVersion with the pin")
 	assert.Equal(t, string(match[1]), managed.PinnedFluxDigests[pin.Flux.Version],
 		"the control plane and the join script install the same Flux manifest")
 }
