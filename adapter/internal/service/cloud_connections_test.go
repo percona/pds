@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/percona/pds/adapter/internal/auth"
+	"github.com/percona/pds/adapter/internal/client/aws"
 	"github.com/percona/pds/adapter/internal/service"
 	"github.com/percona/pds/adapter/internal/store"
 )
@@ -173,12 +174,12 @@ func (f *fakeCloudStore) Events(_ context.Context, _ uint, _ string) ([]store.Cl
 // fakeInspector answers every inspection with what the test set, and keeps
 // the requests.
 type fakeInspector struct {
-	result   service.CloudInspection
+	result   aws.Inspection
 	err      error
-	requests []service.CloudInspectRequest
+	requests []aws.InspectRequest
 }
 
-func (f *fakeInspector) Inspect(_ context.Context, in service.CloudInspectRequest) (service.CloudInspection, error) {
+func (f *fakeInspector) Inspect(_ context.Context, in aws.InspectRequest) (aws.Inspection, error) {
 	f.requests = append(f.requests, in)
 
 	return f.result, f.err
@@ -221,7 +222,7 @@ func (f *cloudFixture) connect(t *testing.T, account string) (string, service.Cl
 }
 
 func (f *cloudFixture) healthy(connection service.CloudEnrollment) {
-	f.inspector.result = service.CloudInspection{
+	f.inspector.result = aws.Inspection{
 		AccountID: "123456789012", StackStatus: "CREATE_COMPLETE", TemplateVersion: service.CloudTemplateVersion,
 	}
 }
@@ -356,19 +357,19 @@ func TestEverySourceIdentityMatchesTheTrustPolicyPatterns(t *testing.T) {
 func TestACheckExplainsEachWayAnAccountIsNotReady(t *testing.T) {
 	tests := []struct {
 		name       string
-		inspection service.CloudInspection
+		inspection aws.Inspection
 		err        error
 		wantState  string
 		wantReason string
 	}{
-		{"role refused", service.CloudInspection{}, service.ErrCloudAssumeDenied, store.CloudPending, "role"},
-		{"aws unreachable", service.CloudInspection{}, errors.New("dial tcp: i/o timeout"), store.CloudPending, "could not check"},
-		{"other account", service.CloudInspection{AccountID: "999999999999", StackStatus: "CREATE_COMPLETE", TemplateVersion: 1}, nil, store.CloudPending, "different AWS account"},
-		{"stack still creating", service.CloudInspection{AccountID: "123456789012", StackStatus: "CREATE_IN_PROGRESS", TemplateVersion: 1}, nil, store.CloudPending, "still being created"},
-		{"stack rolled back", service.CloudInspection{AccountID: "123456789012", StackStatus: "ROLLBACK_COMPLETE", TemplateVersion: 1}, nil, store.CloudPending, "stack"},
-		{"role missing", service.CloudInspection{AccountID: "123456789012", StackStatus: "UPDATE_COMPLETE", TemplateVersion: 1, MissingRoles: []string{"pds-x-node"}}, nil, store.CloudPending, "pds-x-node"},
-		{"old template", service.CloudInspection{AccountID: "123456789012", StackStatus: "UPDATE_COMPLETE", TemplateVersion: 0}, nil, store.CloudOutOfDate, "Rerun"},
-		{"healthy after rollback of an update", service.CloudInspection{AccountID: "123456789012", StackStatus: "UPDATE_ROLLBACK_COMPLETE", TemplateVersion: 1}, nil, store.CloudReady, ""},
+		{"role refused", aws.Inspection{}, aws.ErrAssumeDenied, store.CloudPending, "role"},
+		{"aws unreachable", aws.Inspection{}, errors.New("dial tcp: i/o timeout"), store.CloudPending, "could not check"},
+		{"other account", aws.Inspection{AccountID: "999999999999", StackStatus: "CREATE_COMPLETE", TemplateVersion: 1}, nil, store.CloudPending, "different AWS account"},
+		{"stack still creating", aws.Inspection{AccountID: "123456789012", StackStatus: "CREATE_IN_PROGRESS", TemplateVersion: 1}, nil, store.CloudPending, "still being created"},
+		{"stack rolled back", aws.Inspection{AccountID: "123456789012", StackStatus: "ROLLBACK_COMPLETE", TemplateVersion: 1}, nil, store.CloudPending, "stack"},
+		{"role missing", aws.Inspection{AccountID: "123456789012", StackStatus: "UPDATE_COMPLETE", TemplateVersion: 1, MissingRoles: []string{"pds-x-node"}}, nil, store.CloudPending, "pds-x-node"},
+		{"old template", aws.Inspection{AccountID: "123456789012", StackStatus: "UPDATE_COMPLETE", TemplateVersion: 0}, nil, store.CloudOutOfDate, "Rerun"},
+		{"healthy after rollback of an update", aws.Inspection{AccountID: "123456789012", StackStatus: "UPDATE_ROLLBACK_COMPLETE", TemplateVersion: 1}, nil, store.CloudReady, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -393,7 +394,7 @@ func TestAReadyConnectionThatStopsAnsweringIsUnreachableNotPending(t *testing.T)
 	_, err := f.svc.Verify(t.Context(), f.scope, got.ConnectionID)
 	require.NoError(t, err)
 
-	f.inspector.result, f.inspector.err = service.CloudInspection{}, service.ErrCloudAssumeDenied
+	f.inspector.result, f.inspector.err = aws.Inspection{}, aws.ErrAssumeDenied
 	row, err := f.svc.Verify(t.Context(), f.scope, got.ConnectionID)
 	require.NoError(t, err)
 
@@ -441,7 +442,7 @@ func TestTheHourlyCheckVisitsEveryConnectionAndOneFailureDoesNotStopTheRest(t *t
 	f := newCloudFixture(t)
 	f.connect(t, "123456789012")
 	f.connect(t, "210987654321")
-	f.inspector.err = service.ErrCloudAssumeDenied
+	f.inspector.err = aws.ErrAssumeDenied
 
 	require.NoError(t, f.svc.CheckAll(t.Context()))
 

@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/percona/pds/adapter/internal/auth"
+	"github.com/percona/pds/adapter/internal/client/aws"
 	"github.com/percona/pds/adapter/internal/store"
 )
 
@@ -33,10 +34,6 @@ var (
 	// ErrCloudUnavailable means this deployment has no control plane principal,
 	// so no role in a customer's account could trust it.
 	ErrCloudUnavailable = errors.New("cloud connections are not configured")
-	// ErrCloudAssumeDenied means AWS refused to let the control plane assume
-	// the connection's role. An inspector returns it so the service can tell a
-	// missing or untrusting role from an AWS outage.
-	ErrCloudAssumeDenied = errors.New("the role cannot be assumed")
 )
 
 var (
@@ -62,31 +59,11 @@ type CloudStore interface {
 	Events(ctx context.Context, teamID uint, id string) ([]store.CloudEvent, error)
 }
 
-// CloudInspectRequest names what to look at in a customer's account.
-type CloudInspectRequest struct {
-	RoleARN        string
-	ExternalID     string
-	SourceIdentity string
-	Region         string
-	StackName      string
-	// RoleNames are the roles the stack makes besides the one assumed.
-	RoleNames []string
-}
-
-// CloudInspection is what the account answered.
-type CloudInspection struct {
-	AccountID       string
-	StackStatus     string
-	TemplateVersion int
-	// MissingRoles are the RoleNames that do not exist.
-	MissingRoles []string
-}
-
 // CloudInspector assumes a connection's role afresh and reads the account. The
 // aws client is the production implementation; tests fake it. It returns
-// ErrCloudAssumeDenied when AWS refuses the role.
+// aws.ErrAssumeDenied when AWS refuses the role.
 type CloudInspector interface {
-	Inspect(ctx context.Context, in CloudInspectRequest) (CloudInspection, error)
+	Inspect(ctx context.Context, in aws.InspectRequest) (aws.Inspection, error)
 }
 
 // CloudOptions configures the service.
@@ -340,13 +317,13 @@ func (c *CloudConnections) liveToken(ctx context.Context, token string) (store.C
 // check assumes the connection's role afresh and records what it finds. It
 // never simulates policies, since a simulation misses service control policies.
 func (c *CloudConnections) check(ctx context.Context, row store.CloudConnection, sourceIdentity string) (store.CloudConnection, error) {
-	inspection, err := c.inspector.Inspect(ctx, CloudInspectRequest{
+	inspection, err := c.inspector.Inspect(ctx, aws.InspectRequest{
 		RoleARN: cloudRoleARN(row.AccountID, row.ID, "control-plane"), ExternalID: row.ExternalID,
 		SourceIdentity: sourceIdentity, Region: row.StackRegion, StackName: row.StackName,
 		RoleNames: []string{cloudRoleName(row.ID, "cloudformation"), cloudRoleName(row.ID, "eks-cluster"), cloudRoleName(row.ID, "node"), cloudRoleName(row.ID, "ebs-csi")},
 	})
 	result := judgeCloudCheck(row, inspection, err)
-	if err != nil && !errors.Is(err, ErrCloudAssumeDenied) {
+	if err != nil && !errors.Is(err, aws.ErrAssumeDenied) {
 		c.opts.Logger.WarnContext(ctx, "cloud connection check could not reach the account", "connection", row.ID, "error", err)
 	}
 
@@ -356,7 +333,7 @@ func (c *CloudConnections) check(ctx context.Context, row store.CloudConnection,
 // judgeCloudCheck turns what the account answered into a state and a sentence
 // for the customer. A connection that has never been Ready stays Pending
 // while it is being set up, and one that was Ready becomes Unreachable.
-func judgeCloudCheck(row store.CloudConnection, in CloudInspection, err error) store.CloudCheck {
+func judgeCloudCheck(row store.CloudConnection, in aws.Inspection, err error) store.CloudCheck {
 	notReady := store.CloudPending
 	if row.ReadyAt != nil {
 		notReady = store.CloudUnreachable
@@ -364,7 +341,7 @@ func judgeCloudCheck(row store.CloudConnection, in CloudInspection, err error) s
 	refuse := func(reason string) store.CloudCheck { return store.CloudCheck{State: notReady, Reason: reason} }
 
 	switch {
-	case errors.Is(err, ErrCloudAssumeDenied):
+	case errors.Is(err, aws.ErrAssumeDenied):
 		return refuse("The control plane cannot assume the role in your AWS account. Rerun the connect command, or check that the stack still exists.")
 	case err != nil:
 		return refuse("The control plane could not check your AWS account. Try Verify again in a few minutes.")
