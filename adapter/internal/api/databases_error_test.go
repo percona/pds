@@ -64,14 +64,6 @@ func TestDatabaseErrorMapsAnUnreachableEnvironment(t *testing.T) {
 	assert.NotContains(t, got.Message, "wait")
 }
 
-func TestDatabaseErrorSaysACopyIsStillBeingRestored(t *testing.T) {
-	got := databaseError(fmt.Errorf("%w: %q", hub.ErrRestoring, "spoke-a/pds.reporting-restore-1"), "reporting-restore-1")
-
-	require.NotNil(t, got)
-	assert.Equal(t, CodeConflict, got.Code)
-	assert.Equal(t, "This database is still being restored. Try again once the restore finishes.", got.Message)
-}
-
 // A restore refused for its engine carries the engine cause too, and must read
 // as a restore refusal rather than a create one, no longer claims PostgreSQL is
 // the engine that cannot restore, and says what to do instead.

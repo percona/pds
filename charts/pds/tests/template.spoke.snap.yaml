@@ -332,32 +332,6 @@ rules:
     verbs: ["delete", "create"]
 ---
 # Source: pds/templates/adapter-rbac.yaml
-# Restoring a PostgreSQL backup into a new database. The provider refuses to
-# restore into a new Instance, so the agent creates the database with its data
-# source first, reading the source's cluster and the backup it restores. Delete
-# lets it remove the database a failed seed left behind.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: pds-adapter-database-seeds
-  namespace: pds
-  labels:
-    helm.sh/chart: pds-0.1.0
-    app.kubernetes.io/name: pds
-    app.kubernetes.io/instance: pds
-    app.kubernetes.io/version: "0.1.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/part-of: pds
-    app.kubernetes.io/component: adapter
-rules:
-  - apiGroups: ["pgv2.percona.com"]
-    resources: ["perconapgclusters"]
-    verbs: ["get", "create", "delete"]
-  - apiGroups: ["pgv2.percona.com"]
-    resources: ["perconapgbackups"]
-    verbs: ["get"]
----
-# Source: pds/templates/adapter-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
@@ -398,29 +372,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: pds-adapter-database-secrets
-subjects:
-  - kind: ServiceAccount
-    name: pds
-    namespace: everest-system
----
-# Source: pds/templates/adapter-rbac.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: pds-adapter-database-seeds
-  namespace: pds
-  labels:
-    helm.sh/chart: pds-0.1.0
-    app.kubernetes.io/name: pds
-    app.kubernetes.io/instance: pds
-    app.kubernetes.io/version: "0.1.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/part-of: pds
-    app.kubernetes.io/component: adapter
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: pds-adapter-database-seeds
 subjects:
   - kind: ServiceAccount
     name: pds

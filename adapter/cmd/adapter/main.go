@@ -166,9 +166,6 @@ func run() error {
 		if environment != nil {
 			opts.Secrets = newSecretReader(environment, cfg.PodNamespace)
 			opts.MonitoringAddress = monitoringAddress(environment, cfg.PodNamespace)
-			opts.Seed = func(ctx context.Context, namespace, source, backupID, name string) error {
-				return postgresql.Seed(ctx, environment, namespace, source, backupID, name)
-			}
 			opts.Credentials = newUsersSecrets(environment)
 			opts.Support = environment
 			opts.Cleanup = func(ctx context.Context, namespace, name string) (int, error) {

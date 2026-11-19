@@ -31,10 +31,6 @@ var (
 	ErrBusy                = errors.New("database has an operation running")
 	ErrBackupNotFound      = errors.New("backup not found on this database")
 	ErrBackupUnusable      = errors.New("backup cannot be restored from")
-	// ErrSeedUnavailable means this environment cannot create the database a
-	// restore adopts: the agent has no Kubernetes access, or may not touch the
-	// operator's objects.
-	ErrSeedUnavailable = errors.New("this environment cannot seed a database")
 	// ErrBackupsUnavailable means the adapter has no backup storage to write
 	// to, so there is nothing for a schedule to run into. That is a deployment
 	// state rather than a bad request, so the HTTP layer answers 501.
