@@ -33,10 +33,9 @@ export function ExperimentalNotice() {
         </DialogHeader>
         <div className="space-y-3 text-sm text-muted-foreground">
           <p>
-            PDS is not a generally available product, is not covered by Percona support commitments,
-            and may change or be discontinued.
+            PDS is not covered by Percona support commitments,
           </p>
-          <p>Please use it for testing and evaluation, not production workloads.</p>
+          <p>For now, it's not recommended for production, use with caution.</p>
         </div>
       </DialogContent>
     </Dialog>

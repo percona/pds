@@ -6,8 +6,8 @@ import { renderWithProviders } from "@/test/utils";
 
 const disclaimer = [
   "Percona Database Service is an experimental project.",
-  "PDS is not a generally available product, is not covered by Percona support commitments, and may change or be discontinued.",
-  "Please use it for testing and evaluation, not production workloads.",
+  "PDS is not covered by Percona support commitments,",
+  "For now, it's not recommended for production, use with caution.",
 ];
 
 describe("ExperimentalNotice", () => {

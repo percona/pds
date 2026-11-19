@@ -20,7 +20,7 @@ import { useAlerts } from "@/features/alerts";
 import { useFeature } from "@/features/flags";
 import { useSupportAvailability } from "@/features/support";
 import { TeamSelector } from "@/features/teams";
-import { productName } from "@/lib/product";
+import { shortenedProductName } from "@/lib/product";
 import { cn } from "@/lib/utils";
 import { assetUrl } from "@/lib/base-path";
 
@@ -86,7 +86,7 @@ export function Sidebar() {
           <img src={assetUrl("percona-mark.svg")} alt="" className="size-5 shrink-0" />
           <span className="flex flex-col items-start gap-0.5">
             <span className="whitespace-nowrap text-sm font-semibold leading-tight tracking-tight">
-              {productName}
+              {shortenedProductName}
             </span>
             <ExperimentalNotice />
           </span>
