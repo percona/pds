@@ -99,10 +99,10 @@ describe("Landing page text and motion", () => {
 
     expect(footer).toHaveTextContent("Percona Database Service is an experimental project.");
     expect(footer).toHaveTextContent(
-      "PDS is not a generally available product, is not covered by Percona support commitments, and may change or be discontinued.",
+      "PDS is not covered by Percona support commitments,",
     );
     expect(footer).toHaveTextContent(
-      "Please use it for testing and evaluation, not production workloads.",
+      "For now, it's not recommended for production, use with caution.",
     );
   });
 
