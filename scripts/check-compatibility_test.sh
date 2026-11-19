@@ -23,6 +23,9 @@ support:
   update:
     from:
       openeverest: ">= 2.0.0-dev.2"
+  managedUpgrade:
+    from:
+      "0.1.0": ["0.1.0", "0.2.0"]
 
 kubernetes:
   min: ">= 1.27.0-0"
@@ -30,6 +33,15 @@ kubernetes:
 pds:
   chart: "0.1.0"
   app: "0.1.0"
+
+flux:
+  version: "2.5.1"
+
+managedTemplate:
+  revision: 3
+  cutFor:
+    chart: "0.1.0"
+    flux: "2.5.1"
 
 openeverest:
   name: openeverest
@@ -133,7 +145,7 @@ Upgrade support: unsupported.
 Supported matrix: Percona Database Service 0.1.0, OpenEverest 2.0.0-dev.2,
 provider-percona-xtradb-cluster 0.1.0 with PXC operator 1.20.0,
 provider-percona-postgresql 0.1.0 with PostgreSQL operator 3.0.0,
-PMM 1.9.1 (3.9.1). CRDs core.openeverest.io/v1alpha1 and
+PMM 1.9.1 (3.9.1), Flux 2.5.1. CRDs core.openeverest.io/v1alpha1 and
 backup.openeverest.io/v1alpha1. Databases use the operator default.
 
 ## Pin-bump evidence
@@ -157,6 +169,28 @@ const BackupAPIVersion = "backup.openeverest.io/v1alpha1"
 EOF
 }
 
+write_bootstrap() {
+  local dest="$1"
+  mkdir -p "$(dirname "${dest}")"
+  cat >"${dest}" <<'EOF'
+FLUX_VERSION="${FLUX_VERSION:-2.5.1}"
+FLUX_PINNED_VERSION="2.5.1"
+EOF
+}
+
+# edit_pin replaces one exact block of the fixture pin and fails when the block is not there.
+edit_pin() {
+  python3 - "${FIXTURE}/charts/pds/compatibility.yaml" "$1" "$2" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+if sys.argv[2] not in text:
+    sys.exit("fixture pin has no " + repr(sys.argv[2]))
+path.write_text(text.replace(sys.argv[2], sys.argv[3], 1))
+PY
+}
+
 setup_fixture() {
   local root="$1"
   mkdir -p "${root}/charts/pds" "${root}/docs" \
@@ -166,6 +200,7 @@ setup_fixture() {
   write_values "${root}/charts/pds/values.yaml"
   write_docs "${root}/docs/compatibility.md"
   write_types "${root}/adapter/internal/client/everest/types.go"
+  write_bootstrap "${root}/adapter/internal/api/connect_bootstrap.sh"
 }
 
 run_check() {
@@ -342,6 +377,100 @@ path = Path(sys.argv[1])
 path.write_text(path.read_text().replace('  update:\n    from:\n      openeverest: ">= 2.0.0-dev.2"\n', ''))
 PY
 expect_ok update-floors-are-optional "${FIXTURE}"
+write_pin "${FIXTURE}/charts/pds/compatibility.yaml"
+
+# --- the Flux version, the template revision and support.managedUpgrade ---
+sed -i.bak 's/FLUX_PINNED_VERSION="2.5.1"/FLUX_PINNED_VERSION="2.6.0"/' \
+  "${FIXTURE}/adapter/internal/api/connect_bootstrap.sh"
+expect_fail flux-join-script-pinned-drift "${FIXTURE}" "FLUX_PINNED_VERSION"
+write_bootstrap "${FIXTURE}/adapter/internal/api/connect_bootstrap.sh"
+
+sed -i.bak 's/:-2.5.1}/:-2.6.0}/' "${FIXTURE}/adapter/internal/api/connect_bootstrap.sh"
+expect_fail flux-join-script-default-drift "${FIXTURE}" "FLUX_VERSION"
+write_bootstrap "${FIXTURE}/adapter/internal/api/connect_bootstrap.sh"
+
+edit_pin 'flux:
+  version: "2.5.1"
+
+' ''
+expect_fail flux-missing-from-pin "${FIXTURE}" "flux.version"
+write_pin "${FIXTURE}/charts/pds/compatibility.yaml"
+
+sed -i.bak 's/Flux 2.5.1/Flux 2.4.0/' "${FIXTURE}/docs/compatibility.md"
+expect_fail flux-docs-drift "${FIXTURE}" "2.5.1"
+write_docs "${FIXTURE}/docs/compatibility.md"
+
+# A version change fails until the revision is bumped or explicitly left.
+# The join script and the docs follow the new Flux version here, so only the
+# revision rule is left to fail.
+move_flux_to_2_4_0() {
+  edit_pin 'version: "2.5.1"' 'version: "2.4.0"'
+  sed -i.bak 's/2\.5\.1/2.4.0/' "${FIXTURE}/adapter/internal/api/connect_bootstrap.sh" "${FIXTURE}/docs/compatibility.md"
+}
+reset_fixture_pin() {
+  write_pin "${FIXTURE}/charts/pds/compatibility.yaml"
+  write_docs "${FIXTURE}/docs/compatibility.md"
+  write_bootstrap "${FIXTURE}/adapter/internal/api/connect_bootstrap.sh"
+}
+move_flux_to_2_4_0
+expect_fail flux-changed-without-revision "${FIXTURE}" "managedTemplate.revision"
+expect_fail flux-changed-names-the-way-out "${FIXTURE}" "managedTemplate.cutFor"
+reset_fixture_pin
+
+edit_pin '  chart: "0.1.0"
+  app' '  chart: "0.2.0"
+  app'
+expect_fail chart-changed-without-revision "${FIXTURE}" "managedTemplate.revision"
+write_pin "${FIXTURE}/charts/pds/compatibility.yaml"
+
+# Cutting the revision for the new versions is the bump, and leaving it is the
+# same edit with the revision untouched. Either clears the check.
+move_flux_to_2_4_0
+edit_pin '    flux: "2.5.1"' '    flux: "2.4.0"'
+edit_pin '  revision: 3' '  revision: 4'
+expect_ok flux-changed-with-revision-bump "${FIXTURE}"
+edit_pin '  revision: 4' '  revision: 3'
+expect_ok flux-changed-with-revision-left "${FIXTURE}"
+reset_fixture_pin
+
+edit_pin 'managedTemplate:
+  revision: 3
+  cutFor:
+    chart: "0.1.0"
+    flux: "2.5.1"
+
+' ''
+expect_fail template-revision-missing "${FIXTURE}" "managedTemplate.revision"
+write_pin "${FIXTURE}/charts/pds/compatibility.yaml"
+
+for bad in '0' '-1' '"3"' '3.5'; do
+  edit_pin '  revision: 3' "  revision: ${bad}"
+  expect_fail "template-revision-not-a-positive-integer-${bad//[^0-9a-z]/_}" "${FIXTURE}" "managedTemplate.revision"
+  write_pin "${FIXTURE}/charts/pds/compatibility.yaml"
+done
+
+edit_pin '  managedUpgrade:
+    from:
+      "0.1.0": ["0.1.0", "0.2.0"]
+' ''
+expect_fail managed-upgrade-missing "${FIXTURE}" "support.managedUpgrade"
+write_pin "${FIXTURE}/charts/pds/compatibility.yaml"
+
+edit_pin '    from:
+      "0.1.0": ["0.1.0", "0.2.0"]' '    from: {}'
+expect_ok managed-upgrade-may-list-nothing "${FIXTURE}"
+write_pin "${FIXTURE}/charts/pds/compatibility.yaml"
+
+edit_pin '      "0.1.0": ["0.1.0", "0.2.0"]' '      "0.1.0": "0.2.0"'
+expect_fail managed-upgrade-targets-not-a-list "${FIXTURE}" "support.managedUpgrade.from.0.1.0"
+write_pin "${FIXTURE}/charts/pds/compatibility.yaml"
+
+edit_pin '["0.1.0", "0.2.0"]' '["0.1.0", "latest"]'
+expect_fail managed-upgrade-target-not-a-version "${FIXTURE}" "latest"
+write_pin "${FIXTURE}/charts/pds/compatibility.yaml"
+
+edit_pin '      "0.1.0": ["0.1.0", "0.2.0"]' '      "stable": ["0.2.0"]'
+expect_fail managed-upgrade-source-not-a-version "${FIXTURE}" "stable"
 write_pin "${FIXTURE}/charts/pds/compatibility.yaml"
 
 # --- real repository ---
