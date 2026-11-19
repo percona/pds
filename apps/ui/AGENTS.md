@@ -86,7 +86,7 @@ a skipped or focused test.
 - **Tables** have at most five columns. An empty table shows the empty state,
   not bare headers.
 - **Dialogs** are for destructive and data-changing actions only, plus the
-  read-only connect dialog. Delete asks for the database name and keeps
+  read-only connect dialog and the Experimental disclaimer. Delete asks for the database name and keeps
   confirm disabled until it matches. Restore creates a new database and leaves
   the source running; it does not replace data in place. There is no Blocked
   state. A dialog states its consequence in one plain sentence.
