@@ -309,3 +309,120 @@ func TestAScriptMayNarrowTheTokensRegionsButNeverWidenThem(t *testing.T) {
 	_, err = f.svc.Enroll(t.Context(), issued.Token, service.CloudAccount{ID: "123456789012", Region: "eu-west-1", Regions: []string{"eu-central-1"}})
 	assert.ErrorIs(t, err, service.ErrCloudInvalid)
 }
+
+type environmentsOf []store.ManagedEnvironment
+
+func (e environmentsOf) List(context.Context, uint) ([]store.ManagedEnvironment, error) {
+	return e, nil
+}
+
+func TestAnIssuedTokenHasAPublicIDThatIsNotTheToken(t *testing.T) {
+	f := newCloudFixture(t)
+
+	issued, err := f.svc.IssueToken(t.Context(), f.scope, []string{"eu-west-1"})
+	require.NoError(t, err)
+
+	assert.Equal(t, auth.HashToken(issued.Token)[:16], issued.ID)
+	assert.NotContains(t, issued.Token, issued.ID)
+}
+
+func TestCancellingATokenRevokesItAndDropsTheConnectionItStarted(t *testing.T) {
+	f := newCloudFixture(t)
+	issued, err := f.svc.IssueToken(t.Context(), f.scope, []string{"eu-west-1"})
+	require.NoError(t, err)
+	enrolled, err := f.svc.Enroll(t.Context(), issued.Token, service.CloudAccount{ID: "123456789012", Region: "eu-west-1"})
+	require.NoError(t, err)
+
+	require.NoError(t, f.svc.CancelToken(t.Context(), f.scope, issued.ID))
+
+	_, err = f.svc.Get(t.Context(), f.scope, enrolled.ConnectionID)
+	require.ErrorIs(t, err, store.ErrCloudConnectionUnknown)
+	_, err = f.svc.Enroll(t.Context(), issued.Token, service.CloudAccount{ID: "123456789012", Region: "eu-west-1"})
+	require.ErrorIs(t, err, store.ErrCloudTokenInvalid)
+}
+
+func TestCancellingATokenOfAnotherTeamIsRefusedAsUnknown(t *testing.T) {
+	f := newCloudFixture(t)
+	issued, err := f.svc.IssueToken(t.Context(), f.scope, []string{"eu-west-1"})
+	require.NoError(t, err)
+
+	other := f.scope
+	other.Team = auth.Team{ID: 8}
+
+	require.ErrorIs(t, f.svc.CancelToken(t.Context(), other, issued.ID), store.ErrCloudTokenInvalid)
+}
+
+func TestCancellingATokenWhoseConnectionIsReadyKeepsTheConnection(t *testing.T) {
+	f := newCloudFixture(t)
+	issued, err := f.svc.IssueToken(t.Context(), f.scope, []string{"eu-west-1"})
+	require.NoError(t, err)
+	enrolled, err := f.svc.Enroll(t.Context(), issued.Token, service.CloudAccount{ID: "123456789012", Region: "eu-west-1"})
+	require.NoError(t, err)
+	f.healthy(enrolled)
+	_, err = f.svc.Verify(t.Context(), f.scope, enrolled.ConnectionID)
+	require.NoError(t, err)
+
+	err = f.svc.CancelToken(t.Context(), f.scope, issued.ID)
+
+	require.ErrorIs(t, err, store.ErrCloudTokenInvalid, "the connection's tokens ended when it first became ready")
+	_, err = f.svc.Get(t.Context(), f.scope, enrolled.ConnectionID)
+	require.NoError(t, err)
+}
+
+func TestTheTypedAccountPathMakesAPendingConnectionAndLeavesNoLiveToken(t *testing.T) {
+	f := newCloudFixture(t)
+
+	first, err := f.svc.CreateTyped(t.Context(), f.scope, "123456789012", []string{"eu-west-1", "us-east-1"})
+	require.NoError(t, err)
+	again, err := f.svc.CreateTyped(t.Context(), f.scope, "123456789012", []string{"eu-west-1"})
+	require.NoError(t, err)
+
+	assert.Equal(t, first.ConnectionID, again.ConnectionID, "the same account in the same Team is the same connection")
+	assert.Equal(t, first.ExternalID, again.ExternalID)
+	row, err := f.svc.Get(t.Context(), f.scope, first.ConnectionID)
+	require.NoError(t, err)
+	assert.Equal(t, store.CloudPending, row.State)
+	assert.Equal(t, "eu-west-1", row.StackRegion)
+	for hash := range f.store.Tokens {
+		_, err := f.store.TokenTeam(t.Context(), hash, f.now)
+		assert.ErrorIs(t, err, store.ErrCloudTokenInvalid, "the helper token is revoked at once")
+	}
+}
+
+func TestTheTypedAccountPathRefusesWhatCannotBeAnAccount(t *testing.T) {
+	f := newCloudFixture(t)
+
+	_, err := f.svc.CreateTyped(t.Context(), f.scope, "not-an-account", []string{"eu-west-1"})
+
+	require.ErrorIs(t, err, service.ErrCloudInvalid)
+}
+
+func TestRemovingAConnectionNeedsItsTypedNameAndNoManagedEnvironments(t *testing.T) {
+	f := newCloudFixture(t)
+	_, enrolled := f.connect(t, "123456789012")
+	f.svc = service.NewCloudConnections(f.store, f.inspector, service.CloudOptions{
+		PrincipalARN: testPrincipal, Now: func() time.Time { return f.now },
+		Environments: environmentsOf{{Name: "orders", ConnectionID: enrolled.ConnectionID}},
+	})
+
+	require.ErrorIs(t, f.svc.Remove(t.Context(), f.scope, enrolled.ConnectionID, "wrong"), service.ErrCloudConfirm)
+	require.ErrorIs(t, f.svc.Remove(t.Context(), f.scope, enrolled.ConnectionID, "acme"), service.ErrCloudInUse)
+
+	f.svc = service.NewCloudConnections(f.store, f.inspector, service.CloudOptions{
+		PrincipalARN: testPrincipal, Now: func() time.Time { return f.now }, Environments: environmentsOf{},
+	})
+	require.NoError(t, f.svc.Remove(t.Context(), f.scope, enrolled.ConnectionID, "acme"))
+	_, err := f.svc.Get(t.Context(), f.scope, enrolled.ConnectionID)
+	require.ErrorIs(t, err, store.ErrCloudConnectionUnknown)
+}
+
+func TestAConnectionWithNoAliasIsRemovedByTypingItsAccountID(t *testing.T) {
+	f := newCloudFixture(t)
+	issued, err := f.svc.IssueToken(t.Context(), f.scope, []string{"eu-west-1"})
+	require.NoError(t, err)
+	enrolled, err := f.svc.Enroll(t.Context(), issued.Token, service.CloudAccount{ID: "123456789012", Region: "eu-west-1"})
+	require.NoError(t, err)
+
+	require.ErrorIs(t, f.svc.Remove(t.Context(), f.scope, enrolled.ConnectionID, "acme"), service.ErrCloudConfirm)
+	require.NoError(t, f.svc.Remove(t.Context(), f.scope, enrolled.ConnectionID, "123456789012"))
+}
