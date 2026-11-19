@@ -343,6 +343,33 @@ func TestAnUnmarkedErrorFailsTheStepAtOnce(t *testing.T) {
 	assert.NotContains(t, l.run(run.ID).Message, "123456789012")
 }
 
+func TestARefusedStepKeepsItsTypedRefusal(t *testing.T) {
+	l := newLab(t)
+	l.steps.plan["role"] = []error{provision.Refused(errors.New("raw AWS text"), "Your AWS account is out of Elastic IPs.",
+		provision.Refusal{Reason: "quota", Service: "Amazon EC2", Item: "Elastic IP addresses per Region", Region: "eu-west-1"})}
+	e := l.engine(nil, "role")
+	run, err := e.Start(t.Context(), l.team, l.env, l.kind)
+	require.NoError(t, err)
+
+	_, err = e.RunOnce(t.Context())
+	require.NoError(t, err)
+
+	rows := l.stepRows(run.ID)
+	assert.Equal(t, store.RunFailed, l.run(run.ID).Status)
+	assert.Equal(t, 1, rows[0].Attempts, "a refusal is reported, never retried by itself")
+	assert.Equal(t, "Your AWS account is out of Elastic IPs.", rows[0].Failure)
+	assert.Equal(t, store.StepRefusal{Reason: "quota", Service: "Amazon EC2", Item: "Elastic IP addresses per Region", Region: "eu-west-1"}, rows[0].Refusal)
+}
+
+func TestStartingAKindTheEngineDoesNotKnowIsRefusedWithASentinel(t *testing.T) {
+	l := newLab(t)
+	e := l.engine(nil, "role")
+
+	_, err := e.Start(t.Context(), l.team, l.env, "upgrade_pds")
+
+	require.ErrorIs(t, err, provision.ErrUnknownKind)
+}
+
 func TestARevokedConnectionPausesWithoutSpendingRetries(t *testing.T) {
 	l := newLab(t)
 	ready := atomic.Bool{}

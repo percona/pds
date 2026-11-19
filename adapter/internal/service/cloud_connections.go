@@ -35,6 +35,10 @@ var (
 	// ErrCloudUnavailable means this deployment has no control plane principal,
 	// so no role in a customer's account could trust it.
 	ErrCloudUnavailable = errors.New("cloud connections are not configured")
+	// ErrCloudConfirm means the name typed to remove a connection is not its own.
+	ErrCloudConfirm = errors.New("the typed name does not match the cloud connection")
+	// ErrCloudInUse means managed environments still run through the connection.
+	ErrCloudInUse = errors.New("managed environments still use the cloud connection")
 )
 
 var (
@@ -49,6 +53,7 @@ var (
 type CloudStore interface {
 	CreateToken(ctx context.Context, in store.NewCloudToken) error
 	RevokeToken(ctx context.Context, teamID uint, hash string, now time.Time) error
+	RevokeTokenByID(ctx context.Context, teamID uint, id string, now time.Time) (store.CloudToken, error)
 	TokenTeam(ctx context.Context, hash string, now time.Time) (store.CloudToken, error)
 	Enroll(ctx context.Context, in store.CloudEnrollment, now time.Time) (store.CloudConnection, error)
 	Get(ctx context.Context, teamID uint, id string) (store.CloudConnection, error)
@@ -56,6 +61,7 @@ type CloudStore interface {
 	All(ctx context.Context) ([]store.CloudConnection, error)
 	SaveCheck(ctx context.Context, id string, in store.CloudCheck, now time.Time) (store.CloudConnection, error)
 	Cancel(ctx context.Context, teamID uint, id string, now time.Time) error
+	Remove(ctx context.Context, teamID uint, id string) error
 	RecordEvent(ctx context.Context, id string, in store.CloudEvent, now time.Time) error
 	Events(ctx context.Context, teamID uint, id string) ([]store.CloudEvent, error)
 }
@@ -67,11 +73,20 @@ type CloudInspector interface {
 	Inspect(ctx context.Context, in aws.InspectRequest) (aws.Inspection, error)
 }
 
+// CloudEnvironments lists the managed environments of a Team, so a connection
+// that environments run through is not removed.
+type CloudEnvironments interface {
+	List(ctx context.Context, teamID uint) ([]store.ManagedEnvironment, error)
+}
+
 // CloudOptions configures the service.
 type CloudOptions struct {
 	// PrincipalARN is the role the control plane assumes from. Customer roles
 	// trust it by name, never the account root.
 	PrincipalARN string
+	// Environments is where managed environments are read. Without it no
+	// connection counts as in use.
+	Environments CloudEnvironments
 	Logger       *slog.Logger
 	// Now is the clock, replaced by tests.
 	Now func() time.Time
@@ -99,6 +114,9 @@ func NewCloudConnections(st CloudStore, inspector CloudInspector, opts CloudOpti
 
 // CloudToken is a connect token as it is shown once.
 type CloudToken struct {
+	// ID names the token to cancel it. It is the start of the token's hash, so
+	// it says nothing about the token.
+	ID             string
 	Token          string
 	ExpiresAt      time.Time
 	AllowedRegions []string
@@ -169,7 +187,75 @@ func (c *CloudConnections) IssueToken(ctx context.Context, scope auth.Scope, reg
 		return CloudToken{}, err
 	}
 
-	return CloudToken{Token: token, ExpiresAt: expires, AllowedRegions: regions}, nil
+	return CloudToken{ID: auth.HashToken(token)[:16], Token: token, ExpiresAt: expires, AllowedRegions: regions}, nil
+}
+
+// CancelToken ends a connect token. The connection it started is dropped when
+// it has never been Ready. A token that is unknown, another Team's, or ended
+// already reads as invalid.
+func (c *CloudConnections) CancelToken(ctx context.Context, scope auth.Scope, id string) error {
+	token, err := c.store.RevokeTokenByID(ctx, scope.Team.ID, id, c.opts.Now())
+	if err != nil {
+		return err
+	}
+	if token.ConnectionID == "" {
+		return nil
+	}
+	err = c.store.Cancel(ctx, scope.Team.ID, token.ConnectionID, c.opts.Now())
+	if errors.Is(err, store.ErrCloudConnectionReady) || errors.Is(err, store.ErrCloudConnectionUnknown) {
+		return nil
+	}
+
+	return err
+}
+
+// CreateTyped makes a Pending connection for an account the person typed, for
+// the path that needs no script. The connection's home region is the first of
+// the regions. It enrolls through a token of its own that ends at once, so the
+// rules of enrolling stay in one place.
+func (c *CloudConnections) CreateTyped(ctx context.Context, scope auth.Scope, accountID string, regions []string) (CloudEnrollment, error) {
+	issued, err := c.IssueToken(ctx, scope, regions)
+	if err != nil {
+		return CloudEnrollment{}, err
+	}
+	defer func() {
+		if err := c.store.RevokeToken(ctx, scope.Team.ID, auth.HashToken(issued.Token), c.opts.Now()); err != nil {
+			c.opts.Logger.WarnContext(ctx, "cloud connection helper token was not revoked", "error", err)
+		}
+	}()
+
+	return c.Enroll(ctx, issued.Token, CloudAccount{ID: accountID, Region: regions[0]})
+}
+
+// Remove forgets one of the scope's Team's connections and touches nothing in
+// the customer's account. name is the alias the person typed, or the account id
+// when the connection has none. A connection that managed environments run
+// through stays until they are deleted.
+func (c *CloudConnections) Remove(ctx context.Context, scope auth.Scope, id, name string) error {
+	row, err := c.store.Get(ctx, scope.Team.ID, id)
+	if err != nil {
+		return err
+	}
+	want := row.Alias
+	if want == "" {
+		want = row.AccountID
+	}
+	if name == "" || name != want {
+		return ErrCloudConfirm
+	}
+	if c.opts.Environments != nil {
+		environments, err := c.opts.Environments.List(ctx, scope.Team.ID)
+		if err != nil {
+			return err
+		}
+		for _, environment := range environments {
+			if environment.ConnectionID == id {
+				return ErrCloudInUse
+			}
+		}
+	}
+
+	return c.store.Remove(ctx, scope.Team.ID, id)
 }
 
 // Enroll answers the script's first call: it names the account, and gets the

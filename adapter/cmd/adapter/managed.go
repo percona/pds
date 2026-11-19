@@ -65,29 +65,87 @@ func managedGitURL(cfg config.Config) func(repo string) string {
 	}
 }
 
-// lateRuns starts provisioning runs once the database has connected. The
-// connection lands in the background, and a request before it has no run to
-// queue.
+// lateRuns starts, retries and reads provisioning runs once the database has
+// connected. The connection lands in the background, and a request before it
+// has no run to queue or read.
 type lateRuns struct {
 	mu   sync.RWMutex
-	runs managed.Runs
+	runs managed.RunBook
 }
 
-func (l *lateRuns) set(runs managed.Runs) {
+func (l *lateRuns) set(runs managed.RunBook) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.runs = runs
 }
 
-func (l *lateRuns) Start(ctx context.Context, team uint, environment, kind string) (store.ProvisioningRun, error) {
+func (l *lateRuns) book() (managed.RunBook, error) {
 	l.mu.RLock()
-	runs := l.runs
-	l.mu.RUnlock()
-	if runs == nil {
-		return store.ProvisioningRun{}, store.ErrNotConnected
+	defer l.mu.RUnlock()
+	if l.runs == nil {
+		return nil, store.ErrNotConnected
+	}
+
+	return l.runs, nil
+}
+
+func (l *lateRuns) Start(ctx context.Context, team uint, environment, kind string) (store.ProvisioningRun, error) {
+	runs, err := l.book()
+	if err != nil {
+		return store.ProvisioningRun{}, err
 	}
 
 	return runs.Start(ctx, team, environment, kind)
+}
+
+func (l *lateRuns) Retry(ctx context.Context, team uint, environment string) error {
+	runs, err := l.book()
+	if err != nil {
+		return err
+	}
+
+	return runs.Retry(ctx, team, environment)
+}
+
+func (l *lateRuns) Latest(ctx context.Context, team uint, environment string) (store.ProvisioningRun, error) {
+	runs, err := l.book()
+	if err != nil {
+		return store.ProvisioningRun{}, err
+	}
+
+	return runs.Latest(ctx, team, environment)
+}
+
+func (l *lateRuns) Steps(ctx context.Context, runID uint) ([]store.ProvisioningStep, error) {
+	runs, err := l.book()
+	if err != nil {
+		return nil, err
+	}
+
+	return runs.Steps(ctx, runID)
+}
+
+// runBook is the engine that starts and retries runs together with the store
+// that reads them.
+type runBook struct {
+	engine *provision.Engine
+	reads  *store.Provisioning
+}
+
+func (b runBook) Start(ctx context.Context, team uint, environment, kind string) (store.ProvisioningRun, error) {
+	return b.engine.Start(ctx, team, environment, kind)
+}
+
+func (b runBook) Retry(ctx context.Context, team uint, environment string) error {
+	return b.engine.Retry(ctx, team, environment)
+}
+
+func (b runBook) Latest(ctx context.Context, team uint, environment string) (store.ProvisioningRun, error) {
+	return b.reads.Latest(ctx, team, environment)
+}
+
+func (b runBook) Steps(ctx context.Context, runID uint) ([]store.ProvisioningStep, error) {
+	return b.reads.Steps(ctx, runID)
 }
 
 // lateAbandoner ends an environment's runs once the database has connected.
@@ -134,9 +192,10 @@ func teamHubs(databases *service.Database) func(ctx context.Context, team uint) 
 // newManagedEnvironments wires managed environments: the create run's steps
 // against the customer's AWS account, the environment's Kubernetes API and each
 // Team's hub, the worker that claims runs, the sweeper that closes Access
-// windows, and the request that starts a run. It returns nil where a managed
-// environment cannot be built: no database, or no control plane principal for a
-// customer's role to trust.
+// windows, and the request that starts a run, and the manager that reads and
+// changes them afterwards. It returns nil where a managed environment cannot
+// be built: no database, or no control plane principal for a customer's role to
+// trust.
 func newManagedEnvironments(
 	ctx context.Context,
 	cfg config.Config,
@@ -144,13 +203,13 @@ func newManagedEnvironments(
 	cloud *service.CloudConnections,
 	databases *service.Database,
 	logger *slog.Logger,
-) (*managed.Environments, error) {
+) (*managed.Environments, *managed.Manager, error) {
 	if db == nil || cloud == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	infra, err := aws.NewDefaultInfra(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	hubSide := managed.NewHubSide(teamHubs(databases), managedGitURL(cfg))
 	records := db.ManagedEnvironments()
@@ -187,10 +246,10 @@ func newManagedEnvironments(
 	late := &lateRuns{}
 	go runProvisioning(ctx, cfg, db, deps, late, logger)
 
-	return &managed.Environments{
-		Creator: managed.NewCreator(records, cloud, late, creatorSettings),
-		Remover: managed.NewRemover(records, db.CloudConnections(), late, lateAbandoner{db: db}, forget),
-	}, nil
+	remover := managed.NewRemover(records, db.CloudConnections(), late, lateAbandoner{db: db}, forget)
+	environments := &managed.Environments{Creator: managed.NewCreator(records, cloud, late, creatorSettings), Remover: remover}
+
+	return environments, managed.NewManager(records, late, remover), nil
 }
 
 // runProvisioning waits for the database, then works runs and sweeps until the
@@ -217,7 +276,7 @@ func runProvisioning(ctx context.Context, cfg config.Config, db *store.Starter, 
 
 		return
 	}
-	late.set(engine)
+	late.set(runBook{engine: engine, reads: st.Provisioning()})
 
 	go func() {
 		ticker := time.NewTicker(provisionSweepEvery)

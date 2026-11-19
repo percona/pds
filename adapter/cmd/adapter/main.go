@@ -228,7 +228,7 @@ func run() error {
 		return err
 	}
 
-	managedEnvironments, err := newManagedEnvironments(ctx, cfg, db, cloudConnections, databases, logger)
+	managedEnvironments, managedManager, err := newManagedEnvironments(ctx, cfg, db, cloudConnections, databases, logger)
 	if err != nil {
 		return err
 	}
@@ -244,6 +244,7 @@ func run() error {
 		Connections:         connections,
 		CloudConnections:    cloudConnections,
 		ManagedEnvironments: managedEnvironments,
+		Managed:             managedManager,
 		Chat:                chat,
 		Activity:            activity,
 		ActivityDetails: service.NewActivityDetails(
@@ -358,7 +359,7 @@ func newCloudConnections(ctx context.Context, cfg config.Config, db *store.Start
 		return nil, err
 	}
 	svc := service.NewCloudConnections(db.CloudConnections(), inspector, service.CloudOptions{
-		PrincipalARN: cfg.CloudPrincipalARN, Logger: logger,
+		PrincipalARN: cfg.CloudPrincipalARN, Environments: db.ManagedEnvironments(), Logger: logger,
 	})
 	go svc.Run(ctx, cloudCheckEvery)
 

@@ -28,12 +28,27 @@ const maxDetail = 1000
 // longer works. The run pauses, spends no attempt and does not fail.
 var ErrConnectionUnavailable = errors.New("the cloud connection is unavailable")
 
+// ErrUnknownKind means the engine has no steps for the run kind it was asked to
+// start.
+var ErrUnknownKind = errors.New("provision: unknown run kind")
+
+// Refusal types a step failure the customer fixes outside PDS: why, which
+// service and quota or action, and where. It holds no raw error text.
+type Refusal struct {
+	Reason  string
+	Service string
+	Item    string
+	Region  string
+}
+
 // StepError carries the sentence a person reads and whether the engine may
 // retry the step by itself. A step error without one is permanent.
 type StepError struct {
 	Sentence  string
 	Retryable bool
-	Cause     error
+	// Refusal is set when the failure is one the customer fixes themselves.
+	Refusal *Refusal
+	Cause   error
 }
 
 func (e *StepError) Error() string { return fmt.Sprintf("%s: %v", e.Sentence, e.Cause) }
@@ -47,6 +62,12 @@ func Retryable(err error, sentence string) error {
 // Permanent marks err as one a retry cannot fix, with the sentence to show.
 func Permanent(err error, sentence string) error {
 	return &StepError{Sentence: sentence, Cause: err}
+}
+
+// Refused marks err as a refusal the customer fixes: a retry cannot help until
+// they do, so the engine reports it and waits for Retry.
+func Refused(err error, sentence string, refusal Refusal) error {
+	return &StepError{Sentence: sentence, Refusal: &refusal, Cause: err}
 }
 
 // Env is what a step is given. The step must be idempotent: it is the unit of
@@ -198,7 +219,7 @@ func New(db *store.Provisioning, kinds []Kind, opts Options) (*Engine, error) {
 func (e *Engine) Start(ctx context.Context, team uint, environment, kind string) (store.ProvisioningRun, error) {
 	k, ok := e.kinds[kind]
 	if !ok {
-		return store.ProvisioningRun{}, fmt.Errorf("provision: unknown run kind %q", kind)
+		return store.ProvisioningRun{}, fmt.Errorf("%w %q", ErrUnknownKind, kind)
 	}
 	names := make([]string, len(k.Steps))
 	for i, s := range k.Steps {
@@ -365,8 +386,12 @@ func (e *Engine) after(ctx context.Context, run store.ProvisioningRun, row store
 	var se *StepError
 	sentence := genericFailure
 	retryable := false
+	var refusal store.StepRefusal
 	if errors.As(err, &se) {
 		sentence, retryable = se.Sentence, se.Retryable
+		if se.Refusal != nil {
+			refusal = store.StepRefusal(*se.Refusal)
+		}
 	}
 	if retryable && row.Attempts < e.opts.MaxAttempts {
 		return e.db.EndStep(ctx, run.ID, e.opts.Owner, row.Position, store.StepEnd{
@@ -375,7 +400,7 @@ func (e *Engine) after(ctx context.Context, run store.ProvisioningRun, row store
 	}
 
 	return e.db.EndStep(ctx, run.ID, e.opts.Owner, row.Position, store.StepEnd{
-		StepStatus: store.StepFailed, RunStatus: store.RunFailed, Failure: sentence, Detail: detail, Message: sentence,
+		StepStatus: store.StepFailed, RunStatus: store.RunFailed, Failure: sentence, Detail: detail, Refusal: refusal, Message: sentence,
 	}, now)
 }
 

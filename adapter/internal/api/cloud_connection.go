@@ -166,6 +166,10 @@ func cloudError(err error) error {
 		return NotFound("That AWS account is not connected.").WithCause(err)
 	case errors.Is(err, store.ErrCloudConnectionReady):
 		return Conflict("That AWS account was connected before. Delete its stack to disconnect it.").WithCause(err)
+	case errors.Is(err, service.ErrCloudConfirm):
+		return Validation("The name you typed is not the name of this AWS account. Type it exactly, then try again.").WithCause(err)
+	case errors.Is(err, service.ErrCloudInUse):
+		return Conflict("Delete the environments in this AWS account first, then remove it.").WithCause(err)
 	case errors.Is(err, service.ErrCloudInvalid):
 		return Validation("Check the AWS account and the regions, then run the command again.").WithCause(err)
 	case errors.Is(err, service.ErrCloudUnavailable):

@@ -160,9 +160,12 @@ func (s *Server) objectTeam(param string) func(http.Handler) http.Handler {
 	}
 }
 
-// hasEnvironment reports whether the Team the context acts in has connected
-// the environment.
+// hasEnvironment reports whether the Team the context acts in has the
+// environment, connected or managed.
 func (s *Server) hasEnvironment(ctx context.Context, name string) bool {
+	if team, ok := auth.TeamFromContext(ctx); ok && s.managed != nil && s.managed.Has(ctx, team, name) {
+		return true
+	}
 	if s.databases == nil {
 		return false
 	}

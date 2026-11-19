@@ -114,6 +114,20 @@ func (m *ManagedEnvironments) Get(ctx context.Context, teamID uint, name string)
 	return row, nil
 }
 
+// List returns the Team's managed environments by name.
+func (m *ManagedEnvironments) List(ctx context.Context, teamID uint) ([]ManagedEnvironment, error) {
+	db, err := m.open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var rows []ManagedEnvironment
+	if err := db.Where("team_id = ?", teamID).Order("name").Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list managed environments: %w", scrub(err))
+	}
+
+	return rows, nil
+}
+
 // SetStackFailureSeen records whether a failed stack was reported.
 func (m *ManagedEnvironments) SetStackFailureSeen(ctx context.Context, teamID uint, name string, seen bool) error {
 	db, err := m.open(ctx)

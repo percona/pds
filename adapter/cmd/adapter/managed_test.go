@@ -61,10 +61,30 @@ func (r *recordedRuns) Start(_ context.Context, _ uint, environment, kind string
 	return store.ProvisioningRun{Environment: environment, Kind: kind}, nil
 }
 
+func (r *recordedRuns) Retry(_ context.Context, _ uint, environment string) error {
+	r.started = append(r.started, environment+"/retry")
+
+	return nil
+}
+
+func (r *recordedRuns) Latest(_ context.Context, _ uint, environment string) (store.ProvisioningRun, error) {
+	return store.ProvisioningRun{ID: 5, Environment: environment}, nil
+}
+
+func (r *recordedRuns) Steps(context.Context, uint) ([]store.ProvisioningStep, error) {
+	return []store.ProvisioningStep{{Name: "assume-role"}}, nil
+}
+
 func TestLateRunsRefuseUntilTheDatabaseHasConnected(t *testing.T) {
 	late := &lateRuns{}
 
 	_, err := late.Start(t.Context(), 1, "orders", managed.KindCreate)
+	require.ErrorIs(t, err, store.ErrNotConnected)
+
+	require.ErrorIs(t, late.Retry(t.Context(), 1, "orders"), store.ErrNotConnected)
+	_, err = late.Latest(t.Context(), 1, "orders")
+	require.ErrorIs(t, err, store.ErrNotConnected)
+	_, err = late.Steps(t.Context(), 5)
 	require.ErrorIs(t, err, store.ErrNotConnected)
 
 	runs := &recordedRuns{}
@@ -74,6 +94,14 @@ func TestLateRunsRefuseUntilTheDatabaseHasConnected(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "orders", run.Environment)
 	assert.Equal(t, []string{"orders/create"}, runs.started)
+
+	require.NoError(t, late.Retry(t.Context(), 1, "orders"))
+	latest, err := late.Latest(t.Context(), 1, "orders")
+	require.NoError(t, err)
+	assert.Equal(t, uint(5), latest.ID)
+	steps, err := late.Steps(t.Context(), 5)
+	require.NoError(t, err)
+	assert.Len(t, steps, 1)
 }
 
 func TestWorkerOwnerNamesTheReplica(t *testing.T) {

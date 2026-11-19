@@ -10,6 +10,7 @@ import (
 
 	"github.com/percona/pds/adapter/internal/auth"
 	"github.com/percona/pds/adapter/internal/hub"
+	"github.com/percona/pds/adapter/internal/managed"
 	"github.com/percona/pds/adapter/internal/service"
 )
 
@@ -26,6 +27,14 @@ type environmentResponse struct {
 	// SupportAccess is the environment's support access window while one is
 	// opening or open, and absent otherwise.
 	SupportAccess *hub.SupportSummary `json:"supportAccess,omitempty"`
+	// Origin says whether the customer connected the environment or PDS built
+	// it, and State how it is as a whole.
+	Origin string `json:"origin"`
+	State  string `json:"state"`
+	// ConnectionID, Region and Provisioning are set on a managed environment.
+	ConnectionID string                `json:"connectionId,omitempty"`
+	Region       string                `json:"region,omitempty"`
+	Provisioning *provisioningResponse `json:"provisioning,omitempty"`
 }
 
 // environmentListResponse is what the environments page renders, and nothing more.
@@ -109,14 +118,20 @@ func (s *Server) environmentRows(ctx context.Context) ([]environmentResponse, er
 	if err != nil {
 		return nil, err
 	}
+	managedByName, err := s.managedEnvironments(ctx)
+	if err != nil {
+		return nil, err
+	}
 	items := hubSvc.Environments()
-	rows := make([]environmentResponse, 0, len(items))
+	rows := make([]environmentResponse, 0, len(items)+len(managedByName))
 	for _, item := range items {
 		row := environmentResponse{
 			Name:       item.Name,
 			Namespace:  item.Namespace,
 			Status:     item.Status,
 			Monitoring: item.Monitoring,
+			Origin:     originConnected,
+			State:      connectedState(item.Status == hub.StatusConnected),
 		}
 		if !item.LastSeen.IsZero() {
 			seen := item.LastSeen.UTC()
@@ -125,10 +140,37 @@ func (s *Server) environmentRows(ctx context.Context) ([]environmentResponse, er
 		if summary, ok := support[item.Name]; ok {
 			row.SupportAccess = &summary
 		}
+		if env, ok := managedByName[item.Name]; ok {
+			row = withManaged(row, env, item.Status == hub.StatusConnected)
+			delete(managedByName, item.Name)
+		}
 		rows = append(rows, row)
+	}
+	// A managed environment that has not reported yet is not in the inventory.
+	for _, env := range managedByName {
+		rows = append(rows, withManaged(environmentResponse{Monitoring: false}, env, false))
 	}
 
 	return rows, nil
+}
+
+// managedEnvironments is the managed environments of the Team the context acts
+// in, by name.
+func (s *Server) managedEnvironments(ctx context.Context) (map[string]managed.Managed, error) {
+	team, ok := auth.TeamFromContext(ctx)
+	if !ok || s.managed == nil {
+		return map[string]managed.Managed{}, nil
+	}
+	envs, err := s.managed.Environments(ctx, team)
+	if err != nil {
+		return nil, err
+	}
+	byName := make(map[string]managed.Managed, len(envs))
+	for _, env := range envs {
+		byName[env.Record.Name] = env
+	}
+
+	return byName, nil
 }
 
 // handleConnectGuide returns this control plane's public URL and the Git
@@ -149,6 +191,9 @@ func (s *Server) handleConnectGuide(w http.ResponseWriter, r *http.Request) {
 // a separate decision the operator makes per database. Git desired state
 // stays so reconnecting this name cannot prune those databases.
 func (s *Server) handleDisconnectEnvironment(w http.ResponseWriter, r *http.Request) {
+	if s.deleteManagedEnvironment(w, r, strings.TrimSpace(chi.URLParam(r, "name"))) {
+		return
+	}
 	hubSvc, err := s.hub(r)
 	if err != nil {
 		Respond(w, r, nil, hubUnavailable(err))

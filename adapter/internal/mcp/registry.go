@@ -94,6 +94,7 @@ func newTools() []tool {
 	tools = append(tools, databaseReads()...)
 	tools = append(tools, observabilityReads()...)
 	tools = append(tools, environmentReads()...)
+	tools = append(tools, cloudReads()...)
 	tools = append(tools, historyReads()...)
 	tools = append(tools, alertReads()...)
 	tools = append(tools, supportReads()...)
@@ -101,6 +102,7 @@ func newTools() []tool {
 	tools = append(tools, databaseChanges()...)
 	tools = append(tools, supportChanges()...)
 	tools = append(tools, environmentChanges()...)
+	tools = append(tools, cloudChanges()...)
 
 	return tools
 }

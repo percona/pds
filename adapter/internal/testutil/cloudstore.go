@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,6 +42,21 @@ func (f *CloudStore) RevokeToken(_ context.Context, _ uint, hash string, now tim
 	}
 
 	return nil
+}
+
+// RevokeTokenByID ends one of the Team's tokens by its public id.
+func (f *CloudStore) RevokeTokenByID(_ context.Context, teamID uint, id string, now time.Time) (store.CloudToken, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for hash, token := range f.Tokens {
+		if token.TeamID == teamID && token.RevokedAt == nil && strings.HasPrefix(hash, id) && len(id) == 16 {
+			token.RevokedAt = &now
+
+			return *token, nil
+		}
+	}
+
+	return store.CloudToken{}, store.ErrCloudTokenInvalid
 }
 
 // TokenTeam returns a live token.
@@ -156,6 +172,19 @@ func (f *CloudStore) Cancel(_ context.Context, teamID uint, id string, _ time.Ti
 	}
 	if row.ReadyAt != nil {
 		return store.ErrCloudConnectionReady
+	}
+	delete(f.Connections, id)
+
+	return nil
+}
+
+// Remove forgets one of the Team's connections.
+func (f *CloudStore) Remove(_ context.Context, teamID uint, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	row, ok := f.Connections[id]
+	if !ok || row.TeamID != teamID {
+		return store.ErrCloudConnectionUnknown
 	}
 	delete(f.Connections, id)
 

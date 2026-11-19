@@ -42,11 +42,11 @@ releases use namespace `everest-system`, and the hub's PostgreSQL operator
 and the connected environment's database platform install the same cluster-wide
 CRDs. A hub has no OpenEverest. A connected environment has no UI.
 
-| Shape                 | Installed by                             | Runs                                                                                    | Does not run                  |
-| --------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------- |
-| Hub                   | Chart defaults                           | UI, adapter, adapter database                                                           | OpenEverest, PMM, MinIO, Flux |
-| Connected environment | The Connect command, `values-spoke.yaml` | OpenEverest, providers, PMM, adapter as `agent`, Flux                                   | UI, adapter database          |
-| Hub on one host       | `deploy/compose`                         | UI and adapter in Docker Compose, PostgreSQL outside                                     | Kubernetes access of any kind |
+| Shape                 | Installed by                             | Runs                                                  | Does not run                  |
+| --------------------- | ---------------------------------------- | ----------------------------------------------------- | ----------------------------- |
+| Hub                   | Chart defaults                           | UI, adapter, adapter database                         | OpenEverest, PMM, MinIO, Flux |
+| Connected environment | The Connect command, `values-spoke.yaml` | OpenEverest, providers, PMM, adapter as `agent`, Flux | UI, adapter database          |
+| Hub on one host       | `deploy/compose`                         | UI and adapter in Docker Compose, PostgreSQL outside  | Kubernetes access of any kind |
 
 Namespaces do not follow the shape:
 
@@ -84,13 +84,13 @@ cookie is host only, so the UI and `/api` must share one origin.
 `adapter/internal/api/server.go` is the route table. The groups, by what a
 request has to carry:
 
-| Credential                             | Routes                                                                                                                                                                                                                                                                   |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Credential                             | Routes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | None                                   | `/healthz`, `/readyz`, the `/api/auth` routes (login, logout, session, invite, and the identity provider), the Connect script `/api/internal/connect/bootstrap.sh` and `pds.tgz`, the cloud connection template and script `/api/internal/cloud-connection/template.yaml` and `connect.sh`, and the authorization server for agents: `/.well-known/oauth-authorization-server`, `/oauth/token`, `/oauth/register` and `/oauth/revoke`. `GET /oauth/authorize` needs a session cookie and sends a person without one to sign in |
-| Join token                             | `GET /api/internal/connect/enrollment`                                                                                                                                                                                                                                   |
-| Connect token                          | `POST /api/internal/cloud-connection/enroll`, `/events` and `/verify`                                                                                                                                                                                                    |
-| Join or agent token                    | `POST /api/internal/environments/{name}/join`, `POST /api/internal/environments/{name}/heartbeat`                                                                                                                                                                        |
-| Session cookie, or the operator bearer | Everything else under `/api`: features, environments and Connect, alerts, connections, assistant, chat, activity, support, and databases with their credential, scale, backups, schedule, restore, metrics, history, usage and alerts                                    |
+| Join token                             | `GET /api/internal/connect/enrollment`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Connect token                          | `POST /api/internal/cloud-connection/enroll`, `/events` and `/verify`                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Join or agent token                    | `POST /api/internal/environments/{name}/join`, `POST /api/internal/environments/{name}/heartbeat`                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Session cookie, or the operator bearer | Everything else under `/api`: features, environments and Connect, alerts, connections, assistant, chat, activity, support, and databases with their credential, scale, backups, schedule, restore, metrics, history, usage and alerts                                                                                                                                                                                                                                                                                          |
 
 `Authorization: Bearer $HUB_OPERATOR_TOKEN` stands in for a session wherever
 that token is set, which is always on a hub: it is minted at start when none is
@@ -208,13 +208,13 @@ document fetch), `internal/service/oauth.go` (the flow), `internal/store/oauth.g
 `internal/api/oauth.go` (the HTTP). The issuer is `HUB_OAUTH_ISSUER`, or `HUB_PUBLIC_URL` when that is not set, and must be an origin; the request's Host is
 never used. Everything the flow builds from the issuer (both metadata documents, the `WWW-Authenticate` pointer, the `/mcp` Origin check) reads the one value. Without a usable issuer, or with the `mcp` flag off, the endpoints answer 404.
 
-| Endpoint                                      | What it does                                                                                                                                                                                       |
-| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /.well-known/oauth-authorization-server` | The RFC 8414 metadata: S256 only, public clients (`none`), `client_id_metadata_document_supported`, `authorization_response_iss_parameter_supported`, and the scopes                              |
+| Endpoint                                      | What it does                                                                                                                                                                                                                   |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /.well-known/oauth-authorization-server` | The RFC 8414 metadata: S256 only, public clients (`none`), `client_id_metadata_document_supported`, `authorization_response_iss_parameter_supported`, and the scopes                                                           |
 | `POST /oauth/register`                        | Dynamic Client Registration for public clients: 1 to 10 redirect URIs, https or http on a loopback address. 10 an hour per address and 300 an hour in all. A registration that never produced a session is dropped after a day |
-| `GET /oauth/authorize`                        | Checks the request and parks it for consent                                                                                                                                                        |
-| `POST /oauth/token`                           | `authorization_code` and `refresh_token`, form encoded, 60 a minute per address with the revocation endpoint                                                                                         |
-| `POST /oauth/revoke`                          | RFC 7009: any token of a session ends the whole session. An unknown token is a 200                                                                                                                  |
+| `GET /oauth/authorize`                        | Checks the request and parks it for consent                                                                                                                                                                                    |
+| `POST /oauth/token`                           | `authorization_code` and `refresh_token`, form encoded, 60 a minute per address with the revocation endpoint                                                                                                                   |
+| `POST /oauth/revoke`                          | RFC 7009: any token of a session ends the whole session. An unknown token is a 200                                                                                                                                             |
 
 Authorize without a console session answers 302 to `/app/login?next=<this request>`, after
 checking only the shape of the parameters, and fetches nothing. With a session it identifies the
@@ -226,11 +226,11 @@ the address to send the browser to.
 
 The page calls three routes, mounted under `/api` outside the session guard and answering 404 while the `mcp` flag is off:
 
-| Route                           | What it does                                                                                                                                                  |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Route                             | What it does                                                                                                                                                                                                                                                                   |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `POST /api/agent-consent/lookup`  | Describes the parked request: the client's name, host, kind and redirect host, whether the redirect is a loopback address, and for each Organization the person belongs to its Teams (a User's own, or all for an admin), the highest tier offered and which boxes are offered |
-| `POST /api/agent-consent/approve` | Takes `request`, `organizationId`, `teamId`, `access`, `passwords` and `sqlWrites`, checks them and answers `{redirectUrl}` with the code |
-| `POST /api/agent-consent/deny`    | Answers `{redirectUrl}` with `error=access_denied`, `state` and `iss`                                                                                         |
+| `POST /api/agent-consent/approve` | Takes `request`, `organizationId`, `teamId`, `access`, `passwords` and `sqlWrites`, checks them and answers `{redirectUrl}` with the code                                                                                                                                      |
+| `POST /api/agent-consent/deny`    | Answers `{redirectUrl}` with `error=access_denied`, `state` and `iss`                                                                                                                                                                                                          |
 
 They read the console session cookie only: the operator token and in process callers are not a person at a browser, so they get 401.
 Each is a POST with a JSON body, refused when the browser marks it as coming from another site (`Sec-Fetch-Site` other than
@@ -243,10 +243,10 @@ The AI agents page lists and revokes the agents signed in, through two more cons
 beside the consent calls, answering 404 while the `mcp` flag is off, and reading the console session
 cookie only (the operator token, an agent's own token and in process callers get 401):
 
-| Route                           | What it does                                                                                                                                                                                                                      |
-| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/agent-sessions`       | `{sessions}`: the live agent sessions of the caller, or of every member of their Organization for an admin. Each has `id`, `name`, `host`, `kind`, `member`, `mine`, `team`, `access`, `passwords`, `sqlWrites`, `createdAt`, `lastUsedAt` and `expiresAt`. It never carries a token, a hash, a client id or the resource |
-| `DELETE /api/agent-sessions/{id}` | Ends the session and all its tokens (`DeleteAgentSession`), so the agent's next `/mcp` call is 401, and records `agent.revoke` in Activity for the caller. Answers 204. A session of another member, of another Organization, one already revoked and an id that never existed all answer 404 |
+| Route                             | What it does                                                                                                                                                                                                                                                                                                              |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/agent-sessions`         | `{sessions}`: the live agent sessions of the caller, or of every member of their Organization for an admin. Each has `id`, `name`, `host`, `kind`, `member`, `mine`, `team`, `access`, `passwords`, `sqlWrites`, `createdAt`, `lastUsedAt` and `expiresAt`. It never carries a token, a hash, a client id or the resource |
+| `DELETE /api/agent-sessions/{id}` | Ends the session and all its tokens (`DeleteAgentSession`), so the agent's next `/mcp` call is 401, and records `agent.revoke` in Activity for the caller. Answers 204. A session of another member, of another Organization, one already revoked and an id that never existed all answer 404                             |
 
 The DELETE is refused when the browser marks it as coming from another site (`Sec-Fetch-Site` other than
 `same-origin`). A session that is expired or idle past `SESSION_IDLE_TIMEOUT` is not listed. `POST /oauth/revoke` is the
@@ -282,6 +282,7 @@ with. A User lists their own Team's activity, and an admin lists every Team's.
 
 Each surface sits behind a feature flag from `adapter.features`. A surface that
 is off answers 501, and `GET /api/features` tells the UI which ones to hide.
+
 ### `/mcp`: the registry served to signed in agents
 
 `internal/api/mcp.go` serves the registry over streamable HTTP with the Go MCP SDK, on the same
@@ -455,8 +456,7 @@ approval.
 - **The answer.** `POST /api/chat/approvals/{id}` takes `{decision, name}`,
   where `decision` is `approve` or `reject`, and answers 204. `Chat.Decide`
   reaches only the person the model was asking: another person, an id that is
-  not open, one already answered or expired, and a stream that has closed are all
-  404. What runs is the arguments the call was made with and the card showed,
+  not open, one already answered or expired, and a stream that has closed are all 404. What runs is the arguments the call was made with and the card showed,
   never anything from the answer. A delete is approved only with the database's
   name typed exactly, a wrong name is a 400 and leaves the approval open, and
   the typed name is what the call sends as `confirm`, so the model's own
@@ -754,12 +754,12 @@ connected one. `internal/managed` holds the create run, and
   once and left in place. The next attempt deletes it and makes it again,
   because CloudFormation cannot resume a failed create. An environment that
   never reports fails in Finishing, and Retry only waits again. `assume-role`
-also runs a best-effort preflight: a Region the account has not enabled, or a
-Service Quotas limit below what one environment takes (the VPC, internet
-gateway, NAT gateway and Elastic IP quotas, and 12 vCPUs for the default node
-group), fails the step before anything exists. A read that fails, or a role
-that cannot be assumed, never blocks the run, and a limit is compared with what
-one environment needs and not with what the account already uses.
+  also runs a best-effort preflight: a Region the account has not enabled, or a
+  Service Quotas limit below what one environment takes (the VPC, internet
+  gateway, NAT gateway and Elastic IP quotas, and 12 vCPUs for the default node
+  group), fails the step before anything exists. A read that fails, or a role
+  that cannot be assumed, never blocks the run, and a limit is compared with what
+  one environment needs and not with what the account already uses.
 - **Worker.** Every replica claims create runs under a lease and sweeps once a
   minute: it closes the Access window of a run that is no longer live, resumes
   runs paused on a connection that works again, and prunes old runs.
@@ -835,6 +835,31 @@ one environment needs and not with what the account already uses.
   environment from its Team's hub and forgets its record. `Remains` names what stays.
   Volumes are tagged by the EBS CSI addon (`extraVolumeTags` in the stack) and by
   the `taggedStorageClass` the rendered release turns on.
+
+### Cloud connection and managed environment routes
+
+All of them are in the session group above and sit behind the `clusters` surface. A write needs a
+signed-in member (any User of the Team, or an Organization admin acting in a Team), the same right
+as minting a join token. Another Team's id answers 404.
+
+| Route                                                           | What it does                                                                                                                                                                                                                                                                                        |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/cloud-connections`, `GET /api/cloud-connections/{id}` | The Team's AWS accounts: state (`pending`, `ready`, `unreachable`, `out_of_date`), allowed regions, the managed environments that run through each and, on one account, the steps the connect command reported. Never the ExternalId or a role                                                      |
+| `POST /api/cloud-connection-tokens {allowedRegions?}`           | Mints a one hour connect token and answers once with its public id, expiry and the connect command. Nothing reads the command back                                                                                                                                                                  |
+| `DELETE /api/cloud-connection-tokens/{id}`                      | Cancels the command, and drops the connection it started if that was never Ready                                                                                                                                                                                                                    |
+| `POST /api/cloud-connections {accountId, allowedRegions?}`      | The path with no script: a Pending connection for a typed account, answering the ExternalId and stack name once. Console only                                                                                                                                                                       |
+| `DELETE /api/cloud-connections/{id} {confirm}`                  | Forgets an AWS account in PDS after its typed name (the alias, or the account number). Refused while managed environments run through it. Nothing is deleted in the account                                                                                                                         |
+| `POST /api/cloud-connections/{id}/environments {name, region}`  | `managed.Creator.Create`. Answers 202 with the environment already `creating` and its run                                                                                                                                                                                                           |
+| `GET /api/environments`, `GET /api/environments/{name}`         | An ordinary environment, with `origin` (`connected` or `managed`), `state` (`creating`, `ready`, `degraded`, `failed`, `deleting`) and, for a managed one, `provisioning`: the latest run, its four phases, and for a failed run `failure` with the safe sentence, one action and the typed refusal |
+| `POST /api/environments/{name}/runs {kind}`                     | `upgrade_pds`, `upgrade_kubernetes` or `rebuild`. A run already unfinished answers 409                                                                                                                                                                                                              |
+| `POST /api/environments/{name}/runs/{runId}/retry`              | Re-runs the failed step of the latest run. An older run id is 404                                                                                                                                                                                                                                   |
+| `DELETE /api/environments/{name} {confirm, scope?}`             | On a managed environment: the typed name starts a delete run (202). `scope: "pds_only"` forgets it in PDS only, refused unless the AWS account is Unreachable. An environment the user connected still disconnects with no body                                                                     |
+
+A run's failure is one object on every surface. When AWS refused a step it carries `refusal`
+(`reason` of `quota`, `permission` or `region_not_enabled`, the service, the quota or action, and the
+region); `provision.StepError` holds it, the step record keeps it, and the sentence names the AWS
+account and the Kubernetes cluster and never AWS's own text. A kind the control plane has no steps for
+answers 501.
 
 ### Support access windows
 
@@ -1138,7 +1163,7 @@ database that Kustomization owned.
 | PMM          | The agent calls `GET /prometheus/api/v1/query_range` and posts the newest reading on its heartbeat. The hub charts those samples and does not call PMM. | A Grafana service account token in Secret `<release>-pmm` on the connected environment, minted by the chart's hook. PMM 3 refuses anonymous queries. When `PMM_URL` is unset the agent logs that metrics will answer pending.                                                                                                                                                                                                                                                                                                                                                                                                 |
 | ServiceNow   | `/api/pellc/percona_connector/*` and the attachment API, plus the Table API to list and reply to cases                                                  | `x-sn-apikey` header and a `client_token` body field. Without both, support answers 501 and the UI hides it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | GitHub       | `api.github.com`: create a repository, commit through the Contents API, add a deploy key                                                                | Hub only. A GitHub App installation: the adapter signs a JWT with the App key (`HUB_GITHUB_APP_ID`, `HUB_GITHUB_APP_INSTALLATION_ID`, `HUB_GITHUB_APP_PRIVATE_KEY` or `HUB_GITHUB_APP_PRIVATE_KEY_FILE`), exchanges it for an installation token that lasts an hour, and renews it before it expires or after a 401. `HUB_GITHUB_TOKEN` is the fallback for the lab and local Compose, and setting both is a start error. Enrolled environments never receive either: their image pull Secret comes from `HUB_REGISTRY_TOKEN`, a separate credential, because an installation token would expire under a running environment. |
-| AI providers | Anthropic and Cursor                                                                                                                                    | The key an Organization pastes in the chat panel, sealed in the adapter database. There is no operator key in the chart or the environment.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| AI providers | Anthropic and Cursor                                                                                                                                    | The key an Organization pastes in the chat panel, sealed in the adapter database. There is no operator key in the chart or the environment.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 ### Chat requests to Anthropic
 
@@ -1201,16 +1226,16 @@ registry and sends the results back as the next run. The tool list in the agent'
 `POST /api/chat` with `Accept: text/event-stream` answers a turn as events. A client that does not ask for a stream
 gets the whole reply as one JSON object, whichever provider answers.
 
-| Event          | Data                                    | Meaning                                                                                      |
-| -------------- | --------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `conversation` | `{conversationId}`                      | The message is saved and the conversation exists. Sent first.                                |
-| `progress`     | `{label}`                               | A step of the turn, such as `Thinking` or `Reading status`.                                  |
-| `text`         | `{delta}`                               | The next piece of the answer's text. The pieces, in order, add up to the reply's text.       |
-| `reply`        | `{conversationId, text, actions}`       | The end of the turn: the whole saved text and the buttons. It replaces whatever `text` showed. |
-| `error`        | `{code, message}`                       | The turn failed after the stream opened. The pieces shown so far are not saved.              |
-| `pending`      | `{}`                                    | A retried first message that is still being answered: wait on its conversation.              |
-| `approval`     | `{id, tool, title, database, destructive, lines, expiresAt}` | A change the model asked for. The turn waits until it is answered, rejected or expired. |
-| `approval_end` | `{id, outcome}`                         | How an approval ended: `approved`, `rejected`, `expired` or `cancelled`.                     |
+| Event          | Data                                                         | Meaning                                                                                        |
+| -------------- | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `conversation` | `{conversationId}`                                           | The message is saved and the conversation exists. Sent first.                                  |
+| `progress`     | `{label}`                                                    | A step of the turn, such as `Thinking` or `Reading status`.                                    |
+| `text`         | `{delta}`                                                    | The next piece of the answer's text. The pieces, in order, add up to the reply's text.         |
+| `reply`        | `{conversationId, text, actions}`                            | The end of the turn: the whole saved text and the buttons. It replaces whatever `text` showed. |
+| `error`        | `{code, message}`                                            | The turn failed after the stream opened. The pieces shown so far are not saved.                |
+| `pending`      | `{}`                                                         | A retried first message that is still being answered: wait on its conversation.                |
+| `approval`     | `{id, tool, title, database, destructive, lines, expiresAt}` | A change the model asked for. The turn waits until it is answered, rejected or expired.        |
+| `approval_end` | `{id, outcome}`                                              | How an approval ended: `approved`, `rejected`, `expired` or `cancelled`.                       |
 
 A comment line, `: ping`, keeps the connection alive while the model works or an approval waits.
 
