@@ -25,10 +25,10 @@ for (const theme of ["light", "dark"] as const) {
     const toggleBox = await toggle.boundingBox();
     expect(headerBox?.height).toBe(56);
     // One line of text-sm type is under 24px tall, and a wrapped name is not.
-    expect(
-      (await sidebar.getByText("Percona Database Service").boundingBox())?.height,
-    ).toBeLessThan(24);
-    const nameBox = await sidebar.getByText("Percona Database Service").boundingBox();
+    expect((await sidebar.getByText("PDS", { exact: true }).boundingBox())?.height).toBeLessThan(
+      24,
+    );
+    const nameBox = await sidebar.getByText("PDS", { exact: true }).boundingBox();
     expect(nameBox!.x + nameBox!.width).toBeLessThanOrEqual(toggleBox!.x);
     expect(toggleBox!.width).toBe(28);
     expect(toggleBox!.x + toggleBox!.width).toBeLessThanOrEqual(sidebarBox!.x + sidebarBox!.width);

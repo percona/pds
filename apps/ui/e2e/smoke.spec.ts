@@ -4,7 +4,7 @@ test("the app loads the environments page", async ({ page }) => {
   await page.goto("./");
 
   await expect(page.getByRole("heading", { level: 1, name: "Environments" })).toBeVisible();
-  await expect(page.getByText("Percona Database Service")).toBeVisible();
+  await expect(page.getByTestId("sidebar").getByText("PDS", { exact: true })).toBeVisible();
 });
 
 test("Open chat is on the page and Chat is not in the sidebar", async ({ page }) => {
