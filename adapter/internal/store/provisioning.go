@@ -83,8 +83,8 @@ type ProvisioningStep struct {
 	Name     string `gorm:"size:64;not null"`
 	Status   string `gorm:"size:16;not null"`
 	Attempts int    `gorm:"not null"`
-	// Failure is the safe sentence. Detail is the raw error, redacted and
-	// truncated, for support.
+	// Failure is the safe sentence. Detail is the raw error of a failed step, or
+	// the note of a succeeded one, redacted and truncated.
 	Failure    string `gorm:"size:512;not null;default:''"`
 	Detail     string `gorm:"size:1024;not null;default:''"`
 	StartedAt  *time.Time
