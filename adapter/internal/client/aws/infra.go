@@ -15,8 +15,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/cloudformation"
 	cfntypes "github.com/aws/aws-sdk-go-v2/service/cloudformation/types"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/servicequotas"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go/middleware"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
@@ -109,6 +112,11 @@ type Infra struct {
 	assume func(context.Context, Target) (sdkaws.Config, error)
 	cfn    func(sdkaws.Config) cfnAPI
 	eks    func(sdkaws.Config) eksAPI
+	// quotas, regions and buckets are the best-effort reads and the bucket the
+	// create steps use besides the stack.
+	quotas  func(sdkaws.Config) quotasAPI
+	regions func(sdkaws.Config) regionsAPI
+	buckets func(sdkaws.Config) bucketAPI
 	// poll is how often a wait looks again.
 	poll time.Duration
 }
@@ -116,10 +124,13 @@ type Infra struct {
 // NewInfra builds Infra on the control plane's own identity.
 func NewInfra(base sdkaws.Config) *Infra {
 	return &Infra{
-		assume: func(ctx context.Context, t Target) (sdkaws.Config, error) { return assumeRole(ctx, base, t) },
-		cfn:    func(cfg sdkaws.Config) cfnAPI { return cloudformation.NewFromConfig(cfg) },
-		eks:    func(cfg sdkaws.Config) eksAPI { return eks.NewFromConfig(cfg) },
-		poll:   15 * time.Second,
+		assume:  func(ctx context.Context, t Target) (sdkaws.Config, error) { return assumeRole(ctx, base, t) },
+		cfn:     func(cfg sdkaws.Config) cfnAPI { return cloudformation.NewFromConfig(cfg) },
+		eks:     func(cfg sdkaws.Config) eksAPI { return eks.NewFromConfig(cfg) },
+		quotas:  func(cfg sdkaws.Config) quotasAPI { return servicequotas.NewFromConfig(cfg) },
+		regions: func(cfg sdkaws.Config) regionsAPI { return ec2.NewFromConfig(cfg) },
+		buckets: func(cfg sdkaws.Config) bucketAPI { return s3.NewFromConfig(cfg) },
+		poll:    15 * time.Second,
 	}
 }
 
