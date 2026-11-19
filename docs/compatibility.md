@@ -159,7 +159,7 @@ lifecycle contract before merge:
    renders the pinned platform.
 3. Dispatch [`.github/workflows/smoke.yml`](../.github/workflows/smoke.yml)
    (`hub-smoke`) against the branch and keep the run URL on the PR. A pin
-   change needs all three suites green: `mysql`, `postgresql` and `mcp`, which
+   change needs all four suites green: `mysql`, `postgresql`, `mcp` and `flux`, which
    run in parallel, each on its own lab. The `mysql` and `postgresql` suites
    are the lifecycle contract. Each brings up a hub and one connected
    kind cluster. The `mysql` suite creates a MySQL Dev database and waits until Ready,
@@ -174,7 +174,13 @@ lifecycle contract before merge:
    in place with `--update` on the same pin and check the databases they made
    are still Ready. The `mcp` suite brings up a lab with
    `scripts/hub-smoke.sh --lab-only`, creates no lifecycle, and runs the MCP
-   binary's contract tests against its hub. Per-PR `kind-platform` brings the same lab up
+   binary's contract tests against its hub. The `flux` suite runs
+   `scripts/hub-smoke.sh --flux`: it connects the second kind cluster the way
+   the control plane connects a managed environment, with the pinned Flux, the
+   rendered pds HelmRelease and the agent's Secret, and no join script and no
+   AWS. The chart comes from a registry the lab starts, so it is the chart on
+   the branch. It checks the environment is Connected and that a database is
+   created, Ready and deleted. Per-PR `kind-platform` brings the same lab up
    and checks the connected environment, the agent Deployment, and Flux
    Kustomizations `instances` and `platform`. It does not create a
    database. It is not pin-bump evidence.
@@ -187,7 +193,7 @@ lifecycle contract before merge:
    field: each key is OpenEverest or a provider the pin has, and each value is
    a `>=` constraint.
 
-The nightly `hub-smoke` workflow runs the same three suites. Do not treat a
+The nightly `hub-smoke` workflow runs the same four suites. Do not treat a
 green lint job as enough. `hub-smoke` never gates a pull request.
 
 This repository has no required status checks. The reviewer is the gate:

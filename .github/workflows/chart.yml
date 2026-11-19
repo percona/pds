@@ -21,6 +21,8 @@ on:
       - "scripts/lib/lifecycle_test.sh"
       - "scripts/lib/lab.sh"
       - "scripts/lib/lab_test.sh"
+      - "scripts/lib/flux-environment.sh"
+      - "scripts/lib/flux-environment_test.sh"
       - "scripts/hub-smoke.sh"
       - "scripts/hub-smoke_test.sh"
       - "scripts/smoke-suites.sh"
@@ -47,6 +49,8 @@ on:
       - "scripts/lib/lifecycle_test.sh"
       - "scripts/lib/lab.sh"
       - "scripts/lib/lab_test.sh"
+      - "scripts/lib/flux-environment.sh"
+      - "scripts/lib/flux-environment_test.sh"
       - "scripts/hub-smoke.sh"
       - "scripts/hub-smoke_test.sh"
       - "scripts/smoke-suites.sh"
@@ -86,6 +90,7 @@ jobs:
           bash scripts/lib/helm-install_test.sh
           bash scripts/lib/hub-install_test.sh
           bash scripts/lib/lab_test.sh
+          bash scripts/lib/flux-environment_test.sh
           bash scripts/lib/lifecycle_test.sh
           bash scripts/lib/bounded_test.sh
           bash scripts/hub-smoke_test.sh
