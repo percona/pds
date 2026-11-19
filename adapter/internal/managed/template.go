@@ -10,6 +10,10 @@ import _ "embed"
 // output, and a test holds the two together.
 const TemplateRevision = 1
 
+// OwnershipTag is the tag key on everything an environment owns in AWS. Its
+// value is the environment's ID.
+const OwnershipTag = "percona.com/pds"
+
 // NetworkTemplate is the CloudFormation template of an environment's
 // network and Kubernetes cluster. Only Percona changes it, through a release.
 //

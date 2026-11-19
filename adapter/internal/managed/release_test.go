@@ -19,6 +19,7 @@ func releaseInput() managed.ReleaseInput {
 		ChartVersion:    "0.1.0",
 		HubURL:          "https://hub.example",
 		EnvironmentName: "orders",
+		EnvironmentID:   "0123456789ab",
 		ImageRepository: "ghcr.io/percona/pds-adapter",
 		ImageTag:        "0.1.0",
 		Bucket:          "pds-111122223333-0123456789ab",
@@ -58,6 +59,36 @@ func TestRenderReleaseKeepsTheAgentTokenOutOfGit(t *testing.T) {
 	assert.NotContains(t, hub, "agentToken")
 	assert.Equal(t, "https://hub.example", hub["url"])
 	assert.Equal(t, "orders", hub["environmentName"])
+}
+
+func TestRenderReleaseTagsVolumesWithTheEnvironmentID(t *testing.T) {
+	got, err := managed.RenderRelease(releaseInput())
+	require.NoError(t, err)
+
+	var release struct {
+		Spec struct {
+			Values struct {
+				TaggedStorageClass struct {
+					Enabled bool              `json:"enabled"`
+					Tags    map[string]string `json:"tags"`
+				} `json:"taggedStorageClass"`
+			} `json:"values"`
+		} `json:"spec"`
+	}
+	require.NoError(t, yaml.Unmarshal(got, &release))
+	class := release.Spec.Values.TaggedStorageClass
+	assert.True(t, class.Enabled)
+	assert.Equal(t, map[string]string{"percona.com/pds": "0123456789ab"}, class.Tags)
+}
+
+func TestRenderReleaseWithoutAnIDLeavesTheTaggedStorageClassOut(t *testing.T) {
+	in := releaseInput()
+	in.EnvironmentID = ""
+
+	got, err := managed.RenderRelease(in)
+	require.NoError(t, err)
+
+	assert.NotContains(t, string(got), "taggedStorageClass", "a kind environment has no EBS driver")
 }
 
 func TestRenderReleaseRefusesWhatItCannotInstall(t *testing.T) {

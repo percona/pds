@@ -537,3 +537,24 @@ func TestWorkersNeverClaimTheSameRun(t *testing.T) {
 
 	assert.Len(t, l.steps.ranList(), runs, "each run's step ran once across all the workers")
 }
+
+func TestAStepKeepsWhatItNotedOnceItSucceeds(t *testing.T) {
+	l := newLab(t)
+	e := l.engine(nil, "sweep", "after")
+	l.steps.hooks["sweep"] = func(_ context.Context, env provision.Env) error {
+		env.Note("Removed EBS volume vol-1.")
+
+		return nil
+	}
+	run, err := e.Start(t.Context(), l.team, l.env, l.kind)
+	require.NoError(t, err)
+
+	ran, err := e.RunOnce(t.Context())
+	require.NoError(t, err)
+	require.True(t, ran)
+
+	rows := l.stepRows(run.ID)
+	require.Len(t, rows, 2)
+	assert.Equal(t, "Removed EBS volume vol-1.", rows[0].Detail)
+	assert.Empty(t, rows[1].Detail, "a note belongs to the step that made it")
+}

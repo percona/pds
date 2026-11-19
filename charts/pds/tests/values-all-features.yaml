@@ -16,6 +16,12 @@ commonLabels:
 commonAnnotations:
   percona.com/owner: platform-team
 
+taggedStorageClass:
+  enabled: true
+  tags:
+    percona.com/pds: 0123456789ab
+    percona.com/team: platform
+
 serviceAccount:
   create: true
   name: platform-adapter

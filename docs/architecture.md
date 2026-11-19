@@ -810,6 +810,31 @@ one environment needs and not with what the account already uses.
   and the Kubernetes cluster and shows no raw AWS text. Throttling and role
   propagation retry by themselves, a failed `AssumeRole` pauses the run, and
   anything else gets a generic sentence that points to Percona support.
+- **Delete.** `managed.DeleteKind` is a provisioning run allowed from any state,
+  including a failed create; it preempts a run in progress. Steps run inside-out:
+  `remove-databases` suspends the three Kustomizations, deletes every Instance
+  and waits; `remove-services` deletes LoadBalancer Services and volume claims;
+  `close-access`; `delete-stack`; `sweep`; `delete-bucket`; `forget`. If the
+  Kubernetes API stays silent for `Settings.APIWait` the step records that in
+  its note and the delete goes on to the cluster, so it never continues
+  silently. Nothing is stored about what exists: every attempt calls
+  `aws.Infra.Owned`, which searches the Resource Groups Tagging API for the
+  `percona.com/pds` tag and for the tags a cluster's controllers leave
+  (`kubernetes.io/cluster/<name>`, `elbv2.k8s.aws/cluster`,
+  `aws:eks:cluster-name`). `Release` deletes load balancers, target groups,
+  network interfaces, volumes, snapshots and security groups, and never any other
+  kind. A stack that ends `DELETE_FAILED` sweeps and is deleted again. After
+  `Settings.DeleteWait` (30 minutes) a step fails with a sentence that starts
+  `Delete blocked.` and names the resources; Retry re-runs only that step. There
+  is no force delete. `delete-bucket` empties every version and deletes the
+  bucket only when it carries the environment's tag. The role the customer owns is
+  left, and so is the backup IAM user the agent made.
+  `managed.Remover.RemoveFromPDS` is the one thing a person can do while the
+  connection is Unreachable: it cancels the environment's runs, records a delete run
+  as succeeded with a message that says AWS was not touched, removes the
+  environment from its Team's hub and forgets its record. `Remains` names what stays.
+  Volumes are tagged by the EBS CSI addon (`extraVolumeTags` in the stack) and by
+  the `taggedStorageClass` the rendered release turns on.
 
 ### Support access windows
 

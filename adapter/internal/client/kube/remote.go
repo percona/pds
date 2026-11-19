@@ -9,6 +9,7 @@ import (
 	"io"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -232,6 +233,111 @@ func (r *Remote) WaitDeployments(ctx context.Context, namespace string, names ..
 	}
 
 	return nil
+}
+
+// served finds the resource of a kind, or nil when the API does not serve it:
+// an environment whose create stopped early has no such definitions yet.
+func (r *Remote) served(apiVersion, kind string) (dynamic.NamespaceableResourceInterface, bool, error) {
+	gv, err := schema.ParseGroupVersion(apiVersion)
+	if err != nil {
+		return nil, false, fmt.Errorf("read the API version %q: %w", apiVersion, err)
+	}
+	mapping, err := r.mapper().RESTMapping(schema.GroupKind{Group: gv.Group, Kind: kind}, gv.Version)
+	if meta.IsNoMatchError(err) {
+		r.reset()
+		mapping, err = r.mapper().RESTMapping(schema.GroupKind{Group: gv.Group, Kind: kind}, gv.Version)
+	}
+	if meta.IsNoMatchError(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("find %s in the Kubernetes API: %w", kind, err)
+	}
+
+	return r.dyn.Resource(mapping.Resource), mapping.Scope.Name() == meta.RESTScopeNameNamespace, nil
+}
+
+// Suspend stops Flux applying an object by setting spec.suspend. An object that
+// is not there needs no suspending.
+func (r *Remote) Suspend(ctx context.Context, apiVersion, kind, namespace, name string) error {
+	res, namespaced, err := r.served(apiVersion, kind)
+	if err != nil || res == nil {
+		return err
+	}
+	var client dynamic.ResourceInterface = res
+	if namespaced {
+		client = res.Namespace(namespace)
+	}
+	_, err = client.Patch(ctx, name, types.MergePatchType, []byte(`{"spec":{"suspend":true}}`), metav1.PatchOptions{FieldManager: fieldManager})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("suspend %s %s: %w", kind, name, scrubStatus(err))
+	}
+
+	return nil
+}
+
+// DeleteAll asks for the deletion of every object of the kind in the namespace,
+// or in every namespace when it is empty, and returns how many are still there:
+// an object with a finalizer outlives the request. A kind the API does not
+// serve has no objects.
+func (r *Remote) DeleteAll(ctx context.Context, apiVersion, kind, namespace string) (int, error) {
+	res, namespaced, err := r.served(apiVersion, kind)
+	if err != nil || res == nil {
+		return 0, err
+	}
+	var scope dynamic.ResourceInterface = res
+	if namespaced && namespace != "" {
+		scope = res.Namespace(namespace)
+	}
+	listed, err := scope.List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return 0, fmt.Errorf("list %s: %w", kind, scrubStatus(err))
+	}
+	for _, obj := range listed.Items {
+		var one dynamic.ResourceInterface = res
+		if namespaced {
+			one = res.Namespace(obj.GetNamespace())
+		}
+		if err := one.Delete(ctx, obj.GetName(), metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			return 0, fmt.Errorf("delete %s %s: %w", kind, obj.GetName(), scrubStatus(err))
+		}
+	}
+	rest, err := scope.List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return 0, fmt.Errorf("list %s: %w", kind, scrubStatus(err))
+	}
+
+	return len(rest.Items), nil
+}
+
+// DeleteLoadBalancerServices asks for the deletion of every Service of type
+// LoadBalancer, so the cloud removes the load balancers, and returns how many
+// remain.
+func (r *Remote) DeleteLoadBalancerServices(ctx context.Context) (int, error) {
+	services, err := r.clientset.CoreV1().Services(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return 0, fmt.Errorf("list Services: %w", scrubStatus(err))
+	}
+	left := 0
+	for _, svc := range services.Items {
+		if svc.Spec.Type != corev1.ServiceTypeLoadBalancer {
+			continue
+		}
+		if err := r.clientset.CoreV1().Services(svc.Namespace).Delete(ctx, svc.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			return 0, fmt.Errorf("delete Service %s: %w", svc.Name, scrubStatus(err))
+		}
+	}
+	services, err = r.clientset.CoreV1().Services(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return 0, fmt.Errorf("list Services: %w", scrubStatus(err))
+	}
+	for _, svc := range services.Items {
+		if svc.Spec.Type == corev1.ServiceTypeLoadBalancer {
+			left++
+		}
+	}
+
+	return left, nil
 }
 
 // until looks every poll until done, an error or the patience runs out.
