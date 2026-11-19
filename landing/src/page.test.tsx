@@ -98,9 +98,7 @@ describe("Landing page text and motion", () => {
     const footer = container.querySelector("footer")!;
 
     expect(footer).toHaveTextContent("Percona Database Service is an experimental project.");
-    expect(footer).toHaveTextContent(
-      "PDS is not covered by Percona support commitments,",
-    );
+    expect(footer).toHaveTextContent("PDS is not covered by Percona support commitments,");
     expect(footer).toHaveTextContent(
       "For now, it's not recommended for production, use with caution.",
     );
