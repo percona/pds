@@ -104,7 +104,7 @@ func TestInstallFluxAppliesThePinnedManifestThenWaitsForItsControllers(t *testin
 	assert.Equal(t, "apply Namespace/everest-system", remote.events[firstWait+3], "the accounts follow once Flux is up")
 }
 
-func TestInstallFluxGivesTheReleaseItsOwnClusterAdminAccount(t *testing.T) {
+func TestInstallFluxGivesTheReleaseItsOwnAdminAccount(t *testing.T) {
 	remote := &fakeRemote{}
 	cluster, _ := newEnvironmentAPI(remote)
 	require.NoError(t, cluster.InstallFlux(t.Context(), access, "2.5.1"))
