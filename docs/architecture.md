@@ -801,11 +801,10 @@ one environment needs and not with what the account already uses.
   environment's Region, blocks public access and tags it with
   `percona.com/pds`. It is outside the stack because a stack cannot delete a
   bucket that holds objects. The release registers the bucket as the BackupStorage
-  `s3`, reading its access key from the Secret `pds-s3`. The access key is the
-  static IAM user key a connected environment uses. It is made by the agent in
-  the environment, never by the control plane, so the key does not pass through a
-  stack output or the control plane's logs and the connection's role needs no IAM
-  user permissions.
+  `s3`, reading its access key from the Secret `pds-s3`. The control plane never makes
+  that key: it would pass through a stack output or its logs, and the connection's
+  role has no IAM user permissions. Until the Secret exists in the environment,
+  the BackupStorage has no key to read.
 - **Refusals.** AWS errors become a step that fails with a typed reason (quota,
   permission, region not enabled) and one sentence that names the AWS account
   and the Kubernetes cluster and shows no raw AWS text. Throttling and role
