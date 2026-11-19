@@ -61,6 +61,8 @@ type StackState struct {
 	Exists  bool
 	Status  string
 	Outputs map[string]string
+	// Parameters are the values the stack runs with.
+	Parameters map[string]string
 	// FailureReason is the first failed resource's raw text, kept so it can be
 	// classified. It is never shown to a person.
 	FailureReason string
@@ -117,6 +119,10 @@ type Infra struct {
 	quotas  func(sdkaws.Config) quotasAPI
 	regions func(sdkaws.Config) regionsAPI
 	buckets func(sdkaws.Config) bucketAPI
+	// changes and nodes are the calls an update, a drift check and a read of the
+	// node groups use besides the create steps' own.
+	changes func(sdkaws.Config) changeAPI
+	nodes   func(sdkaws.Config) nodegroupAPI
 	// poll is how often a wait looks again.
 	poll time.Duration
 }
@@ -130,6 +136,8 @@ func NewInfra(base sdkaws.Config) *Infra {
 		quotas:  func(cfg sdkaws.Config) quotasAPI { return servicequotas.NewFromConfig(cfg) },
 		regions: func(cfg sdkaws.Config) regionsAPI { return ec2.NewFromConfig(cfg) },
 		buckets: func(cfg sdkaws.Config) bucketAPI { return s3.NewFromConfig(cfg) },
+		changes: func(cfg sdkaws.Config) changeAPI { return cloudformation.NewFromConfig(cfg) },
+		nodes:   func(cfg sdkaws.Config) nodegroupAPI { return eks.NewFromConfig(cfg) },
 		poll:    15 * time.Second,
 	}
 }
@@ -232,7 +240,10 @@ func (i *Infra) Stack(ctx context.Context, t Target) (StackState, error) {
 		return StackState{}, nil
 	}
 	stack := described.Stacks[0]
-	out := StackState{Exists: true, Status: string(stack.StackStatus), Outputs: map[string]string{}}
+	out := StackState{Exists: true, Status: string(stack.StackStatus), Outputs: map[string]string{}, Parameters: map[string]string{}}
+	for _, p := range stack.Parameters {
+		out.Parameters[sdkaws.ToString(p.ParameterKey)] = sdkaws.ToString(p.ParameterValue)
+	}
 	for _, o := range stack.Outputs {
 		out.Outputs[sdkaws.ToString(o.OutputKey)] = sdkaws.ToString(o.OutputValue)
 	}
