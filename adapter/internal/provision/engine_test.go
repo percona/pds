@@ -557,7 +557,7 @@ func TestAStepReadsTheParametersItsRunWasStartedWith(t *testing.T) {
 	assert.JSONEq(t, `{"version":"0.2.0"}`, seen)
 }
 
-func TestHasRunReportsAnEnvironmentWithARunInHand(t *testing.T) {
+func TestBusyReportsAnEnvironmentWithARunInHand(t *testing.T) {
 	l := newLab(t)
 	e := l.engine(nil, "role")
 
