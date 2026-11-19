@@ -1122,8 +1122,9 @@ reply is in the conversation when the person comes back.
 
 The HTTP adapter's PostgreSQL is not a customer database. It holds bcrypt
 password hashes, sessions, organizations, environment inventory, join token hashes,
-cloud connections with their connect token hashes and reported steps, deploy keys, the work queue, support access windows, database history, usage
-samples and saved chats.
+cloud connections with their connect token hashes and reported steps, deploy keys,
+the work queue, support access windows, database history, usage
+samples, saved chats and provisioning runs.
 Connection secrets are sealed with AES-GCM under `STATE_ENCRYPTION_KEY`, 32
 bytes kept in a Secret and never in the database. Losing that key makes every
 sealed row unreadable. `STATE_ENCRYPTION_KEYS_RETIRED` lets a rotated key
@@ -1143,3 +1144,17 @@ still open old rows.
 - A release serves one named Organization, or every Organization when
   `adapter.state.organization` is `*`. Each row is keyed by Team, and connections by Organization, and a request for
   another Organization's id answers 404.
+- A provisioning run is the record of one create, upgrade, rebuild or delete of a
+  managed environment: ordered steps with a status, an attempt count and a safe
+  failure sentence, written before a step starts and after it ends. It never holds
+  a credential, token, key or kubeconfig. `internal/provision` works them. Any
+  replica claims a run with `FOR UPDATE SKIP LOCKED` and a renewable lease, and a
+  restart is a lapsed lease. A partial unique index allows one unfinished run per
+  environment, a failed one included. Delete is the exception: it cancels an idle
+  run and flags a running one, whose worker stops at the next lease renewal. A
+  step is the unit of retry: transient errors back off (five attempts over about
+  ten minutes by default), then the run is Failed and Retry re-runs from the
+  failed step. A lost cloud connection pauses the run without spending an attempt.
+  The sweeper closes any Access window whose run is finished, paused, failed,
+  cancelled or without a live lease, or whose window is older than 30 minutes,
+  and drops the runs of an environment 90 days after its delete finished.
