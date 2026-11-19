@@ -46,6 +46,10 @@ type ReleaseInput struct {
 	ChartVersion    string
 	HubURL          string
 	EnvironmentName string
+	// EnvironmentID is the value of the percona.com/pds tag the environment's
+	// volumes carry. Empty leaves the tagged StorageClass out, as on an
+	// environment that is not on AWS.
+	EnvironmentID   string
 	ImageRepository string
 	ImageTag        string
 	// Bucket and Region are the environment's backup store.
@@ -95,6 +99,13 @@ func RenderRelease(in ReleaseInput) ([]byte, error) {
 		"openeverest": map[string]any{
 			"upgrade": map[string]any{"preflightChecks": false},
 		},
+	}
+	if in.EnvironmentID != "" {
+		// Every volume a database claims carries the ownership tag, so the delete
+		// finds it by tag after the cluster is gone.
+		managedValues["taggedStorageClass"] = map[string]any{
+			"enabled": true, "tags": map[string]any{OwnershipTag: in.EnvironmentID},
+		}
 	}
 	merge(values, managedValues)
 

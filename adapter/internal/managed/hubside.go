@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/percona/pds/adapter/internal/engine"
 	"github.com/percona/pds/adapter/internal/hub"
 )
 
@@ -15,6 +16,9 @@ type TeamHub interface {
 	CommitFiles(ctx context.Context, environment string, files map[string][]byte, message string) error
 	EnvironmentConnected(environment string) bool
 	EnvironmentRelease(environment string) (hub.HeartbeatRelease, bool)
+	// Disconnect removes the environment from the hub: its inventory, tokens
+	// and clone key. It touches nothing in the environment itself.
+	Disconnect(ctx context.Context, environment string) (supportRemoved bool, err error)
 }
 
 // HubSide is the Hub the create steps use: the Team's hub service answers each
@@ -59,6 +63,20 @@ func (h *HubSide) WriteRelease(ctx context.Context, team uint, environment strin
 	}
 
 	return hubs.CommitFiles(ctx, environment, files, fmt.Sprintf("write the pds release of %s", environment))
+}
+
+// Disconnect removes the environment from its Team's hub. An environment the
+// hub no longer knows is already removed.
+func (h *HubSide) Disconnect(ctx context.Context, team uint, environment string) error {
+	hubs, err := h.hubs(ctx, team)
+	if err != nil {
+		return err
+	}
+	if _, err := hubs.Disconnect(ctx, environment); err != nil && !errors.Is(err, engine.ErrNotFound) {
+		return err
+	}
+
+	return nil
 }
 
 // Connected reports whether the environment's agent has sent a heartbeat.

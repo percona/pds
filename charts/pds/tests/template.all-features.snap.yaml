@@ -303,6 +303,31 @@ data:
       }
     }
 ---
+# Source: pds/templates/tagged-storage-class.yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: pds-gp3
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+    percona.com/owner: platform-team
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  tagSpecification_1: "percona.com/pds=0123456789ab"
+  tagSpecification_2: "percona.com/team=platform"
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+---
 # Source: pds/templates/hub-git-pvc.yaml
 # The hub's desired state for every environment it serves. It has to outlive the
 # pod: losing it means Flux prunes the instances on every spoke at the next

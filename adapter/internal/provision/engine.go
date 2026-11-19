@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/percona/pds/adapter/internal/log"
@@ -55,6 +56,21 @@ type Env struct {
 
 	db  *store.Provisioning
 	now func() time.Time
+	// note is what the step recorded for the person reading its run.
+	note *strings.Builder
+}
+
+// Note records what the step did that a person should be able to read after it
+// ends, such as what a sweep removed. A successful step keeps it; a step's
+// failure sentence is separate.
+func (e Env) Note(text string) {
+	if e.note == nil {
+		return
+	}
+	if e.note.Len() > 0 {
+		e.note.WriteByte(' ')
+	}
+	e.note.WriteString(text)
 }
 
 // WindowOpened records that this run opened the Access window, so the sweeper
@@ -291,7 +307,8 @@ func (e *Engine) step(ctx context.Context, run store.ProvisioningRun, row store.
 		e.keepLease(stepCtx, stop, run, cancelled)
 	}()
 
-	err := step.Run(stepCtx, Env{Run: run, db: e.db, now: e.opts.Now})
+	var note strings.Builder
+	err := step.Run(stepCtx, Env{Run: run, db: e.db, now: e.opts.Now, note: &note})
 	stop(nil)
 	<-renewed
 
@@ -312,7 +329,7 @@ func (e *Engine) step(ctx context.Context, run store.ProvisioningRun, row store.
 	}
 
 	if err == nil {
-		return false, e.db.EndStep(ctx, run.ID, e.opts.Owner, row.Position, store.StepEnd{StepStatus: store.StepSucceeded}, e.opts.Now())
+		return false, e.db.EndStep(ctx, run.ID, e.opts.Owner, row.Position, store.StepEnd{StepStatus: store.StepSucceeded, Detail: truncate(log.RedactText(note.String()))}, e.opts.Now())
 	}
 
 	return true, e.after(ctx, run, row, err)

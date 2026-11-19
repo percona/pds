@@ -43,9 +43,9 @@ type Deps struct {
 	// CloudConnections is nil where no control plane principal is configured,
 	// and its routes then answer 501.
 	CloudConnections *service.CloudConnections
-	// ManagedEnvironments starts the creation of a managed environment. It is
-	// nil where this deployment cannot build one.
-	ManagedEnvironments *managed.Creator
+	// ManagedEnvironments starts the creation and the deletion of a managed
+	// environment. It is nil where this deployment cannot build one.
+	ManagedEnvironments *managed.Environments
 
 	// Connections stores UI-pasted ServiceNow and Anthropic credentials.
 	Connections *service.Connections
