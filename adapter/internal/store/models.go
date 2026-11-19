@@ -470,6 +470,9 @@ func Models() []any {
 		&OAuthCode{},
 		&AgentSession{},
 		&OAuthToken{},
+		&CloudConnection{},
+		&CloudToken{},
+		&CloudEvent{},
 	}
 }
 
@@ -589,3 +592,67 @@ type OAuthToken struct {
 
 // TableName pins the table name.
 func (OAuthToken) TableName() string { return "oauth_tokens" }
+
+// CloudConnection is a Team's standing permission to act in one AWS account.
+// It holds no credential: the control plane assumes the role afresh for every
+// step, so a read of this table opens nothing in the customer's account.
+type CloudConnection struct {
+	ID     string `gorm:"primaryKey;size:32"`
+	TeamID uint   `gorm:"not null;uniqueIndex:uidx_cloud_connections_account,priority:1"`
+	// AccountID is the 12 digit AWS account. A Team has one connection per
+	// account, and another Team connecting the same account gets its own.
+	AccountID string `gorm:"size:12;not null;uniqueIndex:uidx_cloud_connections_account,priority:2"`
+	Alias     string `gorm:"size:64;not null;default:''"`
+	// ExternalID is the per-connection secret the role's trust policy requires.
+	ExternalID  string `gorm:"size:64;not null"`
+	StackName   string `gorm:"size:128;not null"`
+	StackRegion string `gorm:"size:32;not null"`
+	// AllowedRegions are the regions an environment may be built in.
+	AllowedRegions []string `gorm:"type:jsonb;serializer:json;not null"`
+	State          string   `gorm:"size:16;not null"`
+	// Reason is a sentence for the customer that says why the state is not Ready.
+	Reason string `gorm:"size:512;not null;default:''"`
+	// TemplateVersion is the version the stack's template last reported.
+	TemplateVersion int `gorm:"not null;default:0"`
+	CheckedAt       *time.Time
+	ReadyAt         *time.Time
+	// SignalAt is the last time the connect script said anything, a heartbeat
+	// included.
+	SignalAt  *time.Time
+	CreatedAt time.Time `gorm:"not null"`
+	UpdatedAt time.Time `gorm:"not null"`
+}
+
+// TableName pins the table name.
+func (CloudConnection) TableName() string { return "hub_cloud_connections" }
+
+// CloudToken lets the connect script act for one Team for a short while. Only
+// the SHA-256 is stored.
+type CloudToken struct {
+	Hash           string   `gorm:"primaryKey;size:64"`
+	TeamID         uint     `gorm:"not null;index"`
+	AllowedRegions []string `gorm:"type:jsonb;serializer:json;not null"`
+	// ConnectionID is set by the first account the token enrolls, and the token
+	// then serves that connection only.
+	ConnectionID string    `gorm:"size:32;not null;default:'';index"`
+	ExpiresAt    time.Time `gorm:"not null"`
+	RevokedAt    *time.Time
+	CreatedAt    time.Time `gorm:"not null"`
+}
+
+// TableName pins the table name.
+func (CloudToken) TableName() string { return "hub_cloud_tokens" }
+
+// CloudEvent is one step the connect script reported. Heartbeats are not kept:
+// they only move CloudConnection.SignalAt.
+type CloudEvent struct {
+	ID           uint      `gorm:"primaryKey;autoIncrement"`
+	ConnectionID string    `gorm:"size:32;not null;index"`
+	Step         string    `gorm:"size:64;not null"`
+	Status       string    `gorm:"size:16;not null"`
+	Detail       string    `gorm:"size:512;not null;default:''"`
+	CreatedAt    time.Time `gorm:"not null"`
+}
+
+// TableName pins the table name.
+func (CloudEvent) TableName() string { return "hub_cloud_events" }
