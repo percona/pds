@@ -15,6 +15,12 @@ support:
   update:
     from:
       openeverest: ">= 2.0.0-dev.4"
+  # The versions the control plane may move a managed environment's pds
+  # release to, keyed by the version the environment runs. A version with no
+  # entry has no managed upgrade. Separate from update above, which is the join
+  # script's in-place update of a Connect environment.
+  managedUpgrade:
+    from: {}
 
 kubernetes:
   min: ">= 1.27.0-0"
@@ -22,6 +28,21 @@ kubernetes:
 pds:
   chart: "0.1.0"
   app: "0.1.0"
+
+# The Flux release the join script installs and a managed environment
+# bootstraps with.
+flux:
+  version: "2.5.1"
+
+# The managed environment CloudFormation templates are stamped with this
+# revision. cutFor holds the versions the revision was last reviewed against.
+# Changing the chart or Flux version fails the check until revision is bumped,
+# or cutFor is moved to the new versions to leave the revision as it is.
+managedTemplate:
+  revision: 1
+  cutFor:
+    chart: "0.1.0"
+    flux: "2.5.1"
 
 openeverest:
   name: openeverest
