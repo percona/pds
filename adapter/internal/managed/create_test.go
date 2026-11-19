@@ -278,6 +278,7 @@ func newLab(t *testing.T) *lab {
 			OutgoingCIDRs: []string{"203.0.113.7/32"}, FluxVersion: "2.5.1", ChartVersion: "0.1.0",
 			HubURL: "https://hub.example", ImageRepository: "ghcr.io/percona/pds-adapter", ImageTag: "0.1.0",
 			PollEvery: time.Millisecond, StackWait: time.Second, JoinWait: 50 * time.Millisecond,
+			ReleaseWait: 50 * time.Millisecond,
 		},
 	}
 

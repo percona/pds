@@ -2,8 +2,13 @@ package managed_test
 
 import (
 	"context"
+	"time"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/percona/pds/adapter/internal/client/aws"
+	"github.com/percona/pds/adapter/internal/provision"
+	"github.com/percona/pds/adapter/internal/store"
 )
 
 func (f *fakeCloud) PlanUpdate(_ context.Context, t aws.Target, spec aws.UpdateSpec) (aws.ChangePlan, error) {
@@ -74,4 +79,53 @@ func healthyNodes() aws.NodeGroupState {
 	return aws.NodeGroupState{
 		Name: "pds-nodes", Status: "ACTIVE", Version: "1.33", InstanceTypes: []string{"m6i.xlarge"}, Min: 3, Desired: 3, Max: 3,
 	}
+}
+
+// kindEngine builds an engine that runs only the given kind under this lab's
+// kind name, so a run another test left behind is never claimed.
+func (l *lab) kindEngine(kind provision.Kind) *provision.Engine {
+	l.t.Helper()
+
+	kind.Name = l.kind
+	e, err := provision.New(l.prov, []provision.Kind{kind}, provision.Options{
+		Owner: "worker-1", LeaseTTL: time.Minute, RenewEvery: 10 * time.Millisecond,
+		MaxAttempts: 3, Backoff: func(int) time.Duration { return time.Minute },
+	})
+	require.NoError(l.t, err)
+
+	return e
+}
+
+func (l *lab) startWith(e *provision.Engine, params string) store.ProvisioningRun {
+	l.t.Helper()
+
+	run, err := e.StartWith(l.t.Context(), l.team, l.env, l.kind, params)
+	require.NoError(l.t, err)
+
+	return run
+}
+
+// ready makes the environment one that has reported and runs the given chart.
+func (l *lab) ready(chart string) {
+	l.t.Helper()
+
+	require.NoError(l.t, l.db.ManagedEnvironments().SetChartVersion(l.t.Context(), l.team, l.env, chart))
+	require.NoError(l.t, l.db.ManagedEnvironments().MarkReady(l.t.Context(), l.team, l.env, time.Now()))
+}
+
+func (l *lab) record() store.ManagedEnvironment {
+	l.t.Helper()
+
+	rec, err := l.db.ManagedEnvironments().Get(l.t.Context(), l.team, l.env)
+	require.NoError(l.t, err)
+
+	return rec
+}
+
+func (l *lab) work(e *provision.Engine) {
+	l.t.Helper()
+
+	ran, err := e.RunOnce(l.t.Context())
+	require.NoError(l.t, err)
+	require.True(l.t, ran)
 }
