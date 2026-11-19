@@ -180,6 +180,12 @@ func New(db *store.Provisioning, kinds []Kind, opts Options) (*Engine, error) {
 // Start queues a run of a kind for an environment. It returns store.ErrRunActive
 // while the environment has an unfinished run, unless the kind is delete.
 func (e *Engine) Start(ctx context.Context, team uint, environment, kind string) (store.ProvisioningRun, error) {
+	return e.StartWith(ctx, team, environment, kind, "")
+}
+
+// StartWith is Start for a run that carries parameters, which its steps read
+// from Env.Run.Params.
+func (e *Engine) StartWith(ctx context.Context, team uint, environment, kind, params string) (store.ProvisioningRun, error) {
 	k, ok := e.kinds[kind]
 	if !ok {
 		return store.ProvisioningRun{}, fmt.Errorf("provision: unknown run kind %q", kind)
@@ -189,7 +195,13 @@ func (e *Engine) Start(ctx context.Context, team uint, environment, kind string)
 		names[i] = s.Name
 	}
 
-	return e.db.Start(ctx, team, environment, kind, names, e.opts.Now())
+	return e.db.StartWith(ctx, team, environment, kind, names, params, e.opts.Now())
+}
+
+// Busy reports whether the environment has a run in hand, so a job that reads
+// its infrastructure can leave one that a run is changing.
+func (e *Engine) Busy(ctx context.Context, team uint, environment string) (bool, error) {
+	return e.db.Unfinished(ctx, team, environment)
 }
 
 // Retry re-runs the environment's failed run from its failed step.

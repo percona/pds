@@ -51,10 +51,13 @@ var (
 // ProvisioningRun is one ordered attempt to create, upgrade, rebuild or delete
 // a managed environment. It never holds a credential, token, key or kubeconfig.
 type ProvisioningRun struct {
-	ID              uint   `gorm:"primaryKey"`
-	TeamID          uint   `gorm:"not null;index:idx_provisioning_runs_environment,priority:1"`
-	Environment     string `gorm:"size:253;not null;index:idx_provisioning_runs_environment,priority:2"`
-	Kind            string `gorm:"size:32;not null"`
+	ID          uint   `gorm:"primaryKey"`
+	TeamID      uint   `gorm:"not null;index:idx_provisioning_runs_environment,priority:1"`
+	Environment string `gorm:"size:253;not null;index:idx_provisioning_runs_environment,priority:2"`
+	Kind        string `gorm:"size:32;not null"`
+	// Params is what the run was asked to do, as JSON that depends on the kind,
+	// such as the version an upgrade moves to. It holds nothing secret.
+	Params          string `gorm:"type:text;not null;default:''"`
 	Status          string `gorm:"size:16;not null;index"`
 	CancelRequested bool   `gorm:"not null"`
 	LeaseOwner      string `gorm:"size:64;not null;default:''"`
@@ -138,8 +141,13 @@ func lockEnvironment(tx *gorm.DB, team uint, environment string) error {
 // Start queues a run with its steps. Delete is the one kind that may start while
 // another run is unfinished: it cancels what is idle and flags what is running.
 func (p *Provisioning) Start(ctx context.Context, team uint, environment, kind string, steps []string, now time.Time) (ProvisioningRun, error) {
+	return p.StartWith(ctx, team, environment, kind, steps, "", now)
+}
+
+// StartWith is Start for a run that carries parameters.
+func (p *Provisioning) StartWith(ctx context.Context, team uint, environment, kind string, steps []string, params string, now time.Time) (ProvisioningRun, error) {
 	run := ProvisioningRun{
-		TeamID: team, Environment: environment, Kind: kind, Status: RunQueued,
+		TeamID: team, Environment: environment, Kind: kind, Params: params, Status: RunQueued,
 		NotBefore: now, CreatedAt: now, UpdatedAt: now,
 	}
 
@@ -190,6 +198,19 @@ func (p *Provisioning) Start(ctx context.Context, team uint, environment, kind s
 	}
 
 	return run, nil
+}
+
+// Unfinished reports whether the environment has a run in hand: queued, running,
+// paused or failed.
+func (p *Provisioning) Unfinished(ctx context.Context, team uint, environment string) (bool, error) {
+	var open int64
+	err := p.db.WithContext(ctx).Model(&ProvisioningRun{}).
+		Where("team_id = ? AND environment = ? AND "+unfinished, team, environment).Count(&open).Error
+	if err != nil {
+		return false, scrub(err)
+	}
+
+	return open > 0, nil
 }
 
 // Run reads one run.
