@@ -239,9 +239,9 @@ type NodeGroupState struct {
 	Max           int32
 }
 
-// ClusterState is what EKS says of the environment's cluster. A cluster EKS does
+// KubernetesState is what EKS says of the environment's cluster. A cluster EKS does
 // not know has Exists false.
-type ClusterState struct {
+type KubernetesState struct {
 	Exists         bool
 	Status         string
 	Version        string
@@ -250,21 +250,21 @@ type ClusterState struct {
 }
 
 // Cluster reads the EKS cluster and its node groups.
-func (i *Infra) Cluster(ctx context.Context, t Target) (ClusterState, error) {
+func (i *Infra) Cluster(ctx context.Context, t Target) (KubernetesState, error) {
 	session, err := i.assume(ctx, t)
 	if err != nil {
-		return ClusterState{}, err
+		return KubernetesState{}, err
 	}
 	cluster, err := describe(ctx, i.eks(session), t.EKSName)
 	if err != nil {
 		var missing *ekstypes.ResourceNotFoundException
 		if errors.As(err, &missing) {
-			return ClusterState{}, nil
+			return KubernetesState{}, nil
 		}
 
-		return ClusterState{}, err
+		return KubernetesState{}, err
 	}
-	out := ClusterState{Exists: true, Status: string(cluster.Status), Version: sdkaws.ToString(cluster.Version)}
+	out := KubernetesState{Exists: true, Status: string(cluster.Status), Version: sdkaws.ToString(cluster.Version)}
 	if vpc := cluster.ResourcesVpcConfig; vpc != nil {
 		out.PublicEndpoint = vpc.EndpointPublicAccess
 	}
@@ -272,12 +272,12 @@ func (i *Infra) Cluster(ctx context.Context, t Target) (ClusterState, error) {
 	nodes := i.nodes(session)
 	listed, err := nodes.ListNodegroups(ctx, &eks.ListNodegroupsInput{ClusterName: &t.EKSName})
 	if err != nil {
-		return ClusterState{}, fmt.Errorf("list node groups: %w", err)
+		return KubernetesState{}, fmt.Errorf("list node groups: %w", err)
 	}
 	for _, name := range listed.Nodegroups {
 		got, err := nodes.DescribeNodegroup(ctx, &eks.DescribeNodegroupInput{ClusterName: &t.EKSName, NodegroupName: sdkaws.String(name)})
 		if err != nil {
-			return ClusterState{}, fmt.Errorf("describe node group: %w", err)
+			return KubernetesState{}, fmt.Errorf("describe node group: %w", err)
 		}
 		g := got.Nodegroup
 		state := NodeGroupState{

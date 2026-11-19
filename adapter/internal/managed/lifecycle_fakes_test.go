@@ -58,14 +58,14 @@ func (f *fakeCloud) DetectDrift(_ context.Context, t aws.Target) ([]aws.Drift, e
 	return f.drifts, nil
 }
 
-func (f *fakeCloud) Cluster(_ context.Context, t aws.Target) (aws.ClusterState, error) {
+func (f *fakeCloud) Cluster(_ context.Context, t aws.Target) (aws.KubernetesState, error) {
 	if err := f.record("cluster", t); err != nil {
-		return aws.ClusterState{}, err
+		return aws.KubernetesState{}, err
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if len(f.clusters) == 0 {
-		return aws.ClusterState{Exists: true, Status: "ACTIVE", Version: "1.33", NodeGroups: []aws.NodeGroupState{healthyNodes()}}, nil
+		return aws.KubernetesState{Exists: true, Status: "ACTIVE", Version: "1.33", NodeGroups: []aws.NodeGroupState{healthyNodes()}}, nil
 	}
 	state := f.clusters[0]
 	if len(f.clusters) > 1 {

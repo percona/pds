@@ -397,7 +397,7 @@ func TestInfrastructureShowsTheTemplateRevisionAndTheNextKubernetesVersion(t *te
 	l := newLifecycleLab(t)
 	l.ready("0.1.0")
 	l.cloud.stackState = &aws.StackState{Exists: true, Status: "CREATE_COMPLETE", Outputs: map[string]string{"TemplateRevision": "0"}}
-	l.cloud.clusters = []aws.ClusterState{{Exists: true, Status: "ACTIVE", Version: "1.33", NodeGroups: []aws.NodeGroupState{healthyNodes()}}}
+	l.cloud.clusters = []aws.KubernetesState{{Exists: true, Status: "ACTIVE", Version: "1.33", NodeGroups: []aws.NodeGroupState{healthyNodes()}}}
 
 	got, err := l.life.Infrastructure(t.Context(), l.who, l.env)
 
@@ -425,7 +425,7 @@ func (l *lifecycleLab) stack(revision, version string) {
 		Exists: true, Status: "CREATE_COMPLETE",
 		Outputs: map[string]string{"TemplateRevision": revision}, Parameters: map[string]string{"KubernetesVersion": version},
 	}
-	l.cloud.clusters = []aws.ClusterState{{Exists: true, Status: "ACTIVE", Version: version, NodeGroups: []aws.NodeGroupState{healthyNodes()}}}
+	l.cloud.clusters = []aws.KubernetesState{{Exists: true, Status: "ACTIVE", Version: version, NodeGroups: []aws.NodeGroupState{healthyNodes()}}}
 }
 
 func TestAnInfrastructureUpdateStartsAKubernetesRunAfterShowingTheChangeSet(t *testing.T) {
@@ -485,7 +485,7 @@ func TestATemplateUpdateRunsWhenTheStacksRevisionIsOlder(t *testing.T) {
 	assert.JSONEq(t, `{}`, l.only(t).in)
 }
 
-func TestAnUpdateThatWouldReplaceTheNetworkOrTheClusterIsNotStarted(t *testing.T) {
+func TestAnUpdateThatWouldReplaceTheNetworkOrTheKubernetesIsNotStarted(t *testing.T) {
 	l := newLifecycleLab(t)
 	l.ready("0.1.0")
 	l.stack("0", "1.33")
@@ -555,7 +555,7 @@ func TestRebuildStartsOnlyForALostEnvironment(t *testing.T) {
 	assert.Equal(t, managed.KindRebuild, l.only(t).kind)
 }
 
-func TestStatusSaysLostWhenTheClusterWasFoundMissing(t *testing.T) {
+func TestStatusSaysLostWhenTheKubernetesWasFoundMissing(t *testing.T) {
 	l := newLifecycleLab(t)
 	l.ready("0.1.0")
 	l.lost()
@@ -585,7 +585,7 @@ func TestTheHourlyCheckRecordsWhatCloudFormationFoundChanged(t *testing.T) {
 	assert.Zero(t, l.cloud.count("apply-plan")+l.cloud.count("ensure-stack")+l.cloud.count("delete-stack"), "the check only reports")
 }
 
-func TestTheHourlyCheckComparesTheClusterAndNodeGroupWithTheStack(t *testing.T) {
+func TestTheHourlyCheckComparesTheKubernetesAndNodeGroupWithTheStack(t *testing.T) {
 	l := newLifecycleLab(t)
 	l.ready("0.1.0")
 	l.hub.connected.Store(true)
@@ -594,7 +594,7 @@ func TestTheHourlyCheckComparesTheClusterAndNodeGroupWithTheStack(t *testing.T) 
 	}}
 	group := healthyNodes()
 	group.Desired, group.InstanceTypes = 5, []string{"m5.large"}
-	l.cloud.clusters = []aws.ClusterState{{Exists: true, Status: "ACTIVE", Version: "1.34", PublicEndpoint: true, NodeGroups: []aws.NodeGroupState{group}}}
+	l.cloud.clusters = []aws.KubernetesState{{Exists: true, Status: "ACTIVE", Version: "1.34", PublicEndpoint: true, NodeGroups: []aws.NodeGroupState{group}}}
 
 	require.NoError(t, l.life.Check(t.Context()))
 
@@ -612,7 +612,7 @@ func TestAMissingNodeGroupIsDrift(t *testing.T) {
 	l := newLifecycleLab(t)
 	l.ready("0.1.0")
 	l.hub.connected.Store(true)
-	l.cloud.clusters = []aws.ClusterState{{Exists: true, Status: "ACTIVE", Version: "1.33"}}
+	l.cloud.clusters = []aws.KubernetesState{{Exists: true, Status: "ACTIVE", Version: "1.33"}}
 
 	require.NoError(t, l.life.Check(t.Context()))
 
@@ -642,10 +642,10 @@ func TestADriftDetectionThatFailsKeepsWhatWasKnown(t *testing.T) {
 	assert.Equal(t, "old", l.drift()[0].Resource)
 }
 
-func TestAStaleHeartbeatAndAMissingClusterMarkTheEnvironmentLost(t *testing.T) {
+func TestAStaleHeartbeatAndAMissingKubernetesMarkTheEnvironmentLost(t *testing.T) {
 	l := newLifecycleLab(t)
 	l.ready("0.1.0")
-	l.cloud.clusters = []aws.ClusterState{{Exists: false}}
+	l.cloud.clusters = []aws.KubernetesState{{Exists: false}}
 
 	require.NoError(t, l.life.Check(t.Context()))
 
@@ -655,18 +655,18 @@ func TestAStaleHeartbeatAndAMissingClusterMarkTheEnvironmentLost(t *testing.T) {
 	assert.Zero(t, l.cloud.count("ensure-stack"))
 }
 
-func TestAMissingClusterWithALiveHeartbeatIsNotLost(t *testing.T) {
+func TestAMissingKubernetesWithALiveHeartbeatIsNotLost(t *testing.T) {
 	l := newLifecycleLab(t)
 	l.ready("0.1.0")
 	l.hub.connected.Store(true)
-	l.cloud.clusters = []aws.ClusterState{{Exists: false}}
+	l.cloud.clusters = []aws.KubernetesState{{Exists: false}}
 
 	require.NoError(t, l.life.Check(t.Context()))
 
 	assert.Nil(t, l.record().LostAt)
 }
 
-func TestAStaleHeartbeatWithTheClusterThereIsNotLostAndClearsAnEarlierLoss(t *testing.T) {
+func TestAStaleHeartbeatWithTheKubernetesThereIsNotLostAndClearsAnEarlierLoss(t *testing.T) {
 	l := newLifecycleLab(t)
 	l.ready("0.1.0")
 	l.lost()

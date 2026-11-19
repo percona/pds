@@ -40,7 +40,7 @@ var minorVersion = regexp.MustCompile(`^1\.\d{2,3}$`)
 // ChangeSet resource types that decide whether an update may go on.
 const (
 	typeVPC       = "AWS::EC2::VPC"
-	typeCluster   = "AWS::EKS::Cluster"
+	typeEKS       = "AWS::EKS::Cluster"
 	typeNodeGroup = "AWS::EKS::Nodegroup"
 )
 
@@ -50,7 +50,7 @@ const (
 	needsConfirm  = "This update replaces the node group, which restarts every database. Start the update again and confirm the replacement to go on."
 	updateFailed  = "AWS could not apply the update and put the environment back as it was. Retry the step. Contact Percona support if it fails again."
 	updatePending = "The update has not finished in AWS. Retry to keep waiting."
-	clusterBehind = "AWS finished the update but the Kubernetes cluster is not on the new version yet. Retry to check again."
+	versionBehind = "AWS finished the update but the Kubernetes cluster is not on the new version yet. Retry to check again."
 )
 
 // Verdict is what a change set would do to the parts of an environment that
@@ -71,7 +71,7 @@ func Judge(plan aws.ChangePlan) Verdict {
 	for _, c := range plan.Changes {
 		replaced := c.Action == "Remove" || c.Replacement == "True" || c.Replacement == "Conditional"
 		switch {
-		case replaced && (c.Type == typeVPC || c.Type == typeCluster):
+		case replaced && (c.Type == typeVPC || c.Type == typeEKS):
 			v.ReplacesNetwork = true
 		case replaced && c.Type == typeNodeGroup:
 			v.ReplacesNodeGroup = true
@@ -211,7 +211,7 @@ func (d Deps) waitUpdate(ctx context.Context, s scope, params KubernetesParams) 
 		}
 		switch {
 		case updated(state, params):
-			return d.confirmCluster(ctx, s, params)
+			return d.confirmVersion(ctx, s, params)
 		case stackBusy(state):
 			sawWork = true
 		case sawWork && (state.Status == "UPDATE_ROLLBACK_COMPLETE" || state.Status == "UPDATE_ROLLBACK_FAILED" || state.Failed()):
@@ -228,7 +228,7 @@ func (d Deps) waitUpdate(ctx context.Context, s scope, params KubernetesParams) 
 	}
 }
 
-func (d Deps) confirmCluster(ctx context.Context, s scope, params KubernetesParams) error {
+func (d Deps) confirmVersion(ctx context.Context, s scope, params KubernetesParams) error {
 	if params.KubernetesVersion == "" {
 		return nil
 	}
@@ -237,7 +237,7 @@ func (d Deps) confirmCluster(ctx context.Context, s scope, params KubernetesPara
 		return s.fail(err)
 	}
 	if cluster.Version != params.KubernetesVersion {
-		return provision.Permanent(fmt.Errorf("the cluster is on %q, not %q", cluster.Version, params.KubernetesVersion), clusterBehind)
+		return provision.Permanent(fmt.Errorf("the cluster is on %q, not %q", cluster.Version, params.KubernetesVersion), versionBehind)
 	}
 
 	return nil

@@ -40,7 +40,7 @@ func TestKubernetesUpgradeUpdatesTheStackThroughAChangeSetAndWaitsForIt(t *testi
 	l := newLab(t)
 	l.ready("0.1.0")
 	l.cloud.stacks = []aws.StackState{before("1.33"), before("1.33"), inProgress(), updated("1.34")}
-	l.cloud.clusters = []aws.ClusterState{{Exists: true, Status: "ACTIVE", Version: "1.34"}}
+	l.cloud.clusters = []aws.KubernetesState{{Exists: true, Status: "ACTIVE", Version: "1.34"}}
 	e := l.kindEngine(managed.KubernetesKind(l.deps))
 	run := l.startWith(e, toNextMinor)
 
@@ -61,7 +61,7 @@ func TestKubernetesUpgradeUpdatesTheStackThroughAChangeSetAndWaitsForIt(t *testi
 	assert.Zero(t, l.cloud.count("open-access"), "the Kubernetes API is not needed")
 }
 
-func TestAnUpdateThatWouldReplaceTheNetworkOrTheClusterStopsBeforeChangingAnything(t *testing.T) {
+func TestAnUpdateThatWouldReplaceTheNetworkOrTheKubernetesStopsBeforeChangingAnything(t *testing.T) {
 	for _, tc := range []struct{ resource, typ string }{
 		{"Vpc", "AWS::EC2::VPC"},
 		{"Cluster", "AWS::EKS::Cluster"},
@@ -90,7 +90,7 @@ func TestReplacingTheNodeGroupNeedsAnExplicitConfirm(t *testing.T) {
 	l.ready("0.1.0")
 	l.cloud.stacks = []aws.StackState{before("1.33"), updated("1.34")}
 	l.cloud.plans = []aws.ChangePlan{replacing("NodeGroup", "AWS::EKS::Nodegroup", "True")}
-	l.cloud.clusters = []aws.ClusterState{{Exists: true, Status: "ACTIVE", Version: "1.34"}}
+	l.cloud.clusters = []aws.KubernetesState{{Exists: true, Status: "ACTIVE", Version: "1.34"}}
 	e := l.kindEngine(managed.KubernetesKind(l.deps))
 	run := l.startWith(e, toNextMinor)
 
@@ -119,7 +119,7 @@ func TestAnUpdateAWSRollsBackFailsTheStepAndRetryTriesAgainWithAFreshChangeSet(t
 		{Exists: true, Status: "UPDATE_ROLLBACK_COMPLETE", FailureReason: "You have requested more vCPU capacity than your current vCPU limit (Service: AmazonEC2; Status Code: 400; Error Code: VcpuLimitExceeded; Request ID: x)"},
 		{Exists: true, Status: "UPDATE_ROLLBACK_COMPLETE"}, inProgress(), updated("1.34"),
 	}
-	l.cloud.clusters = []aws.ClusterState{{Exists: true, Status: "ACTIVE", Version: "1.34"}}
+	l.cloud.clusters = []aws.KubernetesState{{Exists: true, Status: "ACTIVE", Version: "1.34"}}
 	e := l.kindEngine(managed.KubernetesKind(l.deps))
 	run := l.startWith(e, toNextMinor)
 
@@ -141,7 +141,7 @@ func TestAnUpdateThatIsAlreadyInTheStackIsNotAppliedAgain(t *testing.T) {
 	l := newLab(t)
 	l.ready("0.1.0")
 	l.cloud.stacks = []aws.StackState{updated("1.34")}
-	l.cloud.clusters = []aws.ClusterState{{Exists: true, Status: "ACTIVE", Version: "1.34"}}
+	l.cloud.clusters = []aws.KubernetesState{{Exists: true, Status: "ACTIVE", Version: "1.34"}}
 	e := l.kindEngine(managed.KubernetesKind(l.deps))
 	run := l.startWith(e, toNextMinor)
 
@@ -179,11 +179,11 @@ func TestAnUpdateThatNeverFinishesFailsTheStepWithASentence(t *testing.T) {
 	assert.Contains(t, step.Failure, "has not finished")
 }
 
-func TestAnUpdateThatLeavesTheClusterOnTheOldVersionFails(t *testing.T) {
+func TestAnUpdateThatLeavesTheKubernetesOnTheOldVersionFails(t *testing.T) {
 	l := newLab(t)
 	l.ready("0.1.0")
 	l.cloud.stacks = []aws.StackState{before("1.33"), updated("1.34")}
-	l.cloud.clusters = []aws.ClusterState{{Exists: true, Status: "ACTIVE", Version: "1.33"}}
+	l.cloud.clusters = []aws.KubernetesState{{Exists: true, Status: "ACTIVE", Version: "1.33"}}
 	e := l.kindEngine(managed.KubernetesKind(l.deps))
 	run := l.startWith(e, toNextMinor)
 

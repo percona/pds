@@ -537,7 +537,7 @@ func (l *Lifecycle) checkOne(ctx context.Context, rec store.ManagedEnvironment) 
 // driftItems names what differs from what PDS made: the resources
 // CloudFormation found changed or deleted, and the cluster and node group,
 // which CloudFormation does not check, compared with the stack's parameters.
-func driftItems(stack aws.StackState, cluster aws.ClusterState, cfn []aws.Drift) []store.DriftItem {
+func driftItems(stack aws.StackState, cluster aws.KubernetesState, cfn []aws.Drift) []store.DriftItem {
 	var items []store.DriftItem
 	if !stack.Exists {
 		items = append(items, store.DriftItem{Resource: "CloudFormation stack", Detail: deletedOutside})

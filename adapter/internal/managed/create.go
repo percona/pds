@@ -94,7 +94,7 @@ type Cloud interface {
 	ApplyPlan(ctx context.Context, t aws.Target, name string) error
 	DiscardPlan(ctx context.Context, t aws.Target, name string) error
 	DetectDrift(ctx context.Context, t aws.Target) ([]aws.Drift, error)
-	Cluster(ctx context.Context, t aws.Target) (aws.ClusterState, error)
+	Cluster(ctx context.Context, t aws.Target) (aws.KubernetesState, error)
 }
 
 // KubeAccess is what the control plane calls an environment's Kubernetes API

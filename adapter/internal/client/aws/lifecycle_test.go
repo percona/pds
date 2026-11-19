@@ -275,7 +275,7 @@ func TestDetectDriftGivesUpWhenTheContextEnds(t *testing.T) {
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 }
 
-func TestClusterReadsTheVersionTheEndpointAndTheNodeGroups(t *testing.T) {
+func TestKubernetesReadsTheVersionTheEndpointAndTheNodeGroups(t *testing.T) {
 	e := &fakeEKS{cluster: ekstypes.Cluster{
 		Status: ekstypes.ClusterStatusActive, Version: sdkaws.String("1.33"),
 		ResourcesVpcConfig: &ekstypes.VpcConfigResponse{EndpointPublicAccess: true},
@@ -292,13 +292,13 @@ func TestClusterReadsTheVersionTheEndpointAndTheNodeGroups(t *testing.T) {
 	got, err := infra.Cluster(t.Context(), target)
 
 	require.NoError(t, err)
-	assert.Equal(t, ClusterState{
+	assert.Equal(t, KubernetesState{
 		Exists: true, Status: "ACTIVE", Version: "1.33", PublicEndpoint: true,
 		NodeGroups: []NodeGroupState{{Name: "pds-nodes", Status: "ACTIVE", Version: "1.33", InstanceTypes: []string{"m6i.xlarge"}, Min: 3, Desired: 3, Max: 3}},
 	}, got)
 }
 
-func TestClusterSaysItIsMissingWhenEKSDoesNotKnowIt(t *testing.T) {
+func TestKubernetesSaysItIsMissingWhenEKSDoesNotKnowIt(t *testing.T) {
 	e := &fakeEKS{describeErr: &ekstypes.ResourceNotFoundException{}}
 	infra := updateInfra(&fakeCFN{}, e, &fakeChanges{}, &fakeNodes{})
 
@@ -308,7 +308,7 @@ func TestClusterSaysItIsMissingWhenEKSDoesNotKnowIt(t *testing.T) {
 	assert.False(t, got.Exists)
 }
 
-func TestClusterKeepsAReadThatFailed(t *testing.T) {
+func TestKubernetesKeepsAReadThatFailed(t *testing.T) {
 	e := &fakeEKS{describeErr: errors.New("throttled")}
 	infra := updateInfra(&fakeCFN{}, e, &fakeChanges{}, &fakeNodes{})
 

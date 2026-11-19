@@ -44,7 +44,7 @@ type fakeCloud struct {
 	applied    []string
 	discarded  []string
 	drifts     []aws.Drift
-	clusters   []aws.ClusterState
+	clusters   []aws.KubernetesState
 	stackState *aws.StackState
 }
 
