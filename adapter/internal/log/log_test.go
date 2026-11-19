@@ -52,7 +52,6 @@ func TestRedactsCredentialAttributes(t *testing.T) {
 		{name: "apikey", key: "apikey", val: "sn-api-key"},
 		{name: "token", key: "client_token", val: "sn-client-token"},
 		{name: "secret", key: "secret", val: "top-secret"},
-		{name: "resend key", key: "RESEND_API_KEY", val: "re_abc123"},
 		{name: "authorization", key: "authorization", val: "Bearer abc.def"},
 		{name: "credentials", key: "credentials", val: "root/root"},
 		{name: "dsn", key: "dsn", val: "root:root@tcp(127.0.0.1:3306)/app"},

@@ -16,7 +16,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/percona/pds/adapter/internal/auth"
-	"github.com/percona/pds/adapter/internal/client/resend"
 	"github.com/percona/pds/adapter/internal/service"
 	"github.com/percona/pds/adapter/internal/store"
 	"github.com/percona/pds/adapter/internal/testutil"
@@ -24,11 +23,11 @@ import (
 
 type fakeInviteMailer struct {
 	mu   sync.Mutex
-	sent []resend.Email
+	sent []service.InvitationEmail
 	err  error
 }
 
-func (m *fakeInviteMailer) Send(_ context.Context, email resend.Email) error {
+func (m *fakeInviteMailer) Send(_ context.Context, email service.InvitationEmail) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.err != nil {
@@ -39,11 +38,11 @@ func (m *fakeInviteMailer) Send(_ context.Context, email resend.Email) error {
 	return nil
 }
 
-func (m *fakeInviteMailer) emails() []resend.Email {
+func (m *fakeInviteMailer) emails() []service.InvitationEmail {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return append([]resend.Email(nil), m.sent...)
+	return append([]service.InvitationEmail(nil), m.sent...)
 }
 
 type fakeInviteEvents struct {
