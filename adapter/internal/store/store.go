@@ -193,6 +193,10 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return fmt.Errorf("reconcile schema: %w", scrub(err))
 	}
 
+	if err := ensureProvisioningIndexes(s.db.WithContext(ctx)); err != nil {
+		return fmt.Errorf("reconcile schema: %w", scrub(err))
+	}
+
 	if err := removeProviderKeys(s.db.WithContext(ctx)); err != nil {
 		return fmt.Errorf("remove the keys of the removed providers: %w", scrub(err))
 	}
