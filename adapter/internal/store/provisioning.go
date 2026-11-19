@@ -85,14 +85,27 @@ type ProvisioningStep struct {
 	Attempts int    `gorm:"not null"`
 	// Failure is the safe sentence. Detail is the raw error, redacted and
 	// truncated, for support.
-	Failure    string `gorm:"size:512;not null;default:''"`
-	Detail     string `gorm:"size:1024;not null;default:''"`
+	Failure string `gorm:"size:512;not null;default:''"`
+	Detail  string `gorm:"size:1024;not null;default:''"`
+	// Refusal types a failure AWS caused and the customer fixes. It is empty
+	// for every other failure.
+	Refusal    StepRefusal `gorm:"embedded;embeddedPrefix:refusal_"`
 	StartedAt  *time.Time
 	FinishedAt *time.Time
 }
 
 // TableName pins the table name.
 func (ProvisioningStep) TableName() string { return "provisioning_steps" }
+
+// StepRefusal is the typed part of a failure a customer fixes in their own
+// account: why, which service and quota or action, and where. It holds no raw
+// error text.
+type StepRefusal struct {
+	Reason  string `gorm:"size:24;not null;default:''"`
+	Service string `gorm:"size:64;not null;default:''"`
+	Item    string `gorm:"size:128;not null;default:''"`
+	Region  string `gorm:"size:32;not null;default:''"`
+}
 
 // StepEnd is how a step ended and what happens to its run next.
 type StepEnd struct {
@@ -101,6 +114,7 @@ type StepEnd struct {
 	RunStatus string
 	Failure   string
 	Detail    string
+	Refusal   StepRefusal
 	Message   string
 	NotBefore time.Time
 	// Refund gives back the attempt BeginStep counted, for a pause.
@@ -201,6 +215,21 @@ func (p *Provisioning) Run(ctx context.Context, id uint) (ProvisioningRun, error
 	}
 	if err != nil {
 		return ProvisioningRun{}, scrub(err)
+	}
+
+	return run, nil
+}
+
+// Latest reads the newest run of one of the Team's environments, or
+// ErrRunNotFound when it has none.
+func (p *Provisioning) Latest(ctx context.Context, team uint, environment string) (ProvisioningRun, error) {
+	var run ProvisioningRun
+	res := p.db.WithContext(ctx).Where("team_id = ? AND environment = ?", team, environment).Order("id DESC").Limit(1).Find(&run)
+	if res.Error != nil {
+		return ProvisioningRun{}, scrub(res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return ProvisioningRun{}, ErrRunNotFound
 	}
 
 	return run, nil
@@ -318,7 +347,11 @@ func (p *Provisioning) EndStep(ctx context.Context, runID uint, owner string, po
 			return err
 		}
 
-		step := map[string]any{"status": end.StepStatus, "failure": end.Failure, "detail": end.Detail, "finished_at": now}
+		step := map[string]any{
+			"status": end.StepStatus, "failure": end.Failure, "detail": end.Detail, "finished_at": now,
+			"refusal_reason": end.Refusal.Reason, "refusal_service": end.Refusal.Service,
+			"refusal_item": end.Refusal.Item, "refusal_region": end.Refusal.Region,
+		}
 		if end.Refund {
 			step["attempts"] = gorm.Expr("GREATEST(attempts - 1, 0)")
 		}
@@ -376,7 +409,10 @@ func (p *Provisioning) Retry(ctx context.Context, team uint, environment string,
 		}
 
 		if err := tx.Model(&ProvisioningStep{}).Where("run_id = ? AND status = ?", run.ID, StepFailed).
-			Updates(map[string]any{"status": StepPending, "attempts": 0, "failure": "", "detail": ""}).Error; err != nil {
+			Updates(map[string]any{
+				"status": StepPending, "attempts": 0, "failure": "", "detail": "",
+				"refusal_reason": "", "refusal_service": "", "refusal_item": "", "refusal_region": "",
+			}).Error; err != nil {
 			return err
 		}
 

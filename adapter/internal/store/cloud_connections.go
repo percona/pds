@@ -130,6 +130,38 @@ func (c *CloudConnections) RevokeToken(ctx context.Context, teamID uint, hash st
 	return nil
 }
 
+// RevokeTokenByID ends one of the Team's tokens by its public id, the first 16
+// characters of its hash, and returns it. A token that is unknown, another
+// Team's or already revoked reads as ErrCloudTokenInvalid.
+func (c *CloudConnections) RevokeTokenByID(ctx context.Context, teamID uint, id string, now time.Time) (CloudToken, error) {
+	if len(id) != 16 {
+		return CloudToken{}, ErrCloudTokenInvalid
+	}
+	db, err := c.open(ctx)
+	if err != nil {
+		return CloudToken{}, err
+	}
+	var token CloudToken
+	err = db.Transaction(func(tx *gorm.DB) error {
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("team_id = ? AND substr(hash, 1, 16) = ? AND revoked_at IS NULL", teamID, id).
+			First(&token).Error
+		if err != nil {
+			return err
+		}
+
+		return tx.Model(&token).Update("revoked_at", now.UTC()).Error
+	})
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return CloudToken{}, ErrCloudTokenInvalid
+	}
+	if err != nil {
+		return CloudToken{}, fmt.Errorf("revoke cloud token: %w", scrub(err))
+	}
+
+	return token, nil
+}
+
 // TokenTeam returns the Team a live token acts for.
 func (c *CloudConnections) TokenTeam(ctx context.Context, hash string, now time.Time) (CloudToken, error) {
 	db, err := c.open(ctx)
@@ -333,6 +365,41 @@ func (c *CloudConnections) Cancel(ctx context.Context, teamID uint, id string, n
 	}
 	if err != nil {
 		return fmt.Errorf("cancel cloud connection: %w", scrub(err))
+	}
+
+	return nil
+}
+
+// Remove forgets one of the Team's connections, ready or not, with its tokens
+// and events. It touches nothing in the customer's account.
+func (c *CloudConnections) Remove(ctx context.Context, teamID uint, id string) error {
+	db, err := c.open(ctx)
+	if err != nil {
+		return err
+	}
+	err = db.Transaction(func(tx *gorm.DB) error {
+		var row CloudConnection
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("team_id = ? AND id = ?", teamID, id).First(&row).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrCloudConnectionUnknown
+		}
+		if err != nil {
+			return err
+		}
+		if err := tx.Where("connection_id = ?", id).Delete(&CloudToken{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("connection_id = ?", id).Delete(&CloudEvent{}).Error; err != nil {
+			return err
+		}
+
+		return tx.Delete(&row).Error
+	})
+	if errors.Is(err, ErrCloudConnectionUnknown) {
+		return err
+	}
+	if err != nil {
+		return fmt.Errorf("remove cloud connection: %w", scrub(err))
 	}
 
 	return nil
