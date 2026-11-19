@@ -70,8 +70,8 @@ type Config struct {
 	// ProvisionWindowMaxAge is how long an Access window may stay open.
 	ProvisionWindowMaxAge time.Duration
 	HubGitURL             string
-	HubGitHubOrg      string
-	HubGitHubToken    string
+	HubGitHubOrg          string
+	HubGitHubToken        string
 	// The GitHub App credentials replace HubGitHubToken. The private key is
 	// PEM text, read from a value or a file.
 	HubGitHubAppID             string

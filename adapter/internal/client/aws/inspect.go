@@ -160,3 +160,14 @@ func errorCode(err error) string {
 
 	return ""
 }
+
+// RoleName is the name of one of a cloud connection's roles: control-plane,
+// cloudformation, eks-cluster, node or ebs-csi. The bootstrap template names
+// them the same way.
+func RoleName(connectionID, role string) string { return "pds-" + connectionID + "-" + role }
+
+// RoleARN is the deterministic ARN of one of a connection's roles. They all
+// sit under the path /pds/<connection id>/.
+func RoleARN(account, connectionID, role string) string {
+	return "arn:aws:iam::" + account + ":role/pds/" + connectionID + "/" + RoleName(connectionID, role)
+}

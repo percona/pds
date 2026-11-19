@@ -77,3 +77,9 @@ func TestTransientCoversThrottlingAndRolePropagation(t *testing.T) {
 	assert.False(t, aws.Transient(apiError("VpcLimitExceeded", "x")))
 	assert.False(t, aws.Transient(errors.New("boom")))
 }
+
+func TestConnectionRolesHaveDeterministicARNs(t *testing.T) {
+	assert.Equal(t, "pds-abc123abc123-node", aws.RoleName("abc123abc123", "node"))
+	assert.Equal(t, "arn:aws:iam::111122223333:role/pds/abc123abc123/pds-abc123abc123-control-plane",
+		aws.RoleARN("111122223333", "abc123abc123", "control-plane"))
+}
