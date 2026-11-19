@@ -247,7 +247,7 @@ func (i *Infra) Stack(ctx context.Context, t Target) (StackState, error) {
 	for _, o := range stack.Outputs {
 		out.Outputs[sdkaws.ToString(o.OutputKey)] = sdkaws.ToString(o.OutputValue)
 	}
-	if out.Failed() {
+	if out.Failed() || strings.HasPrefix(out.Status, "UPDATE_ROLLBACK") {
 		events, err := client.DescribeStackEvents(ctx, &cloudformation.DescribeStackEventsInput{StackName: &t.StackName})
 		if err != nil {
 			return StackState{}, fmt.Errorf("describe stack events: %w", err)

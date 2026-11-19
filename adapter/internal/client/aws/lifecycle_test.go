@@ -326,3 +326,18 @@ func TestStackStateCarriesItsParameters(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "1.33", state.Parameters["KubernetesVersion"])
 }
+
+func TestStackReadsTheFirstFailedResourceOfARolledBackUpdate(t *testing.T) {
+	stack := existingStack()
+	stack.StackStatus = cfntypes.StackStatusUpdateRollbackComplete
+	cfn := &fakeCFN{stacks: []cfntypes.Stack{stack}, events: []cfntypes.StackEvent{
+		{ResourceStatus: cfntypes.ResourceStatusUpdateFailed, ResourceStatusReason: sdkaws.String("Cancelled")},
+		{ResourceStatus: cfntypes.ResourceStatusUpdateFailed, ResourceStatusReason: sdkaws.String("VcpuLimitExceeded")},
+	}}
+	infra := updateInfra(cfn, &fakeEKS{}, &fakeChanges{}, &fakeNodes{})
+
+	state, err := infra.Stack(t.Context(), target)
+
+	require.NoError(t, err)
+	assert.Equal(t, "VcpuLimitExceeded", state.FailureReason, "the oldest failure is the cause, the rest is the rollback")
+}

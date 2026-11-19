@@ -317,12 +317,9 @@ func ConnectionReady(d Deps) func(ctx context.Context, run store.ProvisioningRun
 	}
 }
 
-func (d Deps) assumeRole(ctx context.Context, _ provision.Env, s scope) error {
-	if s.conn.State != store.CloudReady {
-		return fmt.Errorf("%w: the connection is %s", provision.ErrConnectionUnavailable, s.conn.State)
-	}
-	if err := d.Cloud.CheckRole(ctx, s.target); err != nil {
-		return s.fail(err)
+func (d Deps) assumeRole(ctx context.Context, env provision.Env, s scope) error {
+	if err := d.checkRole(ctx, env, s); err != nil {
+		return err
 	}
 	if refusal, refused := d.Cloud.Preflight(ctx, s.target, aws.Needs{VCPUs: NodeVCPUs}); refused {
 		return provision.Permanent(errors.New("the preflight found the account cannot build the environment"), refusal.Sentence(s.where))
