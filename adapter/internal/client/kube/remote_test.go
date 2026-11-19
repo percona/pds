@@ -27,8 +27,6 @@ type patched struct {
 	resource  string
 	namespace string
 	name      string
-	manager   string
-	force     bool
 	patchType types.PatchType
 	body      map[string]any
 }
