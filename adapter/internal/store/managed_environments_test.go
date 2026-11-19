@@ -73,3 +73,15 @@ func TestStackFailureSeenIsRemembered(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, got.StackFailureSeen)
 }
+
+func TestRemovingAManagedEnvironmentFreesItsName(t *testing.T) {
+	db, admin := newOrganizationWithAdmin(t)
+	me := db.ManagedEnvironments()
+	_, err := me.Create(t.Context(), managedInput(admin.TeamID, "0123456789ab", "orders"), time.Now())
+	require.NoError(t, err)
+
+	require.NoError(t, me.Remove(t.Context(), admin.TeamID, "orders"))
+
+	_, err = me.Create(t.Context(), managedInput(admin.TeamID, "ba9876543210", "orders"), time.Now())
+	require.NoError(t, err)
+}

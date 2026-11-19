@@ -131,3 +131,16 @@ func (m *ManagedEnvironments) SetStackFailureSeen(ctx context.Context, teamID ui
 
 	return nil
 }
+
+// Remove forgets a managed environment that was never started.
+func (m *ManagedEnvironments) Remove(ctx context.Context, teamID uint, name string) error {
+	db, err := m.open(ctx)
+	if err != nil {
+		return err
+	}
+	if err := db.Where("team_id = ? AND name = ?", teamID, name).Delete(&ManagedEnvironment{}).Error; err != nil {
+		return fmt.Errorf("remove managed environment: %w", scrub(err))
+	}
+
+	return nil
+}
