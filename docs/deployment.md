@@ -475,6 +475,24 @@ do inside an environment is decided by the Kubernetes roles the join script
 installs and by the binding of a role to that group, which the agent creates
 with each window and removes when it ends.
 
+## Cloud connections
+
+A cloud connection lets this control plane act in a customer's AWS account.
+The roles the customer creates trust one principal, which is the AWS identity
+the adapter runs as, and `HUB_CLOUD_PRINCIPAL_ARN` names it. Set it through the
+chart's `adapter.extraEnv`:
+
+| Variable | Value |
+|----------|-------|
+| `HUB_CLOUD_PRINCIPAL_ARN` | The ARN of the IAM role or user the adapter's AWS credentials belong to, for example `arn:aws:iam::111122223333:role/pds-control-plane`. An account root is refused at start |
+
+Unset, the enroll, events and verify routes answer 501. The adapter reaches AWS through
+the default credential chain, so on EKS give its ServiceAccount a Pod Identity
+association with that role. The role needs `sts:AssumeRole` and
+`sts:SetSourceIdentity` on `arn:aws:iam::*:role/pds/*`, and nothing else. The
+template, the connect script and how a connection is checked are in
+[architecture.md](architecture.md#cloud-connections).
+
 ## Connected environments left running
 
 The laptop command is the lab. See [Laptop](#laptop).
