@@ -127,3 +127,36 @@ func merge(base, overlay map[string]any) {
 		base[key] = value
 	}
 }
+
+// ReleaseFiles are the files that make the pds release part of the
+// environment's Git repository, under clusters/<environment>/platform/pds.
+func ReleaseFiles(environment string, in ReleaseInput) (map[string][]byte, error) {
+	release, err := RenderRelease(in)
+	if err != nil {
+		return nil, err
+	}
+	repository, err := yaml.Marshal(map[string]any{
+		"apiVersion": "source.toolkit.fluxcd.io/v1",
+		"kind":       "HelmRepository",
+		"metadata":   map[string]any{"name": ChartRepository, "namespace": "flux-system"},
+		"spec":       map[string]any{"type": "oci", "interval": "1h", "url": ChartURL},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("render the chart source: %w", err)
+	}
+	index, err := yaml.Marshal(map[string]any{
+		"apiVersion": "kustomize.config.k8s.io/v1beta1",
+		"kind":       "Kustomization",
+		"resources":  []string{"helmrepository.yaml", "helmrelease.yaml"},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("render the release index: %w", err)
+	}
+	dir := "clusters/" + environment + "/platform/pds/"
+
+	return map[string][]byte{
+		dir + "helmrelease.yaml":    release,
+		dir + "helmrepository.yaml": repository,
+		dir + "kustomization.yaml":  index,
+	}, nil
+}

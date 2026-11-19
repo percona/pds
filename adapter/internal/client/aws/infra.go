@@ -89,6 +89,7 @@ type ClusterAccess struct {
 
 type cfnAPI interface {
 	CreateStack(context.Context, *cloudformation.CreateStackInput, ...func(*cloudformation.Options)) (*cloudformation.CreateStackOutput, error)
+	DeleteStack(context.Context, *cloudformation.DeleteStackInput, ...func(*cloudformation.Options)) (*cloudformation.DeleteStackOutput, error)
 	DescribeStacks(context.Context, *cloudformation.DescribeStacksInput, ...func(*cloudformation.Options)) (*cloudformation.DescribeStacksOutput, error)
 	DescribeStackEvents(context.Context, *cloudformation.DescribeStackEventsInput, ...func(*cloudformation.Options)) (*cloudformation.DescribeStackEventsOutput, error)
 }
@@ -182,6 +183,20 @@ func (i *Infra) EnsureStack(ctx context.Context, t Target, spec StackSpec) error
 	}
 	if _, err := i.cfn(session).CreateStack(ctx, in); err != nil && errorCode(err) != "AlreadyExistsException" {
 		return fmt.Errorf("create stack: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteStack asks CloudFormation to delete the stack. It does so through the
+// role the stack was made with, and the caller reads the stack until it is gone.
+func (i *Infra) DeleteStack(ctx context.Context, t Target) error {
+	session, err := i.assume(ctx, t)
+	if err != nil {
+		return err
+	}
+	if _, err := i.cfn(session).DeleteStack(ctx, &cloudformation.DeleteStackInput{StackName: &t.StackName}); err != nil {
+		return fmt.Errorf("delete stack: %w", err)
 	}
 
 	return nil

@@ -1,0 +1,471 @@
+package managed
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strconv"
+	"time"
+
+	"github.com/percona/pds/adapter/internal/client/aws"
+	"github.com/percona/pds/adapter/internal/provision"
+	"github.com/percona/pds/adapter/internal/store"
+)
+
+// KindCreate is the run kind that builds a managed environment.
+const KindCreate = "create"
+
+// The names of the create steps, in order.
+const (
+	stepAssumeRole    = "assume-role"
+	stepCreateStack   = "create-stack"
+	stepWaitStack     = "wait-stack"
+	stepOpenAccess    = "open-access"
+	stepInstallFlux   = "install-flux"
+	stepWriteRelease  = "write-release"
+	stepJoin          = "join"
+	stepCloseAccess   = "close-access"
+	stepWaitHeartbeat = "wait-heartbeat"
+)
+
+// CreateStepNames lists the create steps in the order they run.
+var CreateStepNames = []string{
+	stepAssumeRole, stepCreateStack, stepWaitStack, stepOpenAccess, stepInstallFlux,
+	stepWriteRelease, stepJoin, stepCloseAccess, stepWaitHeartbeat,
+}
+
+// Phase is the phase of a create the console shows a step under, or empty for
+// a name that is not a create step.
+func Phase(step string) string {
+	switch step {
+	case stepAssumeRole, stepCreateStack, stepWaitStack:
+		return "Creating network and Kubernetes cluster"
+	case stepOpenAccess:
+		return "Connecting to the environment"
+	case stepInstallFlux, stepWriteRelease, stepJoin:
+		return "Installing PDS"
+	case stepCloseAccess, stepWaitHeartbeat:
+		return "Finishing"
+	}
+
+	return ""
+}
+
+// Sentences a person reads when a step has nothing more specific to say.
+const (
+	busySentence = "AWS is asking the control plane to slow down. The step tries again by itself."
+	// genericSentence is for an AWS error that is none of the typed refusals.
+	genericSentence = "AWS reported an error that PDS cannot fix for you. Retry the step. Contact Percona support if it fails again."
+	stillCreating   = "The network and the Kubernetes cluster are still being created. The step continues by itself."
+	stackFailed     = "AWS could not create the network and the Kubernetes cluster. Retry the step. Contact Percona support if it fails again."
+	notReporting    = "The environment has not reported to the control plane yet. Retry to keep waiting."
+)
+
+// Records reads the managed environment a run works on.
+type Records interface {
+	Get(ctx context.Context, team uint, name string) (store.ManagedEnvironment, error)
+	SetStackFailureSeen(ctx context.Context, team uint, name string, seen bool) error
+}
+
+// Connections reads the cloud connection an environment was created through.
+type Connections interface {
+	Get(ctx context.Context, team uint, id string) (store.CloudConnection, error)
+}
+
+// Cloud is the customer's AWS account, through the connection's role. *aws.Infra
+// is the implementation, and tests fake it.
+type Cloud interface {
+	CheckRole(ctx context.Context, t aws.Target) error
+	EnsureStack(ctx context.Context, t aws.Target, spec aws.StackSpec) error
+	DeleteStack(ctx context.Context, t aws.Target) error
+	Stack(ctx context.Context, t aws.Target) (aws.StackState, error)
+	OpenAccess(ctx context.Context, t aws.Target, cidrs []string) (aws.ClusterAccess, error)
+	CloseAccess(ctx context.Context, t aws.Target) (string, error)
+	KubeToken(ctx context.Context, t aws.Target) (string, error)
+}
+
+// KubeAccess is what the control plane calls an environment's Kubernetes API
+// with while the Access window is open. The token lasts a minute.
+type KubeAccess struct {
+	Endpoint string
+	CA       []byte
+	Token    string
+}
+
+// Join is what a new environment needs to connect itself to the control plane:
+// the agent's credential and the Git remote Flux reads. It is written into the
+// environment and kept nowhere else.
+type Join struct {
+	Environment    string
+	AgentToken     string
+	GitURL         string
+	GitIdentity    string
+	GitIdentityPub string
+}
+
+// Cluster is the environment's Kubernetes API.
+type Cluster interface {
+	// InstallFlux installs the pinned Flux and the ServiceAccount that applies
+	// the pds release. It is idempotent.
+	InstallFlux(ctx context.Context, access KubeAccess, version string) error
+	// WriteJoin writes the agent's Secret and points Flux at the environment's
+	// Git repository. It is idempotent.
+	WriteJoin(ctx context.Context, access KubeAccess, join Join) error
+}
+
+// Hub is the control plane's side of an environment: its Git repository, its
+// join token and its heartbeat.
+type Hub interface {
+	// Join mints the environment's join token, revokes any earlier one, and
+	// enrolls it. Only hashes are stored.
+	Join(ctx context.Context, team uint, environment string) (Join, error)
+	// WriteRelease commits the files to the environment's Git repository.
+	WriteRelease(ctx context.Context, team uint, environment string, files map[string][]byte) error
+	// Connected reports whether the environment's agent has sent a heartbeat.
+	Connected(ctx context.Context, team uint, environment string) (bool, error)
+}
+
+// Settings are what the steps take from the deployment.
+type Settings struct {
+	// OutgoingCIDRs are the only addresses the Kubernetes API is open to
+	// while an Access window is open.
+	OutgoingCIDRs []string
+	FluxVersion   string
+	ChartVersion  string
+	HubURL        string
+	// ImageRepository and ImageTag are the agent image the release installs.
+	ImageRepository string
+	ImageTag        string
+	// PollEvery is how often a wait looks again. StackWait bounds the wait for
+	// the stack and JoinWait the wait for the first heartbeat.
+	PollEvery time.Duration
+	StackWait time.Duration
+	JoinWait  time.Duration
+}
+
+func (s Settings) withDefaults() Settings {
+	if s.PollEvery <= 0 {
+		s.PollEvery = 15 * time.Second
+	}
+	if s.StackWait <= 0 {
+		s.StackWait = 45 * time.Minute
+	}
+	if s.JoinWait <= 0 {
+		s.JoinWait = 20 * time.Minute
+	}
+
+	return s
+}
+
+// Deps is what the managed environment steps work through.
+type Deps struct {
+	Records     Records
+	Connections Connections
+	Cloud       Cloud
+	Cluster     Cluster
+	Hub         Hub
+	Settings    Settings
+	// Granted says whether the stack's service role is granted an action, so a
+	// permission refusal can point at Changed outside PDS. Nil says it is not.
+	Granted func(action string) bool
+}
+
+// scope is what one step knows about its environment and where it works.
+type scope struct {
+	rec    store.ManagedEnvironment
+	conn   store.CloudConnection
+	target aws.Target
+	where  aws.Where
+}
+
+func (d Deps) scope(ctx context.Context, run store.ProvisioningRun) (scope, error) {
+	rec, err := d.Records.Get(ctx, run.TeamID, run.Environment)
+	if errors.Is(err, store.ErrManagedEnvironmentUnknown) {
+		return scope{}, provision.Permanent(err, "This environment is not a managed environment. Contact Percona support.")
+	}
+	if err != nil {
+		return scope{}, provision.Retryable(err, genericSentence)
+	}
+	conn, err := d.Connections.Get(ctx, run.TeamID, rec.ConnectionID)
+	if err != nil {
+		return scope{}, provision.Retryable(err, genericSentence)
+	}
+	cluster := "pds-" + rec.ID
+
+	return scope{
+		rec: rec, conn: conn,
+		target: aws.Target{
+			RoleARN:        aws.RoleARN(conn.AccountID, conn.ID, "control-plane"),
+			ExternalID:     conn.ExternalID,
+			SourceIdentity: "pds-job-provision-" + strconv.FormatUint(uint64(run.ID), 10),
+			Region:         rec.Region,
+			StackName:      "pds-env-" + rec.ID,
+			ClusterName:    cluster,
+		},
+		where: aws.Where{Account: conn.AccountID, Region: rec.Region, Cluster: run.Environment, Granted: d.Granted},
+	}, nil
+}
+
+// fail turns an AWS error into what the engine acts on: a pause for a revoked
+// role, a retry for throttling, a typed refusal, or the generic sentence.
+func (s scope) fail(err error) error {
+	switch {
+	case errors.Is(err, aws.ErrAssumeDenied):
+		return fmt.Errorf("%w: %w", provision.ErrConnectionUnavailable, err)
+	case aws.Transient(err):
+		return provision.Retryable(err, busySentence)
+	}
+	if refusal, ok := aws.Classify(err, s.where); ok {
+		return provision.Permanent(err, refusal.Sentence(s.where))
+	}
+
+	return provision.Retryable(err, genericSentence)
+}
+
+// CreateKind is the run that builds a managed environment, step by step. Every
+// step is idempotent, and any step that needs the Kubernetes API opens the
+// Access window again, because a run that waited for a lease holds none.
+func CreateKind(d Deps) provision.Kind {
+	d.Settings = d.Settings.withDefaults()
+	steps := map[string]func(context.Context, provision.Env, scope) error{
+		stepAssumeRole:    d.assumeRole,
+		stepCreateStack:   d.createStack,
+		stepWaitStack:     d.waitStack,
+		stepOpenAccess:    func(ctx context.Context, env provision.Env, s scope) error { _, err := d.open(ctx, env, s); return err },
+		stepInstallFlux:   d.installFlux,
+		stepWriteRelease:  d.writeRelease,
+		stepJoin:          d.join,
+		stepCloseAccess:   d.closeAccess,
+		stepWaitHeartbeat: d.waitHeartbeat,
+	}
+	kind := provision.Kind{Name: KindCreate}
+	for _, name := range CreateStepNames {
+		run := steps[name]
+		kind.Steps = append(kind.Steps, provision.Step{Name: name, Run: func(ctx context.Context, env provision.Env) error {
+			s, err := d.scope(ctx, env.Run)
+			if err != nil {
+				return err
+			}
+
+			return run(ctx, env, s)
+		}})
+	}
+
+	return kind
+}
+
+// CloseWindow closes an environment's Access window for the sweeper, after
+// reading the real endpoint, and returns what it did.
+func CloseWindow(d Deps) func(ctx context.Context, run store.ProvisioningRun) (string, error) {
+	return func(ctx context.Context, run store.ProvisioningRun) (string, error) {
+		s, err := d.scope(ctx, run)
+		if err != nil {
+			return "", err
+		}
+
+		return d.Cloud.CloseAccess(ctx, s.target)
+	}
+}
+
+// ConnectionReady reports whether the connection a paused run waits on works again.
+func ConnectionReady(d Deps) func(ctx context.Context, run store.ProvisioningRun) bool {
+	return func(ctx context.Context, run store.ProvisioningRun) bool {
+		s, err := d.scope(ctx, run)
+
+		return err == nil && s.conn.State == store.CloudReady
+	}
+}
+
+func (d Deps) assumeRole(ctx context.Context, _ provision.Env, s scope) error {
+	if s.conn.State != store.CloudReady {
+		return fmt.Errorf("%w: the connection is %s", provision.ErrConnectionUnavailable, s.conn.State)
+	}
+	if err := d.Cloud.CheckRole(ctx, s.target); err != nil {
+		return s.fail(err)
+	}
+
+	return nil
+}
+
+func (d Deps) stackSpec(s scope) aws.StackSpec {
+	return aws.StackSpec{
+		Template:       NetworkClusterTemplate,
+		ServiceRoleARN: aws.RoleARN(s.conn.AccountID, s.conn.ID, "cloudformation"),
+		Parameters: map[string]string{
+			"EnvironmentId":     s.rec.ID,
+			"ClusterName":       s.target.ClusterName,
+			"EksClusterRoleArn": aws.RoleARN(s.conn.AccountID, s.conn.ID, "eks-cluster"),
+			"NodeRoleArn":       aws.RoleARN(s.conn.AccountID, s.conn.ID, "node"),
+			"EbsCsiRoleArn":     aws.RoleARN(s.conn.AccountID, s.conn.ID, "ebs-csi"),
+		},
+		Tags: map[string]string{
+			"percona.com/pds":                   s.rec.ID,
+			"percona.com/pds-template-revision": strconv.Itoa(TemplateRevision),
+			"percona.com/pds-connection":        s.conn.ID,
+		},
+	}
+}
+
+func (d Deps) createStack(ctx context.Context, _ provision.Env, s scope) error {
+	if err := d.Cloud.EnsureStack(ctx, s.target, d.stackSpec(s)); err != nil {
+		return s.fail(err)
+	}
+
+	return nil
+}
+
+// waitStack waits for the stack to finish. A stack that failed is reported once
+// and left as it is; the next attempt deletes it and starts the stack again,
+// since CloudFormation cannot resume a failed create.
+func (d Deps) waitStack(ctx context.Context, _ provision.Env, s scope) error {
+	deadline := time.Now().Add(d.Settings.StackWait)
+	for {
+		state, err := d.Cloud.Stack(ctx, s.target)
+		if err != nil {
+			return s.fail(err)
+		}
+
+		switch {
+		case !state.Exists:
+			if err := d.Cloud.EnsureStack(ctx, s.target, d.stackSpec(s)); err != nil {
+				return s.fail(err)
+			}
+			if err := d.Records.SetStackFailureSeen(ctx, s.rec.TeamID, s.rec.Name, false); err != nil {
+				return provision.Retryable(err, genericSentence)
+			}
+		case state.Complete():
+			return nil
+		case state.InProgress() || state.Status == "DELETE_IN_PROGRESS" || state.Status == "ROLLBACK_IN_PROGRESS":
+		case state.Failed():
+			rec, err := d.Records.Get(ctx, s.rec.TeamID, s.rec.Name)
+			if err != nil {
+				return provision.Retryable(err, genericSentence)
+			}
+			if !rec.StackFailureSeen {
+				if err := d.Records.SetStackFailureSeen(ctx, s.rec.TeamID, s.rec.Name, true); err != nil {
+					return provision.Retryable(err, genericSentence)
+				}
+
+				return stackFailure(state, s)
+			}
+			if err := d.Cloud.DeleteStack(ctx, s.target); err != nil {
+				return s.fail(err)
+			}
+		}
+
+		if time.Now().After(deadline) {
+			return provision.Retryable(errors.New("the stack is still being created"), stillCreating)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(d.Settings.PollEvery):
+		}
+	}
+}
+
+// stackFailure says why the stack failed: a typed refusal when the first
+// failed resource names one, otherwise the generic sentence.
+func stackFailure(state aws.StackState, s scope) error {
+	cause := errors.New(state.FailureReason)
+	if refusal, ok := aws.Classify(cause, s.where); ok {
+		return provision.Permanent(cause, refusal.Sentence(s.where))
+	}
+
+	return provision.Permanent(fmt.Errorf("stack status %s: %s", state.Status, state.FailureReason), stackFailed)
+}
+
+// open opens the Access window, recording it first so the sweeper closes it if
+// this worker dies, and returns what the control plane calls the API with.
+func (d Deps) open(ctx context.Context, env provision.Env, s scope) (KubeAccess, error) {
+	if len(d.Settings.OutgoingCIDRs) == 0 {
+		return KubeAccess{}, provision.Permanent(errors.New("no outgoing addresses are declared"),
+			"This control plane has no declared outgoing addresses, so it cannot reach a managed environment. Contact Percona support.")
+	}
+	if err := env.WindowOpened(ctx); err != nil {
+		return KubeAccess{}, err
+	}
+	access, err := d.Cloud.OpenAccess(ctx, s.target, d.Settings.OutgoingCIDRs)
+	if err != nil {
+		return KubeAccess{}, s.fail(err)
+	}
+	token, err := d.Cloud.KubeToken(ctx, s.target)
+	if err != nil {
+		return KubeAccess{}, s.fail(err)
+	}
+
+	return KubeAccess{Endpoint: access.Endpoint, CA: access.CA, Token: token}, nil
+}
+
+func (d Deps) installFlux(ctx context.Context, env provision.Env, s scope) error {
+	access, err := d.open(ctx, env, s)
+	if err != nil {
+		return err
+	}
+	if err := d.Cluster.InstallFlux(ctx, access, d.Settings.FluxVersion); err != nil {
+		return provision.Retryable(err, genericSentence)
+	}
+
+	return nil
+}
+
+func (d Deps) writeRelease(ctx context.Context, _ provision.Env, s scope) error {
+	files, err := ReleaseFiles(s.rec.Name, ReleaseInput{
+		ChartVersion: d.Settings.ChartVersion, HubURL: d.Settings.HubURL, EnvironmentName: s.rec.Name,
+		ImageRepository: d.Settings.ImageRepository, ImageTag: d.Settings.ImageTag,
+	})
+	if err != nil {
+		return provision.Permanent(err, genericSentence)
+	}
+	if err := d.Hub.WriteRelease(ctx, s.rec.TeamID, s.rec.Name, files); err != nil {
+		return provision.Retryable(err, genericSentence)
+	}
+
+	return nil
+}
+
+func (d Deps) join(ctx context.Context, env provision.Env, s scope) error {
+	join, err := d.Hub.Join(ctx, s.rec.TeamID, s.rec.Name)
+	if err != nil {
+		return provision.Retryable(err, genericSentence)
+	}
+	access, err := d.open(ctx, env, s)
+	if err != nil {
+		return err
+	}
+	if err := d.Cluster.WriteJoin(ctx, access, join); err != nil {
+		return provision.Retryable(err, genericSentence)
+	}
+
+	return nil
+}
+
+func (d Deps) closeAccess(ctx context.Context, env provision.Env, s scope) error {
+	note, err := d.Cloud.CloseAccess(ctx, s.target)
+	if err != nil {
+		return s.fail(err)
+	}
+
+	return env.WindowClosed(ctx, note)
+}
+
+func (d Deps) waitHeartbeat(ctx context.Context, _ provision.Env, s scope) error {
+	deadline := time.Now().Add(d.Settings.JoinWait)
+	for {
+		connected, err := d.Hub.Connected(ctx, s.rec.TeamID, s.rec.Name)
+		if err != nil {
+			return provision.Retryable(err, genericSentence)
+		}
+		if connected {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return provision.Permanent(errors.New("no heartbeat before the deadline"), notReporting)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(d.Settings.PollEvery):
+		}
+	}
+}

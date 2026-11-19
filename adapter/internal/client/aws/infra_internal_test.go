@@ -21,6 +21,7 @@ import (
 )
 
 type fakeCFN struct {
+	deleted    []*cloudformation.DeleteStackInput
 	created    []*cloudformation.CreateStackInput
 	createErr  error
 	stacks     []cfntypes.Stack
@@ -32,6 +33,12 @@ func (f *fakeCFN) CreateStack(_ context.Context, in *cloudformation.CreateStackI
 	f.created = append(f.created, in)
 
 	return &cloudformation.CreateStackOutput{}, f.createErr
+}
+
+func (f *fakeCFN) DeleteStack(_ context.Context, in *cloudformation.DeleteStackInput, _ ...func(*cloudformation.Options)) (*cloudformation.DeleteStackOutput, error) {
+	f.deleted = append(f.deleted, in)
+
+	return &cloudformation.DeleteStackOutput{}, nil
 }
 
 func (f *fakeCFN) DescribeStacks(context.Context, *cloudformation.DescribeStacksInput, ...func(*cloudformation.Options)) (*cloudformation.DescribeStacksOutput, error) {
@@ -282,4 +289,14 @@ func TestKubeTokenIsASignedCallerIdentityRequestForTheCluster(t *testing.T) {
 	assert.Equal(t, "GetCallerIdentity", signed.Query().Get("Action"))
 	assert.Equal(t, "60", signed.Query().Get("X-Amz-Expires"))
 	assert.Contains(t, signed.Query().Get("X-Amz-SignedHeaders"), "x-k8s-aws-id")
+}
+
+func TestDeleteStackAsksCloudFormationToRemoveItThroughItsOwnRole(t *testing.T) {
+	cfn := &fakeCFN{}
+
+	require.NoError(t, newInfra(cfn, &fakeEKS{}).DeleteStack(context.Background(), target))
+
+	require.Len(t, cfn.deleted, 1)
+	assert.Equal(t, "pds-env-0123456789ab", sdkaws.ToString(cfn.deleted[0].StackName))
+	assert.Nil(t, cfn.deleted[0].RoleARN, "CloudFormation uses the role the stack was made with")
 }
