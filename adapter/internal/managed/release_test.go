@@ -81,12 +81,21 @@ func TestRenderReleaseTagsVolumesWithTheEnvironmentID(t *testing.T) {
 	assert.Equal(t, map[string]string{"percona.com/pds": "0123456789ab"}, class.Tags)
 }
 
+func TestRenderReleaseWithoutAnIDLeavesTheTaggedStorageClassOut(t *testing.T) {
+	in := releaseInput()
+	in.EnvironmentID = ""
+
+	got, err := managed.RenderRelease(in)
+	require.NoError(t, err)
+
+	assert.NotContains(t, string(got), "taggedStorageClass", "a kind environment has no EBS driver")
+}
+
 func TestRenderReleaseRefusesWhatItCannotInstall(t *testing.T) {
 	for name, mutate := range map[string]func(*managed.ReleaseInput){
 		"no chart version": func(in *managed.ReleaseInput) { in.ChartVersion = "" },
 		"no hub url":       func(in *managed.ReleaseInput) { in.HubURL = "" },
 		"no environment":   func(in *managed.ReleaseInput) { in.EnvironmentName = "" },
-		"no id":            func(in *managed.ReleaseInput) { in.EnvironmentID = "" },
 		"no image":         func(in *managed.ReleaseInput) { in.ImageRepository = "" },
 		"no bucket":        func(in *managed.ReleaseInput) { in.Bucket = "" },
 		"no region":        func(in *managed.ReleaseInput) { in.Region = "" },
