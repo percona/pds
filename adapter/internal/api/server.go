@@ -46,6 +46,9 @@ type Deps struct {
 	// ManagedEnvironments starts the creation of a managed environment. It is
 	// nil where this deployment cannot build one.
 	ManagedEnvironments *managed.Creator
+	// Managed reads and changes managed environments after they exist. It is
+	// nil wherever ManagedEnvironments is.
+	Managed *managed.Manager
 
 	// Connections stores UI-pasted ServiceNow and Anthropic credentials.
 	Connections *service.Connections
@@ -133,6 +136,8 @@ type Server struct {
 	support         *service.Support
 	connections     *service.Connections
 	cloud           *service.CloudConnections
+	managedCreate   *managed.Creator
+	managed         *managed.Manager
 	chat            *service.Chat
 	chatHeartbeat   time.Duration
 	activity        *service.Activity
@@ -180,6 +185,8 @@ func NewServer(deps Deps) *Server {
 		support:         deps.Support,
 		connections:     deps.Connections,
 		cloud:           deps.CloudConnections,
+		managedCreate:   deps.ManagedEnvironments,
+		managed:         deps.Managed,
 		chat:            deps.Chat,
 		chatHeartbeat:   deps.ChatHeartbeat,
 		activity:        deps.Activity,
@@ -295,10 +302,21 @@ func NewServer(deps Deps) *Server {
 				environments.Get("/connect", s.handleConnectGuide)
 				environments.With(s.requireCaller).Post("/connect/tokens", s.handleIssueJoinToken)
 
+				environments.Get("/cloud-connections", s.handleListCloudConnections)
+				environments.Get("/cloud-connections/{id}", s.handleGetCloudConnection)
+				environments.With(s.requireCaller).Post("/cloud-connections", s.handleCreateCloudConnection)
+				environments.With(s.requireCaller).Delete("/cloud-connections/{id}", s.handleRemoveCloudConnection)
+				environments.With(s.requireCaller).Post("/cloud-connections/{id}/environments", s.handleCreateManagedEnvironment)
+				environments.With(s.requireCaller).Post("/cloud-connection-tokens", s.handleIssueCloudToken)
+				environments.With(s.requireCaller).Delete("/cloud-connection-tokens/{id}", s.handleCancelCloudToken)
+
 				environments.Group(func(environment chi.Router) {
 					environment.Use(s.objectTeam("name"))
 
 					environment.With(s.requireCaller).Delete("/environments/{name}", s.handleDisconnectEnvironment)
+					environment.Get("/environments/{name}", s.handleGetEnvironment)
+					environment.With(s.requireCaller).Post("/environments/{name}/runs", s.handleStartRun)
+					environment.With(s.requireCaller).Post("/environments/{name}/runs/{runId}/retry", s.handleRetryRun)
 					environment.Get("/environments/{name}/history", s.handleEnvironmentHistory)
 					environment.Get("/environments/{name}/monitoring", s.handleGetMonitoring)
 					environment.Get("/environments/{name}/monitoring/password", s.handleGetMonitoringPassword)
