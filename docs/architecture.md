@@ -797,6 +797,27 @@ one environment needs and not with what the account already uses.
   with a one-minute EKS token over the Access window and keeps no kubeconfig.
   A rerun of `join` after the agent is running changes the token in the Secret,
   which a running agent reads only when its Pod restarts.
+- **Upgrades, drift and loss.** `managed.Lifecycle` looks after an environment
+  once it has reported. Each environment has a weekly maintenance window of two
+  hours (default Sunday 02:00 UTC, set with a day, an hour and a time zone). In
+  it the control plane starts an `upgrade_pds` run for the newest version
+  `support.managedUpgrade.from` lists for the version the environment runs
+  (`internal/managed/compatibility.yaml` is a copy of the pin a test keeps
+  equal). The run commits the version to Git and waits for the agent's heartbeat
+  to report the release (`Heartbeat.Release`); no AWS role is involved. The
+  release rolls back after one attempt, the run fails with "Upgrade failed,
+  rolled back to <version>", Git is put back, and the version is skipped until a
+  User upgrades early or a newer version is listed. A User may defer a version
+  once, for 1 to 30 days. `upgrade_kubernetes` updates the stack through a change
+  set to the template this release embeds, moving the cluster and its node group
+  one minor version when asked. Starting it reads the change set first and
+  refuses one that would replace the VPC or the EKS cluster, or the node group
+  without a confirm; the run checks again before executing. The hourly check
+  runs CloudFormation drift detection and reads the cluster and node groups
+  with the SDK, since drift detection skips them, and records what changed
+  outside PDS without changing it. A stale heartbeat plus a cluster EKS reports
+  missing marks the environment Lost; only a User's `rebuild` run builds it
+  again, from the stacks and at the chart version it ran.
 - **Backups.** `create-bucket` makes `pds-<account>-<environment id>` in the
   environment's Region, blocks public access and tags it with
   `percona.com/pds`. It is outside the stack because a stack cannot delete a

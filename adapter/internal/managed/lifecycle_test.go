@@ -567,7 +567,6 @@ func TestStatusSaysLostWhenTheClusterWasFoundMissing(t *testing.T) {
 	assert.Equal(t, "Infrastructure missing", managed.LostReason)
 }
 
-
 func (l *lifecycleLab) drift() []store.DriftItem { return l.record().Drift }
 
 func TestTheHourlyCheckRecordsWhatCloudFormationFoundChanged(t *testing.T) {

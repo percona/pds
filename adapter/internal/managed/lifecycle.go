@@ -282,7 +282,9 @@ type Infrastructure struct {
 
 // TemplateOutOfDate reports whether the stack carries an older template
 // revision than this release embeds.
-func (i Infrastructure) TemplateOutOfDate() bool { return i.TemplateRevision < i.LatestTemplateRevision }
+func (i Infrastructure) TemplateOutOfDate() bool {
+	return i.TemplateRevision < i.LatestTemplateRevision
+}
 
 // Infrastructure reads the stack's template revision and the cluster's version
 // from AWS.
