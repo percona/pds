@@ -25,6 +25,12 @@ run_refused --no-such-flag
 [[ "${ERR}" == *"--lab-only"* ]] || fail "usage does not name --lab-only: ${ERR}"
 [[ "${ERR}" != *"--reuse-lab"* ]] || fail "usage still names --reuse-lab: ${ERR}"
 pass "usage names --lab-only and not --reuse-lab"
+[[ "${ERR}" == *"--flux"* ]] || fail "usage does not name --flux: ${ERR}"
+pass "usage names --flux"
+
+run_refused --flux --lab-only
+[[ "${RC}" -eq 2 ]] || fail "--flux with --lab-only: rc=${RC}, want 2"
+pass "--flux and --lab-only exclude each other"
 
 run_refused --engine oracle
 [[ "${RC}" -eq 2 ]] || fail "unknown engine: rc=${RC}, want 2"

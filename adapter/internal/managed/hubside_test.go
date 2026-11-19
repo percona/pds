@@ -3,11 +3,13 @@ package managed_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/percona/pds/adapter/internal/engine"
 	"github.com/percona/pds/adapter/internal/hub"
 	"github.com/percona/pds/adapter/internal/managed"
 )
@@ -19,6 +21,8 @@ type fakeTeamHub struct {
 	message   string
 	committed string
 	connected map[string]bool
+	forgotten []string
+	forgetErr error
 }
 
 func (f *fakeTeamHub) EnrollManaged(_ context.Context, name string) (hub.ManagedEnrollment, error) {
@@ -31,6 +35,12 @@ func (f *fakeTeamHub) CommitFiles(_ context.Context, environment string, files m
 	f.committed, f.files, f.message = environment, files, message
 
 	return nil
+}
+
+func (f *fakeTeamHub) Disconnect(_ context.Context, environment string) (bool, error) {
+	f.forgotten = append(f.forgotten, environment)
+
+	return false, f.forgetErr
 }
 
 func (f *fakeTeamHub) EnvironmentConnected(environment string) bool { return f.connected[environment] }
@@ -102,4 +112,24 @@ func TestHubSidePassesOnAHubItCannotReach(t *testing.T) {
 	assert.Error(t, side.WriteRelease(t.Context(), 9, "orders", nil))
 	_, err = side.Connected(t.Context(), 9, "orders")
 	assert.Error(t, err)
+}
+
+func TestHubSideDisconnectRemovesTheEnvironmentFromItsTeamsHub(t *testing.T) {
+	mine, theirs := &fakeTeamHub{}, &fakeTeamHub{}
+	side := newHubSide(t, map[uint]*fakeTeamHub{7: mine, 8: theirs})
+
+	require.NoError(t, side.Disconnect(t.Context(), 7, "orders"))
+
+	assert.Equal(t, []string{"orders"}, mine.forgotten)
+	assert.Empty(t, theirs.forgotten)
+}
+
+func TestHubSideDisconnectIsDoneForAnEnvironmentTheHubDoesNotKnow(t *testing.T) {
+	team := &fakeTeamHub{forgetErr: fmt.Errorf("%w: %q", engine.ErrNotFound, "orders")}
+	side := newHubSide(t, map[uint]*fakeTeamHub{7: team})
+
+	require.NoError(t, side.Disconnect(t.Context(), 7, "orders"), "a rerun after the hub forgot it has nothing left to do")
+
+	team.forgetErr = errors.New("the Git host is down")
+	require.Error(t, side.Disconnect(t.Context(), 7, "orders"))
 }

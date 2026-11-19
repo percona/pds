@@ -2,7 +2,6 @@ package managed_test
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"testing"
 
@@ -75,35 +74,35 @@ func (f *fakeBook) Steps(_ context.Context, runID uint) ([]store.ProvisioningSte
 	return f.steps[runID], nil
 }
 
-type stateOnly map[string]store.CloudConnection
-
-func (c stateOnly) Get(_ context.Context, _ uint, id string) (store.CloudConnection, error) {
-	row, ok := c[id]
-	if !ok {
-		return store.CloudConnection{}, store.ErrCloudConnectionUnknown
-	}
-
-	return row, nil
+type fakeRemover struct {
+	deleted []string
+	removed []string
+	err     error
 }
 
-type fakeRemover struct{ removed []string }
+func (f *fakeRemover) Delete(_ context.Context, _ auth.Scope, name string) (store.ProvisioningRun, error) {
+	f.deleted = append(f.deleted, name)
 
-func (f *fakeRemover) RemoveFromPDS(_ context.Context, _ uint, name string) error {
-	f.removed = append(f.removed, name)
+	return store.ProvisioningRun{ID: 98, Environment: name, Kind: store.KindDelete, Status: store.RunQueued}, f.err
+}
 
-	return nil
+func (f *fakeRemover) RemoveFromPDS(_ context.Context, _ auth.Scope, name string) error {
+	if f.err == nil {
+		f.removed = append(f.removed, name)
+	}
+
+	return f.err
 }
 
 var managerScope = auth.Scope{UserID: 3, Team: auth.Team{ID: 7}}
 
-func newManager(book *fakeBook, remover managed.PDSOnlyRemover) *managed.Manager {
+func newManager(book *fakeBook, remover managed.Removal) *managed.Manager {
 	return managed.NewManager(
 		roster{
 			"orders": {ID: "aaaaaaaaaaaa", TeamID: 7, Name: "orders", ConnectionID: "conn1", Region: "eu-west-1"},
 			"other":  {ID: "bbbbbbbbbbbb", TeamID: 8, Name: "other", ConnectionID: "conn2", Region: "eu-west-1"},
 		},
 		book,
-		stateOnly{"conn1": {ID: "conn1", State: store.CloudReady}, "conn2": {ID: "conn2", State: store.CloudReady}},
 		remover,
 	)
 }
@@ -294,51 +293,42 @@ func TestRetryNeedsTheLatestRunOfAManagedEnvironment(t *testing.T) {
 	assert.Equal(t, []string{"orders"}, book.retried)
 }
 
-func TestDeleteNeedsTheTypedNameAndStartsADeleteRun(t *testing.T) {
-	book := &fakeBook{}
-	m := newManager(book, nil)
+func TestDeleteNeedsTheTypedNameAndStartsTheDeleteRun(t *testing.T) {
+	remover := &fakeRemover{}
+	m := newManager(&fakeBook{}, remover)
 
 	_, err := m.Delete(t.Context(), managerScope, "orders", "order")
 	require.ErrorIs(t, err, managed.ErrConfirm)
 	_, err = m.Delete(t.Context(), managerScope, "orders", "")
 	require.ErrorIs(t, err, managed.ErrConfirm)
-	assert.Empty(t, book.started)
+	_, err = m.Delete(t.Context(), managerScope, "other", "other")
+	require.ErrorIs(t, err, store.ErrManagedEnvironmentUnknown, "another Team's environment is not found")
+	assert.Empty(t, remover.deleted)
 
 	run, err := m.Delete(t.Context(), managerScope, "orders", "orders")
 	require.NoError(t, err)
 	assert.Equal(t, store.KindDelete, run.Kind)
-	assert.Equal(t, []string{"delete/orders"}, book.started)
+	assert.Equal(t, []string{"orders"}, remover.deleted)
 }
 
-func TestRemoveFromPDSOnlyIsRefusedWhileTheAccountIsReachable(t *testing.T) {
-	remover := &fakeRemover{}
+func TestRemoveFromPDSOnlyNeedsTheTypedNameAndPassesTheReachabilityRefusalThrough(t *testing.T) {
+	remover := &fakeRemover{err: managed.ErrConnectionReachable}
 	m := newManager(&fakeBook{}, remover)
 
-	err := m.RemoveFromPDS(t.Context(), managerScope, "orders", "orders")
-
-	require.ErrorIs(t, err, managed.ErrReachable)
-	assert.Empty(t, remover.removed)
-}
-
-func TestRemoveFromPDSOnlyWorksWhenTheConnectionIsUnreachable(t *testing.T) {
-	remover := &fakeRemover{}
-	m := managed.NewManager(
-		roster{"orders": {ID: "aaaaaaaaaaaa", TeamID: 7, Name: "orders", ConnectionID: "conn1"}},
-		&fakeBook{}, stateOnly{"conn1": {ID: "conn1", State: store.CloudUnreachable}}, remover)
-
 	require.ErrorIs(t, m.RemoveFromPDS(t.Context(), managerScope, "orders", "wrong"), managed.ErrConfirm)
+	require.ErrorIs(t, m.RemoveFromPDS(t.Context(), managerScope, "orders", "orders"), managed.ErrConnectionReachable)
+
+	remover.err = nil
 	require.NoError(t, m.RemoveFromPDS(t.Context(), managerScope, "orders", "orders"))
 	assert.Equal(t, []string{"orders"}, remover.removed)
 }
 
-func TestRemoveFromPDSOnlyIsUnavailableWithoutARemover(t *testing.T) {
-	m := managed.NewManager(
-		roster{"orders": {ID: "aaaaaaaaaaaa", TeamID: 7, Name: "orders", ConnectionID: "conn1"}},
-		&fakeBook{}, stateOnly{"conn1": {ID: "conn1", State: store.CloudUnreachable}}, nil)
+func TestDeletingIsUnavailableWithoutARemoval(t *testing.T) {
+	m := newManager(&fakeBook{}, nil)
 
-	err := m.RemoveFromPDS(t.Context(), managerScope, "orders", "orders")
-
-	require.True(t, errors.Is(err, managed.ErrUnavailable))
+	_, err := m.Delete(t.Context(), managerScope, "orders", "orders")
+	require.ErrorIs(t, err, managed.ErrUnavailable)
+	require.ErrorIs(t, m.RemoveFromPDS(t.Context(), managerScope, "orders", "orders"), managed.ErrUnavailable)
 }
 
 func TestTheTeamsManagedEnvironmentsAreListedWithTheirProvisioning(t *testing.T) {

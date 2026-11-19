@@ -163,10 +163,23 @@ func (m *memoryManaged) Steps(_ context.Context, runID uint) ([]store.Provisioni
 	return m.steps[runID], nil
 }
 
-type memoryRemover struct{ removed []string }
+// memoryRemover deletes through the same run book and forgets in PDS only when
+// the connection is Unreachable, as managed.Remover does.
+type memoryRemover struct {
+	runs    *memoryManaged
+	cloudDB *testutil.CloudStore
+	removed []string
+}
 
-func (r *memoryRemover) RemoveFromPDS(_ context.Context, team uint, name string) error {
-	r.removed = append(r.removed, key(team, name))
+func (r *memoryRemover) Delete(ctx context.Context, scope auth.Scope, name string) (store.ProvisioningRun, error) {
+	return r.runs.Start(ctx, scope.Team.ID, name, store.KindDelete)
+}
+
+func (r *memoryRemover) RemoveFromPDS(_ context.Context, scope auth.Scope, name string) error {
+	if r.cloudDB.Connections[r.runs.rows[key(scope.Team.ID, name)].ConnectionID].State != store.CloudUnreachable {
+		return managed.ErrConnectionReachable
+	}
+	r.removed = append(r.removed, key(scope.Team.ID, name))
 
 	return nil
 }
@@ -207,10 +220,10 @@ func newManagedHTTP(t *testing.T) *managedHTTP {
 	})
 	databases := service.NewDatabase(engine.NewRegistry(), service.WithHub(hubSvc))
 
-	remover := &memoryRemover{}
-	creator := managed.NewCreator(m, cloud, m, managed.CreatorSettings{
+	remover := &memoryRemover{runs: m, cloudDB: cloudDB}
+	creator := &managed.Environments{Creator: managed.NewCreator(m, cloud, m, managed.CreatorSettings{
 		OutgoingCIDRs: []string{"203.0.113.0/24"}, ChartVersion: "1.2.3", ImageRepository: "ghcr.io/example/pds",
-	})
+	})}
 	rows := newMemoryIdentityStore()
 	rows.teams = []store.Team{{ID: 7, OrganizationID: 1, Name: "team-7"}, {ID: 8, OrganizationID: 1, Name: "team-8"}}
 	identity := service.NewIdentity(rows, service.WithServedOrganization("acme"))
@@ -218,7 +231,7 @@ func newManagedHTTP(t *testing.T) *managedHTTP {
 		Config: testConfig(), Logger: log.New(io.Discard, log.FormatJSON, slog.LevelDebug),
 		Auth: signedIn{}, Identity: identity, Databases: databases,
 		CloudConnections: cloud, ManagedEnvironments: creator,
-		Managed: managed.NewManager(m, m, cloudDB, remover),
+		Managed: managed.NewManager(m, m, remover),
 	})
 
 	return &managedHTTP{srv: srv, cloud: cloud, cloudDB: cloudDB, managed: m, remover: remover, scope: scope, connection: enrolled.ConnectionID}

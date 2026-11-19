@@ -146,6 +146,13 @@ type Settings struct {
 	PollEvery time.Duration
 	StackWait time.Duration
 	JoinWait  time.Duration
+	// DeleteWait bounds how long a delete waits for AWS to release what holds
+	// the environment's network, DrainWait how long it waits for databases and
+	// volume claims to leave the environment, and APIWait how long it keeps
+	// trying an environment's Kubernetes API that does not answer.
+	DeleteWait time.Duration
+	DrainWait  time.Duration
+	APIWait    time.Duration
 }
 
 func (s Settings) withDefaults() Settings {
@@ -157,6 +164,15 @@ func (s Settings) withDefaults() Settings {
 	}
 	if s.JoinWait <= 0 {
 		s.JoinWait = 20 * time.Minute
+	}
+	if s.DeleteWait <= 0 {
+		s.DeleteWait = 30 * time.Minute
+	}
+	if s.DrainWait <= 0 {
+		s.DrainWait = 20 * time.Minute
+	}
+	if s.APIWait <= 0 {
+		s.APIWait = 3 * time.Minute
 	}
 
 	return s
@@ -173,6 +189,11 @@ type Deps struct {
 	// Granted says whether the stack's service role is granted an action, so a
 	// permission refusal can point at Changed outside PDS. Nil says it is not.
 	Granted func(action string) bool
+	// Sweeper, Drainer and Forget are what a delete works through.
+	Sweeper Sweeper
+	Drainer Drainer
+	// Forget removes the environment from its Team's hub and forgets its record.
+	Forget func(ctx context.Context, team uint, name string) error
 }
 
 // scope is what one step knows about its environment and where it works.
@@ -315,7 +336,7 @@ func bucketName(s scope) string {
 }
 
 func (d Deps) createBucket(ctx context.Context, _ provision.Env, s scope) error {
-	if err := d.Cloud.EnsureBucket(ctx, s.target, bucketName(s), map[string]string{"percona.com/pds": s.rec.ID}); err != nil {
+	if err := d.Cloud.EnsureBucket(ctx, s.target, bucketName(s), map[string]string{OwnershipTag: s.rec.ID}); err != nil {
 		return s.fail(err)
 	}
 
@@ -334,7 +355,7 @@ func (d Deps) stackSpec(s scope) aws.StackSpec {
 			"EbsCsiRoleArn": aws.RoleARN(s.conn.AccountID, s.conn.ID, "ebs-csi"),
 		},
 		Tags: map[string]string{
-			"percona.com/pds":                   s.rec.ID,
+			OwnershipTag:                        s.rec.ID,
 			"percona.com/pds-template-revision": strconv.Itoa(TemplateRevision),
 			"percona.com/pds-connection":        s.conn.ID,
 		},
@@ -446,7 +467,7 @@ func (d Deps) installFlux(ctx context.Context, env provision.Env, s scope) error
 
 func (d Deps) writeRelease(ctx context.Context, _ provision.Env, s scope) error {
 	files, err := ReleaseFiles(s.rec.Name, ReleaseInput{
-		ChartVersion: d.Settings.ChartVersion, HubURL: d.Settings.HubURL, EnvironmentName: s.rec.Name,
+		ChartVersion: d.Settings.ChartVersion, HubURL: d.Settings.HubURL, EnvironmentName: s.rec.Name, EnvironmentID: s.rec.ID,
 		ImageRepository: d.Settings.ImageRepository, ImageTag: d.Settings.ImageTag,
 		Bucket: bucketName(s), Region: s.rec.Region,
 	})

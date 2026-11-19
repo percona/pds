@@ -57,6 +57,10 @@ spec:
         existingSecret: pds-s3
         region: eu-west-1
         storageName: s3
+    taggedStorageClass:
+      enabled: true
+      tags:
+        percona.com/pds: 0123456789ab
     ui:
       enabled: false
       replicaCount: 0

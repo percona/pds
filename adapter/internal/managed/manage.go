@@ -57,9 +57,6 @@ const ActionRetry = "retry"
 var (
 	// ErrConfirm means the name typed to delete is not the environment's.
 	ErrConfirm = errors.New("the typed name does not match the environment")
-	// ErrReachable means Remove from PDS only was asked while the AWS account
-	// still answers, so the environment can be deleted properly instead.
-	ErrReachable = errors.New("the AWS account is reachable")
 )
 
 // Roster reads the managed environments a Team has.
@@ -77,24 +74,25 @@ type RunBook interface {
 	Steps(ctx context.Context, runID uint) ([]store.ProvisioningStep, error)
 }
 
-// PDSOnlyRemover forgets an environment in PDS and leaves everything in the
-// customer's account. It is nil where that is not offered.
-type PDSOnlyRemover interface {
-	RemoveFromPDS(ctx context.Context, team uint, name string) error
+// Removal deletes an environment, or forgets it in PDS and leaves everything in
+// the customer's account. *Remover is the implementation.
+type Removal interface {
+	Delete(ctx context.Context, scope auth.Scope, name string) (store.ProvisioningRun, error)
+	RemoveFromPDS(ctx context.Context, scope auth.Scope, name string) error
 }
 
 // Manager is what a person does with a managed environment after it exists:
 // read how its runs stand, start another, retry a failed one, delete it.
 type Manager struct {
-	roster      Roster
-	book        RunBook
-	connections Connections
-	remover     PDSOnlyRemover
+	roster  Roster
+	book    RunBook
+	removal Removal
 }
 
-// NewManager builds a Manager. remover may be nil.
-func NewManager(roster Roster, book RunBook, connections Connections, remover PDSOnlyRemover) *Manager {
-	return &Manager{roster: roster, book: book, connections: connections, remover: remover}
+// NewManager builds a Manager. removal may be nil, and deleting is then
+// unavailable.
+func NewManager(roster Roster, book RunBook, removal Removal) *Manager {
+	return &Manager{roster: roster, book: book, removal: removal}
 }
 
 // PhaseView is one of the stages of a create the console shows.
@@ -355,7 +353,10 @@ func (m *Manager) Delete(ctx context.Context, scope auth.Scope, name, typed stri
 	if _, err := m.confirmed(ctx, scope, name, typed); err != nil {
 		return store.ProvisioningRun{}, err
 	}
-	run, err := m.book.Start(ctx, scope.Team.ID, name, store.KindDelete)
+	if m.removal == nil {
+		return store.ProvisioningRun{}, fmt.Errorf("%w: deleting is not offered", ErrUnavailable)
+	}
+	run, err := m.removal.Delete(ctx, scope, name)
 	if errors.Is(err, provision.ErrUnknownKind) {
 		return store.ProvisioningRun{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
@@ -364,24 +365,17 @@ func (m *Manager) Delete(ctx context.Context, scope auth.Scope, name, typed stri
 }
 
 // RemoveFromPDS forgets the environment in PDS and leaves what is in the AWS
-// account. It is for an account the control plane can no longer reach.
+// account. It is for an account the control plane can no longer reach, and the
+// removal refuses with ErrConnectionReachable otherwise.
 func (m *Manager) RemoveFromPDS(ctx context.Context, scope auth.Scope, name, typed string) error {
-	rec, err := m.confirmed(ctx, scope, name, typed)
-	if err != nil {
+	if _, err := m.confirmed(ctx, scope, name, typed); err != nil {
 		return err
 	}
-	if m.remover == nil {
+	if m.removal == nil {
 		return fmt.Errorf("%w: removing from PDS only is not offered", ErrUnavailable)
 	}
-	conn, err := m.connections.Get(ctx, scope.Team.ID, rec.ConnectionID)
-	if err != nil {
-		return err
-	}
-	if conn.State != store.CloudUnreachable {
-		return ErrReachable
-	}
 
-	return m.remover.RemoveFromPDS(ctx, scope.Team.ID, name)
+	return m.removal.RemoveFromPDS(ctx, scope, name)
 }
 
 func (m *Manager) confirmed(ctx context.Context, scope auth.Scope, name, typed string) (store.ManagedEnvironment, error) {

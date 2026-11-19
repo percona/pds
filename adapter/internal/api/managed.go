@@ -360,7 +360,7 @@ func managedError(err error) error {
 		return Conflict("This AWS account is not ready. Open it, check the connection, then try again.").WithCause(err)
 	case errors.Is(err, managed.ErrConfirm):
 		return Validation("The name you typed is not the name of this environment. Type it exactly, then try again.").WithCause(err)
-	case errors.Is(err, managed.ErrReachable):
+	case errors.Is(err, managed.ErrConnectionReachable):
 		return Conflict("PDS can still reach this AWS account. Delete the environment instead of removing it from PDS only.").WithCause(err)
 	case errors.Is(err, store.ErrRunActive):
 		return Conflict("This environment already has a run in progress. Wait for it to finish, or retry it if it failed.").WithCause(err)

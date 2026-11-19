@@ -148,6 +148,18 @@ func (b runBook) Steps(ctx context.Context, runID uint) ([]store.ProvisioningSte
 	return b.reads.Steps(ctx, runID)
 }
 
+// lateAbandoner ends an environment's runs once the database has connected.
+type lateAbandoner struct{ db *store.Starter }
+
+func (l lateAbandoner) Abandon(ctx context.Context, team uint, environment, message string, now time.Time) (store.ProvisioningRun, error) {
+	st := l.db.Store()
+	if st == nil {
+		return store.ProvisioningRun{}, store.ErrNotConnected
+	}
+
+	return st.Provisioning().Abandon(ctx, team, environment, message, now)
+}
+
 // workerOwner names this replica on the leases it holds. Two replicas of one
 // host differ by the random part.
 func workerOwner() string {
@@ -183,7 +195,7 @@ func teamHubs(databases *service.Database) func(ctx context.Context, team uint) 
 // windows, and the request that starts a run, and the manager that reads and
 // changes them afterwards. It returns nil where a managed environment cannot
 // be built: no database, or no control plane principal for a customer's role to
-// trust. Nothing offers Remove from PDS only yet, so the manager has no remover.
+// trust.
 func newManagedEnvironments(
 	ctx context.Context,
 	cfg config.Config,
@@ -191,7 +203,7 @@ func newManagedEnvironments(
 	cloud *service.CloudConnections,
 	databases *service.Database,
 	logger *slog.Logger,
-) (*managed.Creator, *managed.Manager, error) {
+) (*managed.Environments, *managed.Manager, error) {
 	if db == nil || cloud == nil {
 		return nil, nil, nil
 	}
@@ -199,29 +211,45 @@ func newManagedEnvironments(
 	if err != nil {
 		return nil, nil, err
 	}
+	hubSide := managed.NewHubSide(teamHubs(databases), managedGitURL(cfg))
+	records := db.ManagedEnvironments()
+	// The hub goes first and the record last, so a rerun that finds the record
+	// gone knows the hub is clean.
+	forget := func(ctx context.Context, team uint, name string) error {
+		if err := hubSide.Disconnect(ctx, team, name); err != nil {
+			return err
+		}
+
+		return records.Remove(ctx, team, name)
+	}
 
 	settings, creatorSettings := managedSettings(cfg)
 	deps := managed.Deps{
-		Records:     db.ManagedEnvironments(),
+		Records:     records,
 		Connections: db.CloudConnections(),
 		Cloud:       infra,
+		Sweeper:     infra,
+		Forget:      forget,
+		Drainer: managed.NewDrain(func(access managed.KubeAccess) (managed.Cleaner, error) {
+			return kube.NewRemote(access.Endpoint, access.CA, access.Token)
+		}),
 		Cluster: managed.NewEnvironmentAPI(
 			func(access managed.KubeAccess) (managed.Remote, error) {
 				return kube.NewRemote(access.Endpoint, access.CA, access.Token)
 			},
 			managed.NewFluxSource(&http.Client{Timeout: 2 * time.Minute}, managed.FluxReleases, managed.PinnedFluxDigests),
 		),
-		Hub:      managed.NewHubSide(teamHubs(databases), managedGitURL(cfg)),
+		Hub:      hubSide,
 		Settings: settings,
 	}
 
 	late := &lateRuns{}
 	go runProvisioning(ctx, cfg, db, deps, late, logger)
 
-	creator := managed.NewCreator(db.ManagedEnvironments(), cloud, late, creatorSettings)
-	manager := managed.NewManager(db.ManagedEnvironments(), late, db.CloudConnections(), nil)
+	remover := managed.NewRemover(records, db.CloudConnections(), late, lateAbandoner{db: db}, forget)
+	environments := &managed.Environments{Creator: managed.NewCreator(records, cloud, late, creatorSettings), Remover: remover}
 
-	return creator, manager, nil
+	return environments, managed.NewManager(records, late, remover), nil
 }
 
 // runProvisioning waits for the database, then works runs and sweeps until the
@@ -236,7 +264,7 @@ func runProvisioning(ctx context.Context, cfg config.Config, db *store.Starter, 
 		}
 	}
 
-	engine, err := provision.New(st.Provisioning(), []provision.Kind{managed.CreateKind(deps)}, provision.Options{
+	engine, err := provision.New(st.Provisioning(), []provision.Kind{managed.CreateKind(deps), managed.DeleteKind(deps)}, provision.Options{
 		Owner: workerOwner(), LeaseTTL: cfg.ProvisionLeaseTTL, MaxAttempts: cfg.ProvisionMaxAttempts,
 		WindowMaxAge:    cfg.ProvisionWindowMaxAge,
 		ConnectionReady: managed.ConnectionReady(deps),

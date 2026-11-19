@@ -43,9 +43,9 @@ type Deps struct {
 	// CloudConnections is nil where no control plane principal is configured,
 	// and its routes then answer 501.
 	CloudConnections *service.CloudConnections
-	// ManagedEnvironments starts the creation of a managed environment. It is
-	// nil where this deployment cannot build one.
-	ManagedEnvironments *managed.Creator
+	// ManagedEnvironments starts the creation and the deletion of a managed
+	// environment. It is nil where this deployment cannot build one.
+	ManagedEnvironments *managed.Environments
 	// Managed reads and changes managed environments after they exist. It is
 	// nil wherever ManagedEnvironments is.
 	Managed *managed.Manager
@@ -136,7 +136,7 @@ type Server struct {
 	support         *service.Support
 	connections     *service.Connections
 	cloud           *service.CloudConnections
-	managedCreate   *managed.Creator
+	managedCreate   *managed.Environments
 	managed         *managed.Manager
 	chat            *service.Chat
 	chatHeartbeat   time.Duration

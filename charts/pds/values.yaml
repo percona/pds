@@ -24,6 +24,19 @@ commonLabels: {}
 # -- Extra annotations added to every rendered object.
 commonAnnotations: {}
 
+# A StorageClass that tags every EBS volume it provisions, so a managed
+# environment's delete finds the volumes by tag. Off unless the environment
+# runs on EKS and the control plane built it.
+taggedStorageClass:
+  # -- Install the StorageClass. It becomes the default class: when the cluster
+  # already has one, the newest default wins.
+  enabled: false
+  # -- Name of the StorageClass.
+  name: pds-gp3
+  # -- Tags added to each volume, key to value. They become the class's
+  # tagSpecification_N parameters in key order.
+  tags: {}
+
 rbac:
   # -- Create the adapter Roles and ClusterRoles (connection Secrets, events,
   # and metrics). Without them the adapter cannot read or write those objects.
