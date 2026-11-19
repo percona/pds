@@ -112,3 +112,10 @@ func TestEbsCsiDriverTagsTheVolumesItCreates(t *testing.T) {
 	addon := parsed(t).Resources["EbsCsiAddon"]
 	assert.Contains(t, addon.Properties["ConfigurationValues"].(map[string]any)["Fn::Sub"], "extraVolumeTags")
 }
+
+func TestNodeGroupFollowsTheKubernetesVersionParameter(t *testing.T) {
+	group := parsed(t).Resources["NodeGroup"]
+
+	assert.Equal(t, map[string]any{"Ref": "KubernetesVersion"}, group.Properties["Version"],
+		"a Kubernetes upgrade is one stack update that moves the cluster and then its node group")
+}

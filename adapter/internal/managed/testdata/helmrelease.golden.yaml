@@ -24,7 +24,8 @@ spec:
     cleanupOnFail: true
     remediation:
       remediateLastFailure: true
-      retries: 1
+      retries: 0
+      strategy: rollback
   values:
     adapter:
       database:

@@ -81,3 +81,25 @@ func TestSpokeValuesCopyMatchesTheChart(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, string(chart), managed.SpokeValues, "copy charts/pds/values-spoke.yaml to internal/managed/values-spoke.yaml")
 }
+
+func TestAFailedUpgradeRollsBackAfterOneAttemptAndStops(t *testing.T) {
+	got, err := managed.RenderRelease(releaseInput())
+	require.NoError(t, err)
+	var release struct {
+		Spec struct {
+			Upgrade struct {
+				Remediation struct {
+					Retries              int    `json:"retries"`
+					RemediateLastFailure bool   `json:"remediateLastFailure"`
+					Strategy             string `json:"strategy"`
+				} `json:"remediation"`
+			} `json:"upgrade"`
+		} `json:"spec"`
+	}
+	require.NoError(t, yaml.Unmarshal(got, &release))
+
+	remediation := release.Spec.Upgrade.Remediation
+	assert.Zero(t, remediation.Retries, "retries counts attempts after the first, so one attempt is zero retries")
+	assert.True(t, remediation.RemediateLastFailure, "without it the single attempt that fails is not rolled back")
+	assert.Equal(t, "rollback", remediation.Strategy)
+}
