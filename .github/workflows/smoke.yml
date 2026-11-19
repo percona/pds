@@ -67,6 +67,10 @@ jobs:
       - name: free runner disk
         run: scripts/free-runner-disk.sh
 
+      # Six kind nodes exhaust the default inotify instances on Ubuntu 26.04.
+      - name: raise the runner's inotify limits
+        run: scripts/raise-runner-inotify.sh
+
       # The runner image loads an AppArmor profile for /usr/sbin/mysqld. The
       # kernel attaches it by path to mysqld inside the kind nodes as well,
       # where it denies /etc/my.cnf and the server's share files. The
