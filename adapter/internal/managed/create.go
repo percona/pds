@@ -307,7 +307,7 @@ func bucketName(s scope) string {
 }
 
 func (d Deps) createBucket(ctx context.Context, _ provision.Env, s scope) error {
-	if err := d.Cloud.EnsureBucket(ctx, s.target, bucketName(s), map[string]string{"percona.com/pds": s.rec.ID}); err != nil {
+	if err := d.Cloud.EnsureBucket(ctx, s.target, bucketName(s), map[string]string{OwnershipTag: s.rec.ID}); err != nil {
 		return s.fail(err)
 	}
 
@@ -326,7 +326,7 @@ func (d Deps) stackSpec(s scope) aws.StackSpec {
 			"EbsCsiRoleArn": aws.RoleARN(s.conn.AccountID, s.conn.ID, "ebs-csi"),
 		},
 		Tags: map[string]string{
-			"percona.com/pds":                   s.rec.ID,
+			OwnershipTag:                        s.rec.ID,
 			"percona.com/pds-template-revision": strconv.Itoa(TemplateRevision),
 			"percona.com/pds-connection":        s.conn.ID,
 		},
@@ -438,7 +438,7 @@ func (d Deps) installFlux(ctx context.Context, env provision.Env, s scope) error
 
 func (d Deps) writeRelease(ctx context.Context, _ provision.Env, s scope) error {
 	files, err := ReleaseFiles(s.rec.Name, ReleaseInput{
-		ChartVersion: d.Settings.ChartVersion, HubURL: d.Settings.HubURL, EnvironmentName: s.rec.Name,
+		ChartVersion: d.Settings.ChartVersion, HubURL: d.Settings.HubURL, EnvironmentName: s.rec.Name, EnvironmentID: s.rec.ID,
 		ImageRepository: d.Settings.ImageRepository, ImageTag: d.Settings.ImageTag,
 		Bucket: bucketName(s), Region: s.rec.Region,
 	})

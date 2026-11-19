@@ -19,6 +19,7 @@ func releaseInput() managed.ReleaseInput {
 		ChartVersion:    "0.1.0",
 		HubURL:          "https://hub.example",
 		EnvironmentName: "orders",
+		EnvironmentID:   "0123456789ab",
 		ImageRepository: "ghcr.io/percona/pds-adapter",
 		ImageTag:        "0.1.0",
 		Bucket:          "pds-111122223333-0123456789ab",
@@ -60,11 +61,32 @@ func TestRenderReleaseKeepsTheAgentTokenOutOfGit(t *testing.T) {
 	assert.Equal(t, "orders", hub["environmentName"])
 }
 
+func TestRenderReleaseTagsVolumesWithTheEnvironmentID(t *testing.T) {
+	got, err := managed.RenderRelease(releaseInput())
+	require.NoError(t, err)
+
+	var release struct {
+		Spec struct {
+			Values struct {
+				TaggedStorageClass struct {
+					Enabled bool              `json:"enabled"`
+					Tags    map[string]string `json:"tags"`
+				} `json:"taggedStorageClass"`
+			} `json:"values"`
+		} `json:"spec"`
+	}
+	require.NoError(t, yaml.Unmarshal(got, &release))
+	class := release.Spec.Values.TaggedStorageClass
+	assert.True(t, class.Enabled)
+	assert.Equal(t, map[string]string{"percona.com/pds": "0123456789ab"}, class.Tags)
+}
+
 func TestRenderReleaseRefusesWhatItCannotInstall(t *testing.T) {
 	for name, mutate := range map[string]func(*managed.ReleaseInput){
 		"no chart version": func(in *managed.ReleaseInput) { in.ChartVersion = "" },
 		"no hub url":       func(in *managed.ReleaseInput) { in.HubURL = "" },
 		"no environment":   func(in *managed.ReleaseInput) { in.EnvironmentName = "" },
+		"no id":            func(in *managed.ReleaseInput) { in.EnvironmentID = "" },
 		"no image":         func(in *managed.ReleaseInput) { in.ImageRepository = "" },
 		"no bucket":        func(in *managed.ReleaseInput) { in.Bucket = "" },
 		"no region":        func(in *managed.ReleaseInput) { in.Region = "" },

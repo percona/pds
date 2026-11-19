@@ -46,6 +46,9 @@ type ReleaseInput struct {
 	ChartVersion    string
 	HubURL          string
 	EnvironmentName string
+	// EnvironmentID is the value of the percona.com/pds tag the environment's
+	// volumes carry.
+	EnvironmentID   string
 	ImageRepository string
 	ImageTag        string
 	// Bucket and Region are the environment's backup store.
@@ -58,7 +61,7 @@ type ReleaseInput struct {
 func RenderRelease(in ReleaseInput) ([]byte, error) {
 	for name, value := range map[string]string{
 		"chart version": in.ChartVersion, "hub address": in.HubURL,
-		"environment name": in.EnvironmentName, "agent image": in.ImageRepository,
+		"environment name": in.EnvironmentName, "environment id": in.EnvironmentID, "agent image": in.ImageRepository,
 		"backup bucket": in.Bucket, "backup region": in.Region,
 	} {
 		if value == "" {
@@ -91,6 +94,11 @@ func RenderRelease(in ReleaseInput) ([]byte, error) {
 				"enabled": true, "bucket": in.Bucket, "region": in.Region,
 				"storageName": BackupStorage, "existingSecret": BackupSecret,
 			},
+		},
+		// Every volume a database claims carries the ownership tag, so the delete
+		// finds it by tag after the cluster is gone.
+		"taggedStorageClass": map[string]any{
+			"enabled": true, "tags": map[string]any{OwnershipTag: in.EnvironmentID},
 		},
 		"openeverest": map[string]any{
 			"upgrade": map[string]any{"preflightChecks": false},
