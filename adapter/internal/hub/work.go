@@ -17,9 +17,6 @@ const (
 	WorkBackup = "backup"
 	WorkDelete = "delete"
 	WorkScale  = "scale"
-	// WorkSeed asks the agent to create the PostgreSQL database Name, ready to
-	// restore the named backup of Database when its Instance appears.
-	WorkSeed = "seed"
 	// WorkCredentials asks the agent to write a new MySQL database's users
 	// Secret. The hub keeps the database out of the environment's index until
 	// the agent answers, so the Secret exists before the operator looks.
@@ -41,15 +38,10 @@ const workRetryAfter = 2 * time.Minute
 type Work struct {
 	// ID is what the spoke acknowledges. The hub keeps an item in flight
 	// until it hears back, so a lost reply is retried rather than dropped.
-	ID       string `json:"id"`
-	Kind     string `json:"kind"`
-	Database string `json:"database"`
-	BackupID string `json:"backupId,omitempty"`
-	// Name is the database a seed creates. Database is the one it seeds from.
-	Name string `json:"name,omitempty"`
-	// Instance is the manifest a seed releases once the agent has run it. It
-	// travels with the item so a hub restart does not lose it.
-	Instance  string `json:"instance,omitempty"`
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	Database  string `json:"database"`
+	BackupID  string `json:"backupId,omitempty"`
 	CPUCores  *int   `json:"cpu,omitempty"`
 	MemoryGB  *int   `json:"memoryGb,omitempty"`
 	StorageGB *int   `json:"storageGb,omitempty"`
@@ -67,26 +59,10 @@ type Work struct {
 	Key         string `json:"key,omitempty"`
 }
 
-// Why a seed failed, as the agent reports it. The hub switches on these and
-// never on the error text, which is for the log.
-const (
-	// SeedBackupUnusable means the backup is missing or did not finish.
-	SeedBackupUnusable = "backup"
-	// SeedSourceGone means the database the backup was taken from is gone.
-	SeedSourceGone = "source"
-	// SeedUnavailable means the environment cannot seed a database at all.
-	SeedUnavailable = "unavailable"
-	// SeedOther is any other failure.
-	SeedOther = "other"
-)
-
 // WorkResult is a spoke reporting what it did with one item.
 type WorkResult struct {
 	ID    string `json:"id"`
 	Error string `json:"error,omitempty"`
-	// Reason is why a seed failed, one of the Seed constants. An agent that
-	// predates it sends none.
-	Reason string `json:"reason,omitempty"`
 }
 
 // HeartbeatReply is what the hub returns to a successful beat.
@@ -512,7 +488,7 @@ func (q *WorkQueue) Pending(environment string) int {
 }
 
 func sameWork(a, b Work) bool {
-	if a.Kind != b.Kind || a.Database != b.Database || a.BackupID != b.BackupID || a.Name != b.Name ||
+	if a.Kind != b.Kind || a.Database != b.Database || a.BackupID != b.BackupID ||
 		a.Window != b.Window {
 		return false
 	}

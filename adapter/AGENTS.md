@@ -214,20 +214,8 @@ and `postgresql` select a flavor. The agent registers both. The create form
 offers PostgreSQL only when `apps/ui/src/features/databases/engines.ts`
 enables it. The HTTP role does not call the registry: create, scale, schedule
 and delete are Git commits, and backup is work the agent runs. Restore is a
-Git commit that creates a second database. For PostgreSQL the provider refuses
-that, so the hub queues a `seed` work item carrying the Instance manifest and
-commits nothing yet. The agent creates the `PerconaPGCluster` with
-`spec.dataSource.pgbackrest` set from the source's backup (`postgresql.Seed`),
-and the hub commits the Instance when it receives that result, so Flux cannot
-apply it first. That manifest carries `pds.percona.com/restored-from`, and
-`Delete` refuses it with `ErrRestoring` until a heartbeat lists the Instance,
-so a delete cannot orphan the seeded database. A failed seed commits nothing and is reported on the pending
-database. The agent's result carries a typed `reason` (`hub.Seed*`) that the
-hub turns into the failed copy's sentence; the error text goes to the log only,
-and a result with no reason keeps the original sentence.
-A create that errors after the API server made the cluster is
-followed by deleting that cluster when it restores the same backup, so a failed
-copy leaves nothing running.
+Git commit that creates a second database, for both engines: the Instance
+carries a `dataSource` naming the backup, and the provider does the rest.
 
 ```go
 // adapter/internal/engine/engine.go
