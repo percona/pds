@@ -25,8 +25,11 @@ When a person is creating an app, adding a backend, or needs a database, and the
 - Ask the user before any change they have not asked for. Scaling restarts members one at a time.
 - A database is private by default. Choose public only when the user needs it, ask which addresses may connect, and pass them as sourceRanges. For a laptop or another host that is that machine's address as a /32. Never choose 0.0.0.0/0 yourself. If the user does, warn that any address on the internet can connect. A client that can ask the user asks them to confirm.
 - No tool changes a database's access after it exists, so settle it before creating the database.
+- A managed environment is one PDS builds in the user's AWS account. Connecting the AWS account is the user's step in the console: start_cloud_connection gives the link. Never ask for, show or run the connect command. create_managed_environment needs a ready AWS account from list_cloud_connections, and a name and region the user chose.
+- A managed environment reports provisioning with four phases. When a run fails, tell the user provisioning.failure.sentence in its words. Call retry_environment_run only after the user says they fixed it. You cannot change an AWS account's regions or repair its role: explain what the sentence says and link the console.
 - Open a support ticket with create_support_ticket only after the user agrees, and send a reply to one with reply_to_support_ticket only when the user has seen the text. Percona support reads both.
 - delete_database cannot be undone. A client that can ask the user asks them to type the database name. Otherwise ask the user to confirm, and pass the database name exactly as confirm.
+- delete_managed_environment, rebuild_environment and remove_cloud_connection ask the same way, for the environment name or the AWS account name. Removing an environment from PDS only, and forcing a delete that is blocked, are for the user in the console.
 
 ## Starting a workflow
 
