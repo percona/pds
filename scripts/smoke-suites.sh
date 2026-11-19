@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
 # Turns the smoke workflow's `suites` input, a comma separated list of mysql,
-# postgresql and mcp, into the JSON array its matrix runs. An unknown name is
+# postgresql, mcp and flux, into the JSON array its matrix runs. An unknown name is
 # refused rather than dropped, so a typo cannot quietly skip a suite.
 #
 #   scripts/smoke-suites.sh "mysql, mcp"       ["mysql","mcp"]
 set -euo pipefail
 
-known=(mysql postgresql mcp)
+known=(mysql postgresql mcp flux)
 requested="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d ' ')"
 
 IFS=',' read -r -a tokens <<< "${requested}"
