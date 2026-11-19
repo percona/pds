@@ -1,9 +1,10 @@
 import { buttonVariants } from "@/components/ui/button";
-import { consoleUrl, productName, sectionIds } from "@/lib/site";
+import { consoleUrl, githubUrl, productName, sectionIds } from "@/lib/site";
 import { ThemeToggle } from "./theme-toggle";
 
 const navItems = [
-  { href: `#${sectionIds.howItWorks}`, label: "How it works" },
+  { href: `#${sectionIds.tryIt}`, label: "Try it" },
+  { href: `#${sectionIds.proof}`, label: "Built on" },
   { href: `#${sectionIds.operations}`, label: "Operations" },
   { href: `#${sectionIds.pricing}`, label: "Pricing" },
   { href: `#${sectionIds.faq}`, label: "FAQ" },
@@ -34,6 +35,13 @@ export function SiteHeader() {
         </nav>
 
         <div className="ml-auto flex items-center gap-1 sm:gap-2">
+          <a
+            href={githubUrl}
+            rel="noreferrer"
+            className="hidden rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground sm:inline"
+          >
+            GitHub
+          </a>
           <ThemeToggle />
           <a href={consoleUrl} className={buttonVariants({ size: "sm" })}>
             Sign in

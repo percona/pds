@@ -1,0 +1,29 @@
+/* Maps the Stageshow kit's tokens onto this page's, so a faux console follows
+   the light and dark theme and keeps the page's type, radii (8, 12, full) and
+   purple accent. The kit's ink tokens (placeholder bars, hairlines) still come
+   from its own light and dark themes, which the demo sets from the page theme. */
+.pds-stage .ss-stage {
+  --ss-canvas: var(--muted);
+  --ss-surface: var(--card);
+  --ss-chrome: var(--card);
+  --ss-raised: var(--card);
+  --ss-accent: var(--primary);
+  --ss-accent-2: var(--primary);
+  --ss-accent-soft: color-mix(in srgb, var(--primary) 14%, transparent);
+  --ss-accent-text: var(--primary);
+  --ss-success: var(--success);
+  --ss-success-soft: color-mix(in srgb, var(--success) 16%, transparent);
+  --ss-success-text: color-mix(in srgb, var(--success) 72%, var(--foreground));
+  --ss-warning-soft: color-mix(in srgb, var(--warning) 16%, transparent);
+  --ss-warning-text: var(--warning);
+  --ss-text: var(--muted-foreground);
+  --ss-text-strong: var(--foreground);
+  --ss-icon: var(--muted-foreground);
+  --ss-line: var(--border);
+  --ss-font: var(--font-sans);
+  --ss-mono: var(--font-mono);
+  --ss-radius-sm: 8px;
+  --ss-radius-md: 8px;
+  --ss-radius-lg: 12px;
+  --ss-radius-window: 12px;
+}

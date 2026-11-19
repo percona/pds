@@ -1,3 +1,6 @@
+/* The Stageshow kit sits above Tailwind's base reset, so its padding and margins survive it. */
+@layer theme, base, stageshow, components, utilities;
+
 @import "tailwindcss";
 
 /* Tokens, fonts and motion are the console's own (apps/ui/src/index.css), so the
@@ -33,6 +36,9 @@
   --input: #e5e3e3;
   --ring: color-mix(in oklab, #653df4 50%, transparent);
   --success: #16a34a;
+  /* A fixed dark ground for white marks, in both themes. */
+  --mark-tile: #282727;
+  --logo-ground: #ffffff;
   /* White on this green is 3.3:1; the dark ink clears AA for text-xs pills. */
   --success-foreground: #12240f;
   --warning: #b45309;
@@ -61,6 +67,8 @@
   --input: #3b3939;
   --ring: color-mix(in oklab, #b76cf5 50%, transparent);
   --success: #4ade80;
+  --mark-tile: #282727;
+  --logo-ground: #ffffff;
   --success-foreground: #12240f;
   --warning: #fbbf24;
   --warning-foreground: #241a05;
@@ -86,6 +94,8 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-mark-tile: var(--mark-tile);
+  --color-logo-ground: var(--logo-ground);
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
   --color-warning: var(--warning);
@@ -101,7 +111,6 @@
 
   --animate-fade-in: fade-in 160ms ease-out;
   --animate-slide-up: slide-up 160ms ease-out;
-  --animate-soft-pulse: soft-pulse 2s ease-in-out infinite;
 
   @keyframes fade-in {
     from {
@@ -120,16 +129,6 @@
     to {
       opacity: 1;
       transform: translateY(0);
-    }
-  }
-
-  @keyframes soft-pulse {
-    0%,
-    100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.55;
     }
   }
 }

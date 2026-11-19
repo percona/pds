@@ -27,6 +27,30 @@ if (!globalThis.localStorage) {
   });
 }
 
+// jsdom has none of these. The demo stages measure, observe and read media
+// queries, so the tests get inert stand-ins and see each demo's first frame.
+class InertObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+  takeRecords() {
+    return [];
+  }
+}
+globalThis.ResizeObserver ??= InertObserver as unknown as typeof ResizeObserver;
+globalThis.IntersectionObserver ??= InertObserver as unknown as typeof IntersectionObserver;
+window.matchMedia ??= (query: string) =>
+  ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener() {},
+    removeEventListener() {},
+    addListener() {},
+    removeListener() {},
+    dispatchEvent: () => false,
+  }) as MediaQueryList;
+
 afterEach(() => {
   cleanup();
   document.documentElement.classList.remove("dark");
