@@ -86,8 +86,9 @@ request has to carry:
 
 | Credential                             | Routes                                                                                                                                                                                                                                                                   |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| None                                   | `/healthz`, `/readyz`, the `/api/auth` routes (login, logout, session, invite, and the identity provider), the Connect script `/api/internal/connect/bootstrap.sh` and `pds.tgz`, and the authorization server for agents: `/.well-known/oauth-authorization-server`, `/oauth/token`, `/oauth/register` and `/oauth/revoke`. `GET /oauth/authorize` needs a session cookie and sends a person without one to sign in |
+| None                                   | `/healthz`, `/readyz`, the `/api/auth` routes (login, logout, session, invite, and the identity provider), the Connect script `/api/internal/connect/bootstrap.sh` and `pds.tgz`, the cloud connection template and script `/api/internal/cloud-connection/template.yaml` and `connect.sh`, and the authorization server for agents: `/.well-known/oauth-authorization-server`, `/oauth/token`, `/oauth/register` and `/oauth/revoke`. `GET /oauth/authorize` needs a session cookie and sends a person without one to sign in |
 | Join token                             | `GET /api/internal/connect/enrollment`                                                                                                                                                                                                                                   |
+| Connect token                          | `POST /api/internal/cloud-connection/enroll`, `/events` and `/verify`                                                                                                                                                                                                    |
 | Join or agent token                    | `POST /api/internal/environments/{name}/join`, `POST /api/internal/environments/{name}/heartbeat`                                                                                                                                                                        |
 | Session cookie, or the operator bearer | Everything else under `/api`: features, environments and Connect, alerts, connections, assistant, chat, activity, support, and databases with their credential, scale, backups, schedule, restore, metrics, history, usage and alerts                                    |
 
@@ -671,6 +672,58 @@ rather than reporting no match, and a `?environment=` naming an environment the
 report does not hold is ignored. The page is read only: it has no silence or
 acknowledge control.
 
+### Cloud connections
+
+A cloud connection is a Team's standing permission to act in one AWS account.
+The customer grants it once with `connect.sh`, and the control plane then
+assumes a role there for each step. It keeps no credential: no key, token or
+kubeconfig is stored, only what makes the next assume possible.
+
+- **Template.** `internal/api/cloud_connection_template.yaml` is embedded and
+  served as is, the same text to everybody, and `cfn-lint` checks it in CI. Under
+  the path `/pds/<connection id>/` it creates the role the control plane assumes,
+  the CloudFormation service role, the EKS cluster role, the node role and the
+  EBS CSI Pod Identity role, with ARNs that follow from the connection id. The
+  stack reports `TemplateVersion`, and the control plane requires at least
+  `service.CloudTemplateVersion`: a lower one is Out of date. This version is the
+  bootstrap template's own, apart from the revision in
+  [compatibility.md](compatibility.md).
+- **Trust.** The role trusts the role or user in `HUB_CLOUD_PRINCIPAL_ARN`, never
+  an account root, and only with the connection's `sts:ExternalId` and an
+  `sts:SourceIdentity` that matches `pds-user-*` or `pds-job-*`, so the customer's
+  CloudTrail says whether a person or a job acted. AWS wants six literal
+  characters before a wildcard and no colon in the value, hence the form. Without
+  that setting enroll, events and verify answer 501.
+- **Permissions.** The control plane role passes the service role to
+  CloudFormation, drives `pds-*` stacks only through it and never changes its own
+  stack, and reads. The writes live on the service role, split over four managed
+  policies to stay under the 6144 character limit of one: tag-scoped on
+  `percona.com/pds`, tagging allowed only at creation (`ec2:CreateTags` with
+  `ec2:CreateAction`), service-linked roles named by `iam:AWSServiceName`, S3 by
+  a `pds-*` bucket name and `s3:ResourceAccount`, and every regional write limited
+  to the connection's regions. The policy has not been run against a live
+  account yet.
+- **Connect script.** It reads the account and enrolls with a connect token,
+  creates or updates the stack with `aws cloudformation deploy`, turns on
+  termination protection, and asks the control plane to check. A step is reported
+  when it starts and ends, and a running step sends a heartbeat every 30 seconds
+  that only moves the connection's last signal. What the script reports is a hint:
+  only the control plane's check makes a connection Ready.
+- **Token.** `ccn_` and a random value, stored as its SHA-256, valid one hour and
+  reusable until it expires or its connection first reaches Ready. It serves one
+  Team and, once it has enrolled an account, that connection only. The regions are
+  chosen when it is made, and `--regions` may only narrow them.
+- **Same account, same connection.** Enrollment matches on (Team, account id), so
+  a rerun gets the same connection id, secret and stack name, and another Team
+  with the same account gets its own connection.
+- **Check.** It assumes the role, confirms the account with `GetCallerIdentity`,
+  needs `DescribeStacks` to say `CREATE_COMPLETE`, `UPDATE_COMPLETE` or
+  `UPDATE_ROLLBACK_COMPLETE` with a template version at or above the minimum, and
+  `iam:GetRole` on the four other roles. It never simulates policies, since
+  simulation misses service control policies. A connection that has never been
+  Ready stays Pending while it fails the check, and one that was Ready becomes
+  Unreachable. It runs from the script, on Verify and every hour.
+
 ### Support access windows
 
 An environment has one support access record, kept per Team in
@@ -1069,7 +1122,8 @@ reply is in the conversation when the person comes back.
 
 The HTTP adapter's PostgreSQL is not a customer database. It holds bcrypt
 password hashes, sessions, organizations, environment inventory, join token hashes,
-deploy keys, the work queue, support access windows, database history, usage
+cloud connections with their connect token hashes and reported steps, deploy keys,
+the work queue, support access windows, database history, usage
 samples, saved chats and provisioning runs.
 Connection secrets are sealed with AES-GCM under `STATE_ENCRYPTION_KEY`, 32
 bytes kept in a Secret and never in the database. Losing that key makes every

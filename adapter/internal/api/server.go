@@ -39,6 +39,10 @@ type Deps struct {
 	// support routes then answer 501 so the UI hides its actions.
 	Support *service.Support
 
+	// CloudConnections is nil where no control plane principal is configured,
+	// and its routes then answer 501.
+	CloudConnections *service.CloudConnections
+
 	// Connections stores UI-pasted ServiceNow and Anthropic credentials.
 	Connections *service.Connections
 
@@ -124,6 +128,7 @@ type Server struct {
 	metrics         *service.Metrics
 	support         *service.Support
 	connections     *service.Connections
+	cloud           *service.CloudConnections
 	chat            *service.Chat
 	chatHeartbeat   time.Duration
 	activity        *service.Activity
@@ -170,6 +175,7 @@ func NewServer(deps Deps) *Server {
 		metrics:         deps.Metrics,
 		support:         deps.Support,
 		connections:     deps.Connections,
+		cloud:           deps.CloudConnections,
 		chat:            deps.Chat,
 		chatHeartbeat:   deps.ChatHeartbeat,
 		activity:        deps.Activity,
@@ -212,6 +218,14 @@ func NewServer(deps Deps) *Server {
 	s.router.Get("/api/internal/connect/bootstrap.sh", s.handleConnectBootstrap)
 	s.router.Get("/api/internal/connect/pds.tgz", s.handleConnectChart)
 	s.router.Get("/api/internal/connect/enrollment", s.handleConnectEnrollment)
+
+	// A customer's AWS account reaches these with a connect token, or with no
+	// credential at all for the generic template and script.
+	s.router.Get(cloudRoutePrefix+"template.yaml", s.handleCloudTemplate)
+	s.router.Get(cloudRoutePrefix+"connect.sh", s.handleCloudConnectScript)
+	s.router.Post(cloudRoutePrefix+"enroll", s.handleCloudEnroll)
+	s.router.Post(cloudRoutePrefix+"events", s.handleCloudEvent)
+	s.router.Post(cloudRoutePrefix+"verify", s.handleCloudVerify)
 
 	s.registerOAuthRoutes()
 	s.registerMCPRoutes()

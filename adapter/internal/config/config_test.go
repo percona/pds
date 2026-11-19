@@ -73,6 +73,7 @@ func clearEnv(t *testing.T) {
 		"HUB_URL",
 		"HUB_PUBLIC_URL",
 		"HUB_OAUTH_ISSUER",
+		"HUB_CLOUD_PRINCIPAL_ARN",
 		"HUB_GIT_URL",
 		"HUB_GITHUB_ORG",
 		"HUB_GITHUB_TOKEN",
@@ -1462,6 +1463,29 @@ func TestLoadRefusesAnOAuthIssuerThatIsNotAnOrigin(t *testing.T) {
 	_, err := config.Load()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "HUB_OAUTH_ISSUER")
+}
+
+func TestLoadReadsTheCloudPrincipalAndRefusesAnAccountRoot(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("HUB_GIT_DIR", "/tmp/hub-git")
+	t.Setenv("HUB_OPERATOR_TOKEN", "op-secret")
+	t.Setenv("HUB_PUBLIC_URL", "https://hub.example")
+
+	got, err := config.Load()
+	require.NoError(t, err)
+	assert.Empty(t, got.CloudPrincipalARN, "no principal turns cloud connections off")
+
+	t.Setenv("HUB_CLOUD_PRINCIPAL_ARN", " arn:aws:iam::111122223333:role/pds-control-plane ")
+	got, err = config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, "arn:aws:iam::111122223333:role/pds-control-plane", got.CloudPrincipalARN)
+
+	for _, bad := range []string{"arn:aws:iam::111122223333:root", "111122223333", "*", "arn:aws:iam::1:role/x"} {
+		t.Setenv("HUB_CLOUD_PRINCIPAL_ARN", bad)
+		_, err = config.Load()
+		require.Error(t, err, bad)
+		assert.Contains(t, err.Error(), "HUB_CLOUD_PRINCIPAL_ARN")
+	}
 }
 
 func setSupportTailnet(t *testing.T) {

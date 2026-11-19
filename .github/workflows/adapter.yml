@@ -92,11 +92,25 @@ jobs:
         run: |
           shellcheck --severity=warning \
             adapter/internal/api/connect_bootstrap.sh \
-            adapter/internal/api/connect_bootstrap_test.sh
+            adapter/internal/api/connect_bootstrap_test.sh \
+            adapter/internal/api/cloud_connection_connect.sh \
+            adapter/internal/api/cloud_connection_connect_test.sh
 
       - name: connect bootstrap tests
         working-directory: .
         run: bash adapter/internal/api/connect_bootstrap_test.sh
+
+      - name: cloud connection script tests
+        working-directory: .
+        run: bash adapter/internal/api/cloud_connection_connect_test.sh
+
+      # The template is go:embed content that a customer's AWS account runs, so
+      # CloudFormation is the first to read it, not a Go test.
+      - name: cfn-lint the cloud connection template
+        working-directory: .
+        run: |
+          python3 -m pip install --user cfn-lint==1.60.1
+          "$HOME/.local/bin/cfn-lint" adapter/internal/api/cloud_connection_template.yaml
 
       - name: govulncheck
         run: |
