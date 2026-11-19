@@ -101,7 +101,7 @@ func TestTheEKSIsPrivateAndUsesAccessEntries(t *testing.T) {
 
 	access, _ := cluster.Properties["AccessConfig"].(map[string]any)
 	assert.Equal(t, "API", access["AuthenticationMode"])
-	assert.Equal(t, false, access["BootstrapClusterCreatorAdminPermissions"], "the control plane holds no standing access") // allow-legacy-name: the AWS property name
+	assert.Equal(t, false, access["BootstrapClusterCreatorAdminPermissions"], "the control plane holds no standing access")
 
 	vpc, _ := cluster.Properties["ResourcesVpcConfig"].(map[string]any)
 	assert.Equal(t, false, vpc["EndpointPublicAccess"], "the endpoint is private between runs")

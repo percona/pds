@@ -58,7 +58,7 @@ STALE_ENVIRONMENT='/api/(internal/)?clusters([/?" `]|$)|[?&]cluster=|hub_cluster
 # and the copy lint that bans the bare word.
 IDENTIFIER_FILES='\.(go|ts|tsx)$'
 CLUSTER_IDENTIFIER='\b[A-Za-z0-9_]*([a-z0-9_]Clusters?|Cluster(s[A-Za-z0-9_]|[A-Za-rt-z0-9_]))[A-Za-z0-9_]*|\b(cluster|clusters)[A-Z_][A-Za-z0-9_]*'
-ALLOWED_IDENTIFIER='InCluster|inCluster|ClusterIP|ClusterRole|ClusterConfig|PerconaPGCluster|ClusterAccess|ClusterEvent|clusterEvent|ClusterRegion|clusterRegion|ClusterType|clusterType|EverestCluster|DefaultCluster|TopologyCluster|VisibilityCluster|PMMAccessCluster|LegacyClusters|bareCluster|clusterWord|collectClusterLabels|DefaultsTheClusterName|XtraDBCluster|PostgresCluster|pgCluster'
+ALLOWED_IDENTIFIER='InCluster|inCluster|ClusterIP|ClusterRole|ClusterConfig|PerconaPGCluster|ClusterAccess|ClusterEvent|clusterEvent|ClusterRegion|clusterRegion|ClusterType|clusterType|EverestCluster|DefaultCluster|TopologyCluster|VisibilityCluster|PMMAccessCluster|LegacyClusters|bareCluster|clusterWord|collectClusterLabels|DefaultsTheClusterName|XtraDBCluster|PostgresCluster|pgCluster|BootstrapClusterCreatorAdminPermissions'
 
 # Files whose subject is the rename itself.
 ALLOWED_FILE='^(AGENTS\.md|scripts/check-naming\.sh|scripts/check-naming_test\.sh|package-lock\.json)$'
