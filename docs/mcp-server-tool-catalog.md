@@ -10,35 +10,40 @@ The tools live in the Go registry in `adapter/internal/mcp`, which the control p
 - **Requests.** Every error carries a `requestId` that a customer can quote to Percona support. A request times out after 30 seconds. Writes are never retried after a timeout.
 - **Copy.** Descriptions use customer vocabulary only (control plane, monitoring, database platform, environment). No hub, spoke, adapter, PMM, Everest, Flux, or operator as narrator. No em or en dashes, no exclamation marks in errors, sentence case. The adapter's customer copy test and the contract test of `apps/mcp` over `tools/list` hold it.
 
-
 ## 2. Registration
 
-| Group | Tools | Listed at |
-| --- | --- | --- |
-| Read | `list_environments`, `list_databases`, `get_database`, `list_backups`, `get_metrics`, `list_activity`, `get_activity`, `list_alerts`, `get_database_alerts`, `get_database_history`, `get_database_usage`, `get_environment_history`, `list_support_tickets`, `get_support_ticket` | every tier |
-| Wait | `wait_for_database`, `wait_for_backup`, `wait_for_environment` | every tier |
-| Changes | `create_database`, `scale_database`, `backup_database`, `set_backup_schedule`, `restore_database`, `create_support_ticket`, `reply_to_support_ticket`, `create_environment` | the change tier and above |
-| Destructive changes | `delete_database` | the change and delete tier |
+| Group               | Tools                                                                                                                                                                                                                                                                                                                                                   | Listed at                  |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| Read                | `list_environments`, `get_environment`, `list_cloud_connections`, `get_cloud_connection`, `list_databases`, `get_database`, `list_backups`, `get_metrics`, `list_activity`, `get_activity`, `list_alerts`, `get_database_alerts`, `get_database_history`, `get_database_usage`, `get_environment_history`, `list_support_tickets`, `get_support_ticket` | every tier                 |
+| Wait                | `wait_for_database`, `wait_for_backup`, `wait_for_environment`                                                                                                                                                                                                                                                                                          | every tier                 |
+| Changes             | `create_database`, `scale_database`, `backup_database`, `set_backup_schedule`, `restore_database`, `create_support_ticket`, `reply_to_support_ticket`, `create_environment`, `start_cloud_connection`, `create_managed_environment`, `retry_environment_run`, `upgrade_environment`                                                                     | the change tier and above  |
+| Destructive changes | `delete_database`, `delete_managed_environment`, `rebuild_environment`, `remove_cloud_connection`                                                                                                                                                                                                                                                       | the change and delete tier |
 
 - A feature the control plane has switched off or not configured answers 501, and the tool returns `not_available` with the control plane's customer sentence. This holds for the support tools and for environments.
 - Counts: 17 read tools, 25 at the change tier, 26 at the change and delete tier. `get_logs` and `get_platform_status` are not registered.
 - **Access tiers.** The caller's access tier decides: `read`, `change` (the changes and `reply_to_support_ticket`) or `change_delete` (which adds `delete_database`). The tier is the lowest of the Organization's limit, the sign-in choice and what the person's role allows, and the caller is built with it. `tools/list` returns only the tools the tier allows, and a call to a tool above it is refused as `not_allowed` before any request is made. A caller whose client kind is not `chat` or `mcp` is served the read tier whatever its access says, because every change is recorded with the client that made it. The console Chat calls the registry as client `chat` and is served the read tier, so it is offered the read and wait tools and no change tool.
 
-
 ## 3. Annotations
 
-| Tool | readOnly | destructive | idempotent | openWorld |
-| --- | --- | --- | --- | --- |
-| all read tools and both wait tools | true | false | true | false |
-| `create_database` | false | false | false | false |
-| `scale_database` | false | false | true | false |
-| `backup_database` | false | false | false | false |
-| `set_backup_schedule` | false | false | true | false |
-| `restore_database` | false | false | false | false |
-| `create_support_ticket` | false | false | false | false |
-| `reply_to_support_ticket` | false | false | false | false |
-| `create_environment` | false | false | false | false |
-| `delete_database` | false | true | false | false |
+| Tool                               | readOnly | destructive | idempotent | openWorld |
+| ---------------------------------- | -------- | ----------- | ---------- | --------- |
+| all read tools and both wait tools | true     | false       | true       | false     |
+| `create_database`                  | false    | false       | false      | false     |
+| `scale_database`                   | false    | false       | true       | false     |
+| `backup_database`                  | false    | false       | false      | false     |
+| `set_backup_schedule`              | false    | false       | true       | false     |
+| `restore_database`                 | false    | false       | false      | false     |
+| `create_support_ticket`            | false    | false       | false      | false     |
+| `reply_to_support_ticket`          | false    | false       | false      | false     |
+| `create_environment`               | false    | false       | false      | false     |
+| `start_cloud_connection`           | false    | false       | true       | false     |
+| `create_managed_environment`       | false    | false       | false      | false     |
+| `retry_environment_run`            | false    | false       | false      | false     |
+| `upgrade_environment`              | false    | false       | false      | false     |
+| `delete_database`                  | false    | true        | false      | false     |
+| `delete_managed_environment`       | false    | true        | false      | false     |
+| `rebuild_environment`              | false    | true        | false      | false     |
+| `remove_cloud_connection`          | false    | true        | false      | false     |
 
 Annotations are hints. The real gates are the registration rules and access tiers above, the `confirm` check, and the open range acknowledgement.
 
@@ -125,8 +130,29 @@ Annotations are hints. The real gates are the registration rules and access tier
 
 - **API:** `GET /api/environments`.
 - **Input:** none.
-- **Result:** `{environments: [{name, namespace?, status, lastSeen?}]}`, passed through.
-- **Description:** List the environments connected to this control plane, with their status and when each was last seen. Use an environment name when creating a database.
+- **Result:** `{environments: [{name, namespace?, status, lastSeen?, origin, state, connectionId?, region?, provisioning?}]}`. `origin` is `connected` or `managed`; `state` is `creating`, `ready`, `degraded`, `failed` or `deleting`. `provisioning` is set on a managed environment, see "Managed environments" below.
+- **Description:** List the environments of this control plane, with their status and when each was last seen. origin says whether the user connected the Kubernetes cluster or PDS built the environment, and state says how it is. A managed environment also carries provisioning: the four phases of its latest run and, when a run failed, what to do. Use an environment name when creating a database.
+
+### get_environment
+
+- **API:** `GET /api/environments/{name}`.
+- **Input:** `name`.
+- **Result:** one entry of `list_environments`.
+- **Description:** Get one environment with its status, origin and state. A managed environment carries provisioning: its latest run, the four phases (Creating network and Kubernetes cluster, Connecting to the environment, Installing PDS, Finishing) and, when a run failed, failure with the sentence to tell the user and the one action. When AWS refused a step, failure.refusal says which quota or permission and where.
+
+### list_cloud_connections
+
+- **API:** `GET /api/cloud-connections`.
+- **Input:** none.
+- **Result:** `{cloudConnections: [{id, accountId, alias?, state, reason?, allowedRegions, environments, checkedAt?, readyAt?}]}`. `state` is `pending`, `ready`, `unreachable` or `out_of_date`. `environments` names the managed environments that run through the AWS account. The result has no ExternalId, role or connect command.
+- **Description:** List the AWS accounts connected to this team, with their state and the managed environments that run through each. State is pending, ready, unreachable or out_of_date. Only a ready AWS account can host a new environment. reason says in a sentence why an account is not ready.
+
+### get_cloud_connection
+
+- **API:** `GET /api/cloud-connections/{id}`.
+- **Input:** `id` (twelve lowercase hex digits, from `list_cloud_connections`).
+- **Result:** one entry of `list_cloud_connections` with `steps?` (`{step, status, at?}`, what the connect command reported).
+- **Description:** Get one connected AWS account with its state, the regions it allows, its managed environments and the steps the connect command reported. id is copied from list_cloud_connections. Nothing here lets you repair an account: tell the user what reason says and link them to the console.
 
 ### list_support_tickets
 
@@ -167,8 +193,8 @@ The Go registry in `adapter/internal/mcp` serves all three (`wait.go`). Its dead
 ### wait_for_environment
 
 - **API:** `GET /api/environments`.
-- **Input:** `name`; `timeoutSeconds` (1 to 45, default 30).
-- **Result:** `{outcome, name, status?, waitedSeconds}`. `connected` when the environment's status is connected, `in_progress` while it is listed but not connected, `not_found` when it never appears during the wait.
+- **Input:** `name`; `until` (`connected` default, or `deleted`); `timeoutSeconds` (1 to 45, default 30).
+- **Result:** `{outcome, name, status?, state?, provisioning?, waitedSeconds}`. `connected` when the environment reports in and no run is building it; `failed` or `blocked` when its latest run failed or a delete left something behind (both end the wait); `waiting` when a run is paused until the AWS account answers; `in_progress` while listed and not done; `deleted` when `until` is `deleted` and the environment is gone; `not_found` when it never appears.
 - **Description:** Wait for an environment to connect, up to timeoutSeconds (default 30, at most 45). Use it after create_environment, once the user has run the command from the console. Returns connected, in_progress or not_found. On in_progress, call it again: connecting can take several minutes.
 
 ## 6. Change tools
@@ -242,6 +268,61 @@ Each returns the envelope in section 7. All return before the work is done, and 
 - **Result:** the envelope with `id` (the name), `expiresAt`, `consoleUrl` (`<PDS_URL>/environments/new`) and a `note` that tells the user to open that link, enter the same name and run the command it creates. `next` is `wait_for_environment`. On the Go registry `consoleUrl` is present only when the registry was given the console's address; without it the note sends the user to the console instead.
 - **Description:** Register a new environment. name is also the name of the EKS cluster the user creates, so ask the user for it. Refused when an environment with that name already exists. This call does not connect anything: it returns consoleUrl. Ask the user to open it, enter the same name and run the command it creates. The command is never shown here. Then use wait_for_environment.
 
+### start_cloud_connection (changes)
+
+- **API:** `GET /api/cloud-connections`. Nothing is minted: the connect command is never requested.
+- **Input:** none.
+- **Result:** the envelope with `consoleUrl` (`<PDS_URL>/environments/aws-accounts/new`, present only when the registry was given the console's address), the AWS accounts already connected and a `note` that tells the user to open the link and run the command it shows.
+- **Description:** Start connecting an AWS account so PDS can build environments in it. This call does not connect anything: it returns consoleUrl and the AWS accounts that are already connected. Ask the user to open consoleUrl and run the one command it shows in their AWS account. The command is never shown here. Follow the account with get_cloud_connection.
+
+### create_managed_environment (changes)
+
+- **API:** `POST /api/cloud-connections/{connectionId}/environments`, which answers 202.
+- **Input:** `connectionId`; `name`; `region`. The control plane checks the AWS account is ready and allows the region, and that the name is free in the Team.
+- **Result:** the envelope with `id` (the name), `status` (the state) and `provisioning`; `next` is `wait_for_environment`.
+- **Description:** Build a new environment in a connected AWS account: PDS creates the network and the Kubernetes cluster and installs PDS on it. connectionId is a ready AWS account from list_cloud_connections and region is one it allows. Ask the user for the name and the region. The call returns before anything is built: use wait_for_environment, which follows the four phases. If a phase fails, tell the user what failure says, and call retry_environment_run once they have fixed it.
+
+### retry_environment_run (changes)
+
+- **API:** `GET /api/environments/{environment}`, then `POST /api/environments/{environment}/runs/{runId}/retry`.
+- **Input:** `environment`. The tool reads the latest run and refuses with `invalid_input` when it has not failed.
+- **Result:** the envelope with `provisioning`; `next` is `wait_for_environment`.
+- **Description:** Retry the failed step of an environment's latest run. Only the step that failed runs again. Use it after the user has fixed what failure says, such as raising a quota in their AWS account. Refused when the environment has no failed run.
+
+### upgrade_environment (changes)
+
+- **API:** `POST /api/environments/{environment}/runs` with `kind` `upgrade_pds` or `upgrade_kubernetes`. A run already in progress answers 409.
+- **Input:** `environment`; `kind` (`pds` or `kubernetes`).
+- **Result:** the envelope with `provisioning`; `next` is `wait_for_environment`.
+- **Description:** Start an upgrade of a managed environment now. kind pds upgrades PDS on it, and kubernetes upgrades the Kubernetes version and the nodes one minor version at a time. Refused while the environment has a run in progress. Use wait_for_environment to follow it.
+
+### delete_managed_environment (destructive changes)
+
+- **API:** `GET /api/environments/{environment}`, then `DELETE /api/environments/{environment}` with the stored name as `confirm`. The tool never sends `scope`, so it never does Remove from PDS only.
+- **Input:** `environment`; `confirm` (the environment name, exact match). A client that declared form mode elicitation is asked to type the name and `confirm` is ignored. An environment the user connected is refused with `invalid_input`.
+- **Result:** the envelope with `provisioning`; `next` is `wait_for_environment` with `until: deleted`.
+- **Description:** Delete an environment PDS built, with its databases, its Kubernetes cluster and its network in the AWS account. This cannot be undone. A client that can ask the user asks them to type the environment name, and the call goes on only when it matches, whatever confirm says. For any other client, ask the user to confirm and pass the environment name as confirm. The call returns before the environment is gone: use wait_for_environment with until deleted. If something is left behind, the environment shows delete blocked and lists what remains.
+
+### rebuild_environment (destructive changes)
+
+- **API:** `POST /api/environments/{environment}/runs` with `kind` `rebuild`.
+- **Input:** `environment`.
+- **Result:** the envelope with `provisioning`; `next` is `wait_for_environment`.
+- **Description:** Rebuild a managed environment whose infrastructure is gone, so PDS builds the Kubernetes cluster again. Backups can be restored afterwards. Ask the user first. Use wait_for_environment to follow it.
+
+### remove_cloud_connection (destructive changes)
+
+- **API:** `GET /api/cloud-connections/{id}`, then `DELETE /api/cloud-connections/{id}` with the name as `confirm`.
+- **Input:** `id`; `confirm` (the AWS account's alias, or its account number when it has none). The tool refuses with `conflict` when managed environments still run through the AWS account, before it asks anyone. Elicitation works as for `delete_database`.
+- **Result:** the envelope with `id`. Nothing in the AWS account is deleted.
+- **Description:** Remove a connected AWS account from PDS. Nothing is deleted in the AWS account itself. Refused while managed environments still run through it. A client that can ask the user asks them to type the AWS account name, and the call goes on only when it matches, whatever confirm says. For any other client, ask the user to confirm and pass the name as confirm: the alias, or the account number when there is none.
+
+## Managed environments and what no tool does
+
+A managed environment is an environment PDS builds in the user's AWS account. `provisioning` is `{run: {id, kind, status, startedAt?, finishedAt?}, progress, message?, phases: [{name, status}], failure?: {sentence, action, refusal?: {reason, service?, item?, region?}}}`. `progress` is `in_progress`, `waiting`, `failed`, `blocked` or `ready`. The phases of a create are "Creating network and Kubernetes cluster", "Connecting to the environment", "Installing PDS" and "Finishing". `failure.sentence` is a safe sentence with what to do next and never carries AWS text, a role or another account's id. `refusal.reason` is `quota`, `permission` or `region_not_enabled`.
+
+No tool, at any tier, shows or runs the connect script, its command or its `ccn_` token; changes AllowedRegions, the control plane's principal or the ExternalId; force deletes a blocked delete; does Remove from PDS only; or repairs a revoked role. Typed-account creation (`POST /api/cloud-connections`), the connect token routes, the maintenance window and deferral routes have no tool. An agent explains and links the console.
+
 ## 7. Change result envelope
 
 ```
@@ -277,16 +358,16 @@ A timed-out change reports the outcome as unknown and names the check to run, in
 
 Every failure is an `isError` result with `{kind, message, retryable, hint?, outcome?, requestId}`. `requestId` is left out when no request was sent, as with a refused saved sign in or a rejected id.
 
-| `kind` | Raised when | `retryable` |
-| --- | --- | --- |
-| `invalid_input` | the API answers 400, or the registry rejects an id, a `confirm`, or a range | no |
-| `not_found` | 404; hint: call `list_databases` for current ids | no |
-| `conflict` | 409 (busy database, restored copy still being restored, name taken, environment unreachable) | no |
-| `not_available` | 501 | no |
-| `unavailable` | 502 or 500 | yes |
-| `timeout` | the request timed out | reads yes; changes unknown |
-| `confirmation_required` | an open range was sent without `acknowledgeOpenToInternet` and the client cannot ask; or the user declined or cancelled a question; or an answer expired | no, ask the user |
-| `not_allowed` | the caller's access tier does not include the tool (Go registry): `change` tools need the change tier, `delete_database` the change and delete tier. Raised before any request | no, tell the user |
+| `kind`                  | Raised when                                                                                                                                                                    | `retryable`                |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------- |
+| `invalid_input`         | the API answers 400, or the registry rejects an id, a `confirm`, or a range                                                                                                    | no                         |
+| `not_found`             | 404; hint: call `list_databases` for current ids                                                                                                                               | no                         |
+| `conflict`              | 409 (busy database, restored copy still being restored, name taken, environment unreachable)                                                                                   | no                         |
+| `not_available`         | 501                                                                                                                                                                            | no                         |
+| `unavailable`           | 502 or 500                                                                                                                                                                     | yes                        |
+| `timeout`               | the request timed out                                                                                                                                                          | reads yes; changes unknown |
+| `confirmation_required` | an open range was sent without `acknowledgeOpenToInternet` and the client cannot ask; or the user declined or cancelled a question; or an answer expired                       | no, ask the user           |
+| `not_allowed`           | the caller's access tier does not include the tool (Go registry): `change` tools need the change tier, `delete_database` the change and delete tier. Raised before any request | no, tell the user          |
 
 Messages: 400, 403, 404 and 409 pass through as the API wrote them, and the adapter's customer copy test keeps them clean. 502, 500 and any other status use fixed text. A sign in that is missing or ended never reaches the registry: the bridge answers it with words that name `pds-mcp login`.
 
@@ -294,12 +375,12 @@ Messages: 400, 403, 404 and 409 pass through as the API wrote them, and the adap
 
 The registry serves four prompts beside the tools. Each is a workflow a person starts from a client's prompt or command list (Claude Code names the command after the server and the prompt), and each answers with one user message that the agent follows. They are text files in `adapter/internal/mcp/guidance/prompts`. `prompts/list` returns them by name, and only those the caller's access tier includes. The text names only tools that tier lists. An argument that fails its check, or a required one that is missing, is refused as invalid params. The TypeScript server has no prompts.
 
-| Prompt | Title | Tier | Arguments |
-| --- | --- | --- | --- |
-| `connect_app` | Connect an app to a database | read | `database` (required) |
-| `investigate_database` | Investigate a slow or failing database | read | `database` (required) |
-| `new_database` | Create a database for an app | change | `engine`, `environment`, `name` |
-| `set_up_backups` | Set up backups | change | `database` (required) |
+| Prompt                 | Title                                  | Tier   | Arguments                       |
+| ---------------------- | -------------------------------------- | ------ | ------------------------------- |
+| `connect_app`          | Connect an app to a database           | read   | `database` (required)           |
+| `investigate_database` | Investigate a slow or failing database | read   | `database` (required)           |
+| `new_database`         | Create a database for an app           | change | `engine`, `environment`, `name` |
+| `set_up_backups`       | Set up backups                         | change | `database` (required)           |
 
 - **`connect_app`.** Reads the database, waits until it is ready, then checks where the app will run against the database's access. The same VPC means private. A laptop or another host means public with that machine's address as a `/32`. Never `0.0.0.0/0`. It gives the host, port and username, never the password: the user copies it from the console. When the access does not fit, it says no tool changes access after creation and, at the change tier, offers a new database.
 - **`investigate_database`.** `get_database`, `get_metrics`, `get_database_usage` when monitoring is off, `get_database_history` and `get_database_alerts`, then a summary. At the change tier it offers `create_support_ticket` after the user agrees. At the read tier it tells the user a ticket needs change access.
