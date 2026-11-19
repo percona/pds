@@ -174,3 +174,31 @@ func TestEventsKeepStepsAndHeartbeatsOnlyTouchTheConnection(t *testing.T) {
 	require.NotNil(t, got.SignalAt)
 	assert.WithinDuration(t, start.Add(time.Minute), *got.SignalAt, time.Second)
 }
+
+func TestEnrollingMayNarrowTheTokensRegions(t *testing.T) {
+	db, admin := newOrganizationWithAdmin(t)
+	cc := db.CloudConnections()
+	token := newCloudToken(admin.TeamID, "h1", time.Hour)
+	token.AllowedRegions = []string{"eu-west-1", "us-east-1"}
+	require.NoError(t, cc.CreateToken(t.Context(), token))
+	in := enrollInput("h1", "123456789012", "aaaaaaaaaaaa")
+	in.AllowedRegions = []string{"us-east-1"}
+
+	row, err := cc.Enroll(t.Context(), in, time.Now())
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"us-east-1"}, row.AllowedRegions)
+}
+
+func TestCloudConnectionsAnswerNotConnectedUntilTheDatabaseIsUp(t *testing.T) {
+	starter := store.Start(t.Context(), store.Options{
+		URL:            "postgres://hub:hunter2@127.0.0.1:1/hub?sslmode=disable",
+		ConnectTimeout: time.Second,
+		RetryBackoff:   time.Hour,
+	})
+	t.Cleanup(func() { _ = starter.Close() })
+
+	_, err := starter.CloudConnections().List(t.Context(), 1)
+
+	assert.ErrorIs(t, err, store.ErrNotConnected)
+}

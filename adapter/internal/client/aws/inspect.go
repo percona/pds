@@ -7,10 +7,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
 	sdkaws "github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/cloudformation"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
@@ -56,6 +58,26 @@ type Inspector struct{ base sdkaws.Config }
 // NewInspector builds an inspector. The config carries the control plane's own
 // identity, the principal customer roles trust.
 func NewInspector(base sdkaws.Config) *Inspector { return &Inspector{base: base} }
+
+// NewDefaultInspector builds an inspector from the identity the process runs
+// as: Pod Identity, an instance role or the usual environment variables. The
+// region only picks the STS endpoint that asks to assume a role.
+func NewDefaultInspector(ctx context.Context) (*Inspector, error) {
+	base, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(defaultRegion(os.Getenv("AWS_REGION"))))
+	if err != nil {
+		return nil, fmt.Errorf("load the control plane's AWS identity: %w", err)
+	}
+
+	return NewInspector(base), nil
+}
+
+func defaultRegion(set string) string {
+	if set != "" {
+		return set
+	}
+
+	return "us-east-1"
+}
 
 // Inspect assumes the role with its ExternalId and SourceIdentity, then reads
 // the account, the stack and the roles as that session.

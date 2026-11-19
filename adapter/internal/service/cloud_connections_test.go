@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -15,161 +14,10 @@ import (
 	"github.com/percona/pds/adapter/internal/client/aws"
 	"github.com/percona/pds/adapter/internal/service"
 	"github.com/percona/pds/adapter/internal/store"
+	"github.com/percona/pds/adapter/internal/testutil"
 )
 
 const testPrincipal = "arn:aws:iam::111122223333:role/pds-control-plane"
-
-// fakeCloudStore keeps connections in memory with the semantics the service
-// relies on: tokens by hash, one connection per (Team, account), the first
-// Ready revoking the connection's tokens.
-type fakeCloudStore struct {
-	mu          sync.Mutex
-	tokens      map[string]*store.CloudToken
-	connections map[string]*store.CloudConnection
-	events      []store.CloudEvent
-}
-
-func newFakeCloudStore() *fakeCloudStore {
-	return &fakeCloudStore{tokens: map[string]*store.CloudToken{}, connections: map[string]*store.CloudConnection{}}
-}
-
-func (f *fakeCloudStore) CreateToken(_ context.Context, in store.NewCloudToken) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.tokens[in.Hash] = &store.CloudToken{Hash: in.Hash, TeamID: in.TeamID, AllowedRegions: in.AllowedRegions, ExpiresAt: in.ExpiresAt}
-
-	return nil
-}
-
-func (f *fakeCloudStore) RevokeToken(_ context.Context, _ uint, hash string, now time.Time) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if token, ok := f.tokens[hash]; ok {
-		token.RevokedAt = &now
-	}
-
-	return nil
-}
-
-func (f *fakeCloudStore) TokenTeam(_ context.Context, hash string, now time.Time) (store.CloudToken, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	token, ok := f.tokens[hash]
-	if !ok || token.RevokedAt != nil || !token.ExpiresAt.After(now) {
-		return store.CloudToken{}, store.ErrCloudTokenInvalid
-	}
-
-	return *token, nil
-}
-
-func (f *fakeCloudStore) Enroll(_ context.Context, in store.CloudEnrollment, now time.Time) (store.CloudConnection, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	token, ok := f.tokens[in.TokenHash]
-	if !ok || token.RevokedAt != nil || !token.ExpiresAt.After(now) {
-		return store.CloudConnection{}, store.ErrCloudTokenInvalid
-	}
-	for _, row := range f.connections {
-		if row.TeamID == token.TeamID && row.AccountID == in.AccountID {
-			token.ConnectionID = row.ID
-
-			return *row, nil
-		}
-	}
-	row := &store.CloudConnection{
-		ID: in.NewID, TeamID: token.TeamID, AccountID: in.AccountID, Alias: in.Alias, ExternalID: in.NewExternalID,
-		StackName: in.NewStackName, StackRegion: in.StackRegion, AllowedRegions: token.AllowedRegions, State: store.CloudPending,
-	}
-	f.connections[row.ID] = row
-	token.ConnectionID = row.ID
-
-	return *row, nil
-}
-
-func (f *fakeCloudStore) Get(_ context.Context, teamID uint, id string) (store.CloudConnection, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	row, ok := f.connections[id]
-	if !ok || row.TeamID != teamID {
-		return store.CloudConnection{}, store.ErrCloudConnectionUnknown
-	}
-
-	return *row, nil
-}
-
-func (f *fakeCloudStore) List(_ context.Context, teamID uint) ([]store.CloudConnection, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	var out []store.CloudConnection
-	for _, row := range f.connections {
-		if row.TeamID == teamID {
-			out = append(out, *row)
-		}
-	}
-
-	return out, nil
-}
-
-func (f *fakeCloudStore) All(_ context.Context) ([]store.CloudConnection, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	var out []store.CloudConnection
-	for _, row := range f.connections {
-		out = append(out, *row)
-	}
-
-	return out, nil
-}
-
-func (f *fakeCloudStore) SaveCheck(_ context.Context, id string, in store.CloudCheck, now time.Time) (store.CloudConnection, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	row, ok := f.connections[id]
-	if !ok {
-		return store.CloudConnection{}, store.ErrCloudConnectionUnknown
-	}
-	row.State, row.Reason, row.CheckedAt = in.State, in.Reason, &now
-	if in.TemplateVersion > 0 {
-		row.TemplateVersion = in.TemplateVersion
-	}
-	if in.State == store.CloudReady && row.ReadyAt == nil {
-		row.ReadyAt = &now
-		for _, token := range f.tokens {
-			if token.ConnectionID == id {
-				token.RevokedAt = &now
-			}
-		}
-	}
-
-	return *row, nil
-}
-
-func (f *fakeCloudStore) Cancel(_ context.Context, teamID uint, id string, _ time.Time) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	row, ok := f.connections[id]
-	if !ok || row.TeamID != teamID {
-		return store.ErrCloudConnectionUnknown
-	}
-	if row.ReadyAt != nil {
-		return store.ErrCloudConnectionReady
-	}
-	delete(f.connections, id)
-
-	return nil
-}
-
-func (f *fakeCloudStore) RecordEvent(_ context.Context, _ string, in store.CloudEvent, _ time.Time) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.events = append(f.events, in)
-
-	return nil
-}
-
-func (f *fakeCloudStore) Events(_ context.Context, _ uint, _ string) ([]store.CloudEvent, error) {
-	return f.events, nil
-}
 
 // fakeInspector answers every inspection with what the test set, and keeps
 // the requests.
@@ -187,7 +35,7 @@ func (f *fakeInspector) Inspect(_ context.Context, in aws.InspectRequest) (aws.I
 
 type cloudFixture struct {
 	svc       *service.CloudConnections
-	store     *fakeCloudStore
+	store     *testutil.CloudStore
 	inspector *fakeInspector
 	scope     auth.Scope
 	now       time.Time
@@ -197,7 +45,7 @@ func newCloudFixture(t *testing.T) *cloudFixture {
 	t.Helper()
 
 	f := &cloudFixture{
-		store:     newFakeCloudStore(),
+		store:     testutil.NewCloudStore(),
 		inspector: &fakeInspector{},
 		scope:     auth.Scope{UserID: 42, Role: auth.RoleUser, Team: auth.Team{ID: 7, Name: "default"}},
 		now:       time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC),
@@ -236,8 +84,8 @@ func TestAnIssuedTokenIsOneHourAndOnlyItsHashIsKept(t *testing.T) {
 	assert.True(t, strings.HasPrefix(issued.Token, "ccn_"))
 	assert.Equal(t, f.now.Add(time.Hour), issued.ExpiresAt)
 	assert.Equal(t, []string{"eu-west-1", "us-east-1"}, issued.AllowedRegions)
-	assert.NotContains(t, f.store.tokens, issued.Token)
-	assert.Contains(t, f.store.tokens, auth.HashToken(issued.Token))
+	assert.NotContains(t, f.store.Tokens, issued.Token)
+	assert.Contains(t, f.store.Tokens, auth.HashToken(issued.Token))
 }
 
 func TestATokenNeedsRegionsThatLookLikeRegions(t *testing.T) {
@@ -299,7 +147,7 @@ func TestEnrollingWithAWrongTokenIsRefused(t *testing.T) {
 }
 
 func TestWithoutAControlPlanePrincipalNothingIsIssued(t *testing.T) {
-	svc := service.NewCloudConnections(newFakeCloudStore(), &fakeInspector{}, service.CloudOptions{})
+	svc := service.NewCloudConnections(testutil.NewCloudStore(), &fakeInspector{}, service.CloudOptions{})
 
 	_, err := svc.IssueToken(t.Context(), auth.Scope{Team: auth.Team{ID: 1}}, []string{"eu-west-1"})
 
@@ -419,8 +267,8 @@ func TestScriptEventsAreRecordedAgainstTheTokensConnection(t *testing.T) {
 	require.NoError(t, f.svc.RecordEvent(t.Context(), token, service.CloudStep{Step: "stack", Status: store.CloudStepStarted}))
 	require.NoError(t, f.svc.RecordEvent(t.Context(), token, service.CloudStep{Step: "stack", Status: store.CloudStepFailed, Detail: strings.Repeat("x", 600)}))
 
-	require.Len(t, f.store.events, 2)
-	assert.Len(t, f.store.events[1].Detail, 512, "a long detail is cut, not refused")
+	require.Len(t, f.store.Reported, 2)
+	assert.Len(t, f.store.Reported[1].Detail, 512, "a long detail is cut, not refused")
 
 	for _, bad := range []service.CloudStep{{Step: "", Status: "started"}, {Step: "stack", Status: "done"}, {Step: "st ack", Status: "started"}} {
 		assert.ErrorIs(t, f.svc.RecordEvent(t.Context(), token, bad), service.ErrCloudInvalid, "%+v", bad)
@@ -447,4 +295,17 @@ func TestTheHourlyCheckVisitsEveryConnectionAndOneFailureDoesNotStopTheRest(t *t
 	require.NoError(t, f.svc.CheckAll(t.Context()))
 
 	assert.Len(t, f.inspector.requests, 2)
+}
+
+func TestAScriptMayNarrowTheTokensRegionsButNeverWidenThem(t *testing.T) {
+	f := newCloudFixture(t)
+	issued, err := f.svc.IssueToken(t.Context(), f.scope, []string{"eu-west-1", "us-east-1"})
+	require.NoError(t, err)
+
+	narrowed, err := f.svc.Enroll(t.Context(), issued.Token, service.CloudAccount{ID: "123456789012", Region: "eu-west-1", Regions: []string{"us-east-1"}})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"us-east-1"}, narrowed.AllowedRegions)
+
+	_, err = f.svc.Enroll(t.Context(), issued.Token, service.CloudAccount{ID: "123456789012", Region: "eu-west-1", Regions: []string{"eu-central-1"}})
+	assert.ErrorIs(t, err, service.ErrCloudInvalid)
 }

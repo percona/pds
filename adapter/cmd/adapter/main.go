@@ -18,6 +18,7 @@ import (
 	"github.com/percona/pds/adapter/internal/agent"
 	"github.com/percona/pds/adapter/internal/api"
 	"github.com/percona/pds/adapter/internal/auth"
+	"github.com/percona/pds/adapter/internal/client/aws"
 	"github.com/percona/pds/adapter/internal/client/everest"
 	"github.com/percona/pds/adapter/internal/client/github"
 	"github.com/percona/pds/adapter/internal/client/kube"
@@ -222,17 +223,23 @@ func run() error {
 
 	directory := directoryService(identity, db, activity)
 
+	cloudConnections, err := newCloudConnections(ctx, cfg, db, logger)
+	if err != nil {
+		return err
+	}
+
 	server := api.NewServer(api.Deps{
-		Config:      cfg,
-		Version:     version,
-		Logger:      logger,
-		Auth:        api.NewSessionAuthenticator(identity, cfg.HubOperatorToken),
-		Databases:   databases,
-		Metrics:     metrics,
-		Support:     support,
-		Connections: connections,
-		Chat:        chat,
-		Activity:    activity,
+		Config:           cfg,
+		Version:          version,
+		Logger:           logger,
+		Auth:             api.NewSessionAuthenticator(identity, cfg.HubOperatorToken),
+		Databases:        databases,
+		Metrics:          metrics,
+		Support:          support,
+		Connections:      connections,
+		CloudConnections: cloudConnections,
+		Chat:             chat,
+		Activity:         activity,
 		ActivityDetails: service.NewActivityDetails(
 			activity,
 			newActivityDatabaseReader(databases),
@@ -331,6 +338,29 @@ func storeReadyChecker(db *store.Starter) api.ReadyChecker {
 
 	return db
 }
+
+// newCloudConnections builds the cloud connection service and starts its
+// hourly check. It is nil without a control plane principal, because no role in
+// a customer's account could trust this deployment, and the routes then answer
+// 501.
+func newCloudConnections(ctx context.Context, cfg config.Config, db *store.Starter, logger *slog.Logger) (*service.CloudConnections, error) {
+	if cfg.CloudPrincipalARN == "" || db == nil {
+		return nil, nil
+	}
+	inspector, err := aws.NewDefaultInspector(ctx)
+	if err != nil {
+		return nil, err
+	}
+	svc := service.NewCloudConnections(db.CloudConnections(), inspector, service.CloudOptions{
+		PrincipalARN: cfg.CloudPrincipalARN, Logger: logger,
+	})
+	go svc.Run(ctx, cloudCheckEvery)
+
+	return svc, nil
+}
+
+// cloudCheckEvery is how often every cloud connection is checked.
+const cloudCheckEvery = time.Hour
 
 // tokenTeamLookup hands agent routes the unscoped hash lookup once the
 // database is connected. A nil starter is an untyped nil so tests and a

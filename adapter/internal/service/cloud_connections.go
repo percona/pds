@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -108,6 +109,8 @@ type CloudAccount struct {
 	ID     string
 	Alias  string
 	Region string
+	// Regions, when set, narrow the token's allowed regions to these.
+	Regions []string
 }
 
 // CloudEnrollment is what the script is told to build the stack with.
@@ -132,7 +135,9 @@ type CloudStep struct {
 // UserSourceIdentity is the SourceIdentity of a call made for a person. The
 // trust policy matches pds-user-* and pds-job-*, and AWS wants six literal
 // characters before a wildcard and only letters, digits and +=,.@_- anywhere.
-func UserSourceIdentity(userID uint) string { return "pds-user-" + strconv.FormatUint(uint64(userID), 10) }
+func UserSourceIdentity(userID uint) string {
+	return "pds-user-" + strconv.FormatUint(uint64(userID), 10)
+}
 
 // JobSourceIdentity is the SourceIdentity of a call made by a background job.
 func JobSourceIdentity(job string) string { return "pds-job-" + job }
@@ -180,6 +185,11 @@ func (c *CloudConnections) Enroll(ctx context.Context, token string, account Clo
 	if len(account.Alias) > 64 || (account.Alias != "" && !cloudAlias.MatchString(account.Alias)) {
 		return CloudEnrollment{}, fmt.Errorf("%w: the account alias is not valid", ErrCloudInvalid)
 	}
+	hash := auth.HashToken(token)
+	regions, err := c.narrowRegions(ctx, hash, account.Regions)
+	if err != nil {
+		return CloudEnrollment{}, err
+	}
 	id, err := randomHex(6)
 	if err != nil {
 		return CloudEnrollment{}, err
@@ -189,8 +199,8 @@ func (c *CloudConnections) Enroll(ctx context.Context, token string, account Clo
 		return CloudEnrollment{}, err
 	}
 	row, err := c.store.Enroll(ctx, store.CloudEnrollment{
-		TokenHash: auth.HashToken(token), AccountID: account.ID, Alias: account.Alias,
-		StackRegion: account.Region, NewID: id, NewExternalID: external, NewStackName: "pds-" + id,
+		TokenHash: hash, AccountID: account.ID, Alias: account.Alias,
+		StackRegion: account.Region, AllowedRegions: regions, NewID: id, NewExternalID: external, NewStackName: "pds-" + id,
 	}, c.opts.Now())
 	if err != nil {
 		return CloudEnrollment{}, err
@@ -201,6 +211,25 @@ func (c *CloudConnections) Enroll(ctx context.Context, token string, account Clo
 		AllowedRegions: row.AllowedRegions, PrincipalARN: c.opts.PrincipalARN,
 		ControlPlaneRoleARN: cloudRoleARN(row.AccountID, row.ID, "control-plane"), TemplateVersion: CloudTemplateVersion,
 	}, nil
+}
+
+// narrowRegions checks that the regions a script asked for are among the
+// token's, so a script can limit a connection and never widen it.
+func (c *CloudConnections) narrowRegions(ctx context.Context, hash string, asked []string) ([]string, error) {
+	if len(asked) == 0 {
+		return nil, nil
+	}
+	token, err := c.store.TokenTeam(ctx, hash, c.opts.Now())
+	if err != nil {
+		return nil, err
+	}
+	for _, region := range asked {
+		if !slices.Contains(token.AllowedRegions, region) {
+			return nil, fmt.Errorf("%w: %q is not one of the regions chosen for this command", ErrCloudInvalid, region)
+		}
+	}
+
+	return asked, nil
 }
 
 // RecordEvent keeps a step the script reported. The script's word is a hint:

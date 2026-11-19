@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -53,9 +54,12 @@ type Config struct {
 	// is its issuer. Empty means HubPublicURL. It differs where the address spokes use is not
 	// one a person's browser or agent can use as an issuer, as in the kind lab.
 	HubOAuthIssuer string
-	HubGitURL      string
-	HubGitHubOrg   string
-	HubGitHubToken string
+	// CloudPrincipalARN is the role or user the control plane assumes customer roles
+	// from, and the one their trust policies name. Empty turns cloud connections off.
+	CloudPrincipalARN string
+	HubGitURL         string
+	HubGitHubOrg      string
+	HubGitHubToken    string
 	// The GitHub App credentials replace HubGitHubToken. The private key is
 	// PEM text, read from a value or a file.
 	HubGitHubAppID             string
@@ -449,6 +453,7 @@ func Load() (Config, error) {
 		HubURL:                     strings.TrimSpace(lookup("HUB_URL", "")),
 		HubPublicURL:               strings.TrimSpace(lookup("HUB_PUBLIC_URL", "")),
 		HubOAuthIssuer:             strings.TrimSpace(lookup("HUB_OAUTH_ISSUER", "")),
+		CloudPrincipalARN:          strings.TrimSpace(lookup("HUB_CLOUD_PRINCIPAL_ARN", "")),
 		HubGitURL:                  strings.TrimSpace(lookup("HUB_GIT_URL", "")),
 		HubGitHubOrg:               strings.TrimSpace(lookup("HUB_GITHUB_ORG", "")),
 		HubGitHubToken:             lookup("HUB_GITHUB_TOKEN", ""),
@@ -491,6 +496,10 @@ func Load() (Config, error) {
 		if err := validateHubURL(check.name, check.value, check.allowPath); err != nil {
 			return Config{}, err
 		}
+	}
+
+	if cfg.CloudPrincipalARN != "" && !cloudPrincipalARN.MatchString(cfg.CloudPrincipalARN) {
+		return Config{}, errors.New("HUB_CLOUD_PRINCIPAL_ARN must be the ARN of an IAM role or user, never an account root")
 	}
 
 	// An absent variable is an adapter with no database. A variable that is
@@ -1066,3 +1075,7 @@ func validateDatabaseURL(raw string) error {
 
 	return nil
 }
+
+// cloudPrincipalARN is a role or user ARN. An account root is refused: a trust
+// policy that names one lets anyone in that account assume the role.
+var cloudPrincipalARN = regexp.MustCompile(`^arn:aws:iam::[0-9]{12}:(role|user)/[A-Za-z0-9+=,.@_/-]+$`)
