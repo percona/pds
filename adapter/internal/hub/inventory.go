@@ -85,10 +85,33 @@ type Heartbeat struct {
 	// predates it, which says nothing about its windows. The hub reads it and
 	// drops it before the beat is kept.
 	Support *HeartbeatSupport `json:"support,omitempty"`
+	// Release is the state of the pds HelmRelease, for an environment whose
+	// release the control plane keeps in Git. Nil means the agent does not report
+	// one: a connected environment has no such release, and an older agent
+	// predates it.
+	Release *HeartbeatRelease `json:"release,omitempty"`
 	// SecretResults answers the secret reads the previous reply asked for. The
 	// handler takes them off the beat before anything else sees it, because
 	// they carry credentials.
 	SecretResults []SecretResult `json:"secretResults,omitempty"`
+}
+
+// States of the pds HelmRelease an agent reports.
+const (
+	ReleaseReady      = "ready"
+	ReleaseUpgrading  = "upgrading"
+	ReleaseRolledBack = "rolled_back"
+)
+
+// HeartbeatRelease is what Flux says of the environment's pds release.
+type HeartbeatRelease struct {
+	// Version is the chart version the release runs now.
+	Version string `json:"version"`
+	// Attempted is the version the last upgrade tried, when it is not Version.
+	Attempted string `json:"attempted,omitempty"`
+	State     string `json:"state"`
+	// At is when the hub received the report, set by the hub.
+	At time.Time `json:"-"`
 }
 
 // Alert severities after the agent maps the severity label.
@@ -450,6 +473,23 @@ func (i *Inventory) MonitoringAddress(name string) string {
 	defer i.mu.Unlock()
 
 	return i.environments[name].last.MonitoringAddress
+}
+
+// Release returns the release state an environment reported on its last beat.
+func (i *Inventory) Release(name string) (HeartbeatRelease, bool) {
+	if i == nil {
+		return HeartbeatRelease{}, false
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	last := i.environments[name].last
+	if last.Release == nil {
+		return HeartbeatRelease{}, false
+	}
+	release := *last.Release
+	release.At = last.At.UTC()
+
+	return release, true
 }
 
 // Forget drops an environment. A row appears the moment a token is minted, so
