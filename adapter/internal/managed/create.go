@@ -20,6 +20,7 @@ const (
 	stepAssumeRole    = "assume-role"
 	stepCreateStack   = "create-stack"
 	stepWaitStack     = "wait-stack"
+	stepCreateBucket  = "create-bucket"
 	stepOpenAccess    = "open-access"
 	stepInstallFlux   = "install-flux"
 	stepWriteRelease  = "write-release"
@@ -30,7 +31,7 @@ const (
 
 // CreateStepNames lists the create steps in the order they run.
 var CreateStepNames = []string{
-	stepAssumeRole, stepCreateStack, stepWaitStack, stepOpenAccess, stepInstallFlux,
+	stepAssumeRole, stepCreateStack, stepWaitStack, stepCreateBucket, stepOpenAccess, stepInstallFlux,
 	stepWriteRelease, stepJoin, stepCloseAccess, stepWaitHeartbeat,
 }
 
@@ -38,7 +39,7 @@ var CreateStepNames = []string{
 // a name that is not a create step.
 func Phase(step string) string {
 	switch step {
-	case stepAssumeRole, stepCreateStack, stepWaitStack:
+	case stepAssumeRole, stepCreateStack, stepWaitStack, stepCreateBucket:
 		return "Creating network and Kubernetes cluster"
 	case stepOpenAccess:
 		return "Connecting to the environment"
@@ -76,6 +77,8 @@ type Connections interface {
 // is the implementation, and tests fake it.
 type Cloud interface {
 	CheckRole(ctx context.Context, t aws.Target) error
+	Preflight(ctx context.Context, t aws.Target, needs aws.Needs) (aws.Refusal, bool)
+	EnsureBucket(ctx context.Context, t aws.Target, bucket string, tags map[string]string) error
 	EnsureStack(ctx context.Context, t aws.Target, spec aws.StackSpec) error
 	DeleteStack(ctx context.Context, t aws.Target) error
 	Stack(ctx context.Context, t aws.Target) (aws.StackState, error)
@@ -101,6 +104,8 @@ type Join struct {
 	GitURL         string
 	GitIdentity    string
 	GitIdentityPub string
+	// Namespace is where the environment's databases live.
+	Namespace string
 }
 
 // Cluster is the environment's Kubernetes API.
@@ -231,6 +236,7 @@ func CreateKind(d Deps) provision.Kind {
 		stepAssumeRole:    d.assumeRole,
 		stepCreateStack:   d.createStack,
 		stepWaitStack:     d.waitStack,
+		stepCreateBucket:  d.createBucket,
 		stepOpenAccess:    func(ctx context.Context, env provision.Env, s scope) error { _, err := d.open(ctx, env, s); return err },
 		stepInstallFlux:   d.installFlux,
 		stepWriteRelease:  d.writeRelease,
@@ -281,6 +287,27 @@ func (d Deps) assumeRole(ctx context.Context, _ provision.Env, s scope) error {
 		return fmt.Errorf("%w: the connection is %s", provision.ErrConnectionUnavailable, s.conn.State)
 	}
 	if err := d.Cloud.CheckRole(ctx, s.target); err != nil {
+		return s.fail(err)
+	}
+	if refusal, refused := d.Cloud.Preflight(ctx, s.target, aws.Needs{VCPUs: NodeVCPUs}); refused {
+		return provision.Permanent(errors.New("the preflight found the account cannot build the environment"), refusal.Sentence(s.where))
+	}
+
+	return nil
+}
+
+// NodeVCPUs is what the template's default node group takes: three m6i.xlarge
+// nodes of four vCPUs. The preflight compares the account's vCPU quota with it.
+const NodeVCPUs = 12
+
+// bucketName is the environment's backup bucket. The pds prefix and the account
+// are what the control plane's role is allowed to create buckets under.
+func bucketName(s scope) string {
+	return "pds-" + s.conn.AccountID + "-" + s.rec.ID
+}
+
+func (d Deps) createBucket(ctx context.Context, _ provision.Env, s scope) error {
+	if err := d.Cloud.EnsureBucket(ctx, s.target, bucketName(s), map[string]string{"percona.com/pds": s.rec.ID}); err != nil {
 		return s.fail(err)
 	}
 
@@ -413,6 +440,7 @@ func (d Deps) writeRelease(ctx context.Context, _ provision.Env, s scope) error 
 	files, err := ReleaseFiles(s.rec.Name, ReleaseInput{
 		ChartVersion: d.Settings.ChartVersion, HubURL: d.Settings.HubURL, EnvironmentName: s.rec.Name,
 		ImageRepository: d.Settings.ImageRepository, ImageTag: d.Settings.ImageTag,
+		Bucket: bucketName(s), Region: s.rec.Region,
 	})
 	if err != nil {
 		return provision.Permanent(err, genericSentence)

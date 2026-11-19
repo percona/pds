@@ -31,7 +31,7 @@ spec:
         enabled: false
         operator:
           enabled: false
-      everestBackupStorage: ""
+      everestBackupStorage: s3
       everestURL: http://everest.everest-system.svc.cluster.local:8080
       hub:
         agentTokenExistingSecret: pds-hub-agent-token
@@ -47,8 +47,16 @@ spec:
         preflightChecks: false
     stack:
       enabled: true
+      minio:
+        enabled: false
       pmm:
         subchart: false
+      s3:
+        bucket: pds-111122223333-0123456789ab
+        enabled: true
+        existingSecret: pds-s3
+        region: eu-west-1
+        storageName: s3
     ui:
       enabled: false
       replicaCount: 0

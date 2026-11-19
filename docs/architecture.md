@@ -747,13 +747,25 @@ connected one. `internal/managed` holds the create run, and
   its volumes. The stack records `managed.TemplateRevision` as a tag and an
   output, and a test holds it equal to `managedTemplate.revision` in
   `charts/pds/compatibility.yaml`.
-- **Steps.** `assume-role`, `create-stack`, `wait-stack`, `open-access`,
-  `install-flux`, `write-release`, `join`, `close-access` and `wait-heartbeat`,
-  shown under four phases: Creating network and Kubernetes cluster, Connecting
+- **Steps.** `assume-role`, `create-stack`, `wait-stack`, `create-bucket`,
+  `open-access`, `install-flux`, `write-release`, `join`, `close-access` and
+  `wait-heartbeat`, shown under four phases: Creating network and Kubernetes cluster, Connecting
   to the environment, Installing PDS, and Finishing. A failed stack is reported
   once and left in place. The next attempt deletes it and makes it again,
   because CloudFormation cannot resume a failed create. An environment that
-  never reports fails in Finishing, and Retry only waits again.
+  never reports fails in Finishing, and Retry only waits again. `assume-role`
+also runs a best-effort preflight: a Region the account has not enabled, or a
+Service Quotas limit below what one environment takes (the VPC, internet
+gateway, NAT gateway and Elastic IP quotas, and 12 vCPUs for the default node
+group), fails the step before anything exists. A read that fails, or a role
+that cannot be assumed, never blocks the run, and a limit is compared with what
+one environment needs and not with what the account already uses.
+- **Worker.** Every replica claims create runs under a lease and sweeps once a
+  minute: it closes the Access window of a run that is no longer live, resumes
+  runs paused on a connection that works again, and prunes old runs.
+  `HUB_PROVISION_LEASE_TTL`, `HUB_PROVISION_MAX_ATTEMPTS` and
+  `HUB_PROVISION_WINDOW_MAX_AGE` tune them. A request that arrives before the
+  database has connected is refused as not connected.
 - **Access window.** The public endpoint is open only to the declared outgoing
   addresses, with the control plane's access entry, while a step needs the
   Kubernetes API. A step that needs it opens the window again, since a run that
@@ -770,6 +782,29 @@ connected one. `internal/managed` holds the create run, and
   golden after an intended change. The hub's Git write credentials act as
   cluster-admin on every managed environment it serves. The join script refuses
   an environment whose `pds` release a HelmRelease owns.
+- **Flux and the join.** `install-flux` applies the Flux manifest of
+  `managed.FluxVersion` only when its SHA-256 matches `managed.PinnedFluxDigests`
+  (the digest the join script pins too, held equal by a test), waits for the
+  source, kustomize and Helm controllers, and creates the accounts that apply
+  what Git holds: `pds-helm` with cluster-admin for the release, and narrower
+  ones for each Kustomization. `join` drops every credential an earlier attempt
+  minted and mints one agent credential, so a rerun leaves one live token, then
+  writes it into the Secret the release names, writes the read-only clone key,
+  and points Flux at the environment's repository with three Kustomizations:
+  `instances` (`clusters/<environment>/instances`, into the databases'
+  namespace), `platform` (monitoring, from `platform/pmm`) and `pds` (the
+  release, from `platform/pds`). The control plane reaches the Kubernetes API
+  with a one-minute EKS token over the Access window and keeps no kubeconfig.
+  A rerun of `join` after the agent is running changes the token in the Secret,
+  which a running agent reads only when its Pod restarts.
+- **Backups.** `create-bucket` makes `pds-<account>-<environment id>` in the
+  environment's Region, blocks public access and tags it with
+  `percona.com/pds`. It is outside the stack because a stack cannot delete a
+  bucket that holds objects. The release registers the bucket as the BackupStorage
+  `s3`, reading its access key from the Secret `pds-s3`. The control plane never makes
+  that key: it would pass through a stack output or its logs, and the connection's
+  role has no IAM user permissions. Until the Secret exists in the environment,
+  the BackupStorage has no key to read.
 - **Refusals.** AWS errors become a step that fails with a typed reason (quota,
   permission, region not enabled) and one sentence that names the AWS account
   and the Kubernetes cluster and shows no raw AWS text. Throttling and role

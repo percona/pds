@@ -63,6 +63,9 @@ type Config struct {
 	// endpoint while an Access window is open. Empty refuses managed
 	// environments, and 0.0.0.0/0 is accepted when the operator chooses it.
 	ManagedOutgoingCIDRs []string
+	// ManagedChartVersion is the published pds chart a managed environment
+	// installs. Empty refuses managed environments.
+	ManagedChartVersion string
 	// ProvisionLeaseTTL is how long a provisioning run's lease lasts unrenewed.
 	ProvisionLeaseTTL time.Duration
 	// ProvisionMaxAttempts caps the automatic attempts of one step.
@@ -1092,8 +1095,6 @@ func validateDatabaseURL(raw string) error {
 	return nil
 }
 
-// cloudPrincipalARN is a role or user ARN. An account root is refused: a trust
-// policy that names one lets anyone in that account assume the role.
 // loadProvisioning reads the settings of provisioning runs and the Access
 // window. Each value that is set must be usable: a typo would otherwise turn
 // into a run that never gets a lease or a window that never closes.
@@ -1123,6 +1124,14 @@ func loadProvisioning(cfg *Config, lookup func(key, fallback string) string) err
 		*d.into = value
 	}
 
+	// The version is written into a HelmRelease, so only a release number passes.
+	if version := strings.TrimSpace(lookup("HUB_MANAGED_CHART_VERSION", "")); version != "" {
+		if !chartVersion.MatchString(version) {
+			return fmt.Errorf("HUB_MANAGED_CHART_VERSION: %q is not a release such as 0.1.0", version)
+		}
+		cfg.ManagedChartVersion = version
+	}
+
 	attempts, err := strconv.Atoi(lookup("HUB_PROVISION_MAX_ATTEMPTS", "5"))
 	if err != nil || attempts < 1 {
 		return errors.New("HUB_PROVISION_MAX_ATTEMPTS must be a whole number of at least 1")
@@ -1132,4 +1141,8 @@ func loadProvisioning(cfg *Config, lookup func(key, fallback string) string) err
 	return nil
 }
 
+var chartVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`)
+
+// cloudPrincipalARN is a role or user ARN. An account root is refused: a trust
+// policy that names one lets anyone in that account assume the role.
 var cloudPrincipalARN = regexp.MustCompile(`^arn:aws:iam::[0-9]{12}:(role|user)/[A-Za-z0-9+=,.@_/-]+$`)

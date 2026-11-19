@@ -52,7 +52,7 @@ func (f *fakeCFN) DescribeStackEvents(context.Context, *cloudformation.DescribeS
 type fakeEKS struct {
 	cluster       ekstypes.Cluster
 	describeErr   error
-	updates       []*eks.UpdateClusterConfigInput // allow-legacy-name: the AWS SDK names it so
+	updates       []*eks.UpdateClusterConfigInput
 	entries       []*eks.CreateAccessEntryInput
 	entryErr      error
 	associated    []*eks.AssociateAccessPolicyInput
@@ -61,22 +61,22 @@ type fakeEKS struct {
 	describeCalls int
 }
 
-func (f *fakeEKS) DescribeCluster(context.Context, *eks.DescribeClusterInput, ...func(*eks.Options)) (*eks.DescribeClusterOutput, error) { // allow-legacy-name: the AWS SDK names it so
+func (f *fakeEKS) DescribeCluster(context.Context, *eks.DescribeClusterInput, ...func(*eks.Options)) (*eks.DescribeClusterOutput, error) {
 	f.describeCalls++
 	if f.describeErr != nil {
 		return nil, f.describeErr
 	}
 	cluster := f.cluster
 
-	return &eks.DescribeClusterOutput{Cluster: &cluster}, nil // allow-legacy-name: the AWS SDK names it so
+	return &eks.DescribeClusterOutput{Cluster: &cluster}, nil
 }
 
-func (f *fakeEKS) UpdateClusterConfig(_ context.Context, in *eks.UpdateClusterConfigInput, _ ...func(*eks.Options)) (*eks.UpdateClusterConfigOutput, error) { // allow-legacy-name: the AWS SDK names it so
+func (f *fakeEKS) UpdateClusterConfig(_ context.Context, in *eks.UpdateClusterConfigInput, _ ...func(*eks.Options)) (*eks.UpdateClusterConfigOutput, error) {
 	f.updates = append(f.updates, in)
 	f.cluster.ResourcesVpcConfig.EndpointPublicAccess = in.ResourcesVpcConfig.EndpointPublicAccess != nil && *in.ResourcesVpcConfig.EndpointPublicAccess
 	f.cluster.ResourcesVpcConfig.PublicAccessCidrs = in.ResourcesVpcConfig.PublicAccessCidrs
 
-	return &eks.UpdateClusterConfigOutput{Update: &ekstypes.Update{Id: sdkaws.String("u1")}}, nil // allow-legacy-name: the AWS SDK names it so
+	return &eks.UpdateClusterConfigOutput{Update: &ekstypes.Update{Id: sdkaws.String("u1")}}, nil
 }
 
 func (f *fakeEKS) DescribeUpdate(context.Context, *eks.DescribeUpdateInput, ...func(*eks.Options)) (*eks.DescribeUpdateOutput, error) {
@@ -114,7 +114,7 @@ func newInfra(c *fakeCFN, e *fakeEKS) *Infra {
 
 var target = Target{
 	RoleARN: "arn:aws:iam::111122223333:role/pds/abc/pds-abc-control-plane", Region: "eu-west-1",
-	StackName: "pds-env-0123456789ab", EKSName: "pds-0123456789ab", // allow-legacy-name: the AWS SDK names it so
+	StackName: "pds-env-0123456789ab", EKSName: "pds-0123456789ab",
 }
 
 func apiErr(code string) error { return &smithy.GenericAPIError{Code: code, Message: code} }
@@ -197,9 +197,9 @@ func TestStackStatusClasses(t *testing.T) {
 	}
 }
 
-func newCluster() ekstypes.Cluster { // allow-legacy-name: the AWS SDK names it so
+func newEKSCluster() ekstypes.Cluster {
 	return ekstypes.Cluster{
-		Name: sdkaws.String("pds-0123456789ab"), Status: ekstypes.ClusterStatusActive, // allow-legacy-name: the AWS SDK names it so
+		Name: sdkaws.String("pds-0123456789ab"), Status: ekstypes.ClusterStatusActive,
 		Endpoint:             sdkaws.String("https://ABC.gr7.eu-west-1.eks.amazonaws.com"),
 		CertificateAuthority: &ekstypes.Certificate{Data: sdkaws.String(base64.StdEncoding.EncodeToString([]byte("ca")))},
 		ResourcesVpcConfig:   &ekstypes.VpcConfigResponse{EndpointPrivateAccess: true},
@@ -207,17 +207,17 @@ func newCluster() ekstypes.Cluster { // allow-legacy-name: the AWS SDK names it 
 }
 
 func TestOpenAccessAddsTheEntryAndOpensTheEndpointToTheDeclaredAddresses(t *testing.T) {
-	kube := &fakeEKS{cluster: newCluster()} // allow-legacy-name: the AWS SDK names it so
+	kube := &fakeEKS{cluster: newEKSCluster()}
 
 	got, err := newInfra(&fakeCFN{}, kube).OpenAccess(context.Background(), target, []string{"203.0.113.7/32"})
 	require.NoError(t, err)
 
 	require.Len(t, kube.entries, 1)
 	assert.Equal(t, target.RoleARN, sdkaws.ToString(kube.entries[0].PrincipalArn))
-	assert.Equal(t, "pds-0123456789ab", sdkaws.ToString(kube.entries[0].ClusterName)) // allow-legacy-name: the AWS SDK names it so
+	assert.Equal(t, "pds-0123456789ab", sdkaws.ToString(kube.entries[0].ClusterName))
 	require.Len(t, kube.associated, 1)
-	assert.Contains(t, sdkaws.ToString(kube.associated[0].PolicyArn), "AmazonEKSClusterAdminPolicy") // allow-legacy-name: the AWS SDK names it so
-	assert.Equal(t, ekstypes.AccessScopeTypeCluster, kube.associated[0].AccessScope.Type)            // allow-legacy-name: the AWS SDK names it so
+	assert.Contains(t, sdkaws.ToString(kube.associated[0].PolicyArn), "AmazonEKSClusterAdminPolicy")
+	assert.Equal(t, ekstypes.AccessScopeTypeCluster, kube.associated[0].AccessScope.Type)
 
 	require.Len(t, kube.updates, 1)
 	vpc := kube.updates[0].ResourcesVpcConfig
@@ -229,7 +229,7 @@ func TestOpenAccessAddsTheEntryAndOpensTheEndpointToTheDeclaredAddresses(t *test
 }
 
 func TestOpenAccessIsIdempotent(t *testing.T) {
-	cluster := newCluster() // allow-legacy-name: the AWS SDK names it so
+	cluster := newEKSCluster()
 	cluster.ResourcesVpcConfig.EndpointPublicAccess = true
 	cluster.ResourcesVpcConfig.PublicAccessCidrs = []string{"203.0.113.7/32"}
 	kube := &fakeEKS{cluster: cluster, entryErr: apiErr("ResourceInUseException")}
@@ -240,7 +240,7 @@ func TestOpenAccessIsIdempotent(t *testing.T) {
 }
 
 func TestCloseAccessChecksTheEndpointThenClosesItAndDropsTheEntry(t *testing.T) {
-	cluster := newCluster() // allow-legacy-name: the AWS SDK names it so
+	cluster := newEKSCluster()
 	cluster.ResourcesVpcConfig.EndpointPublicAccess = true
 	cluster.ResourcesVpcConfig.PublicAccessCidrs = []string{"203.0.113.7/32"}
 	kube := &fakeEKS{cluster: cluster}
@@ -257,7 +257,7 @@ func TestCloseAccessChecksTheEndpointThenClosesItAndDropsTheEntry(t *testing.T) 
 }
 
 func TestCloseAccessLeavesAClosedEndpointAndAMissingEntry(t *testing.T) {
-	kube := &fakeEKS{cluster: newCluster(), deleteErr: apiErr("ResourceNotFoundException")} // allow-legacy-name: the AWS SDK names it so
+	kube := &fakeEKS{cluster: newEKSCluster(), deleteErr: apiErr("ResourceNotFoundException")}
 
 	note, err := newInfra(&fakeCFN{}, kube).CloseAccess(context.Background(), target)
 	require.NoError(t, err)
@@ -265,7 +265,7 @@ func TestCloseAccessLeavesAClosedEndpointAndAMissingEntry(t *testing.T) {
 	assert.Contains(t, note, "already private")
 }
 
-func TestCloseAccessOnAClusterThatIsGoneRecordsIt(t *testing.T) { // allow-legacy-name: the AWS SDK names it so
+func TestCloseAccessWhenTheEKSControlPlaneIsGoneRecordsIt(t *testing.T) {
 	kube := &fakeEKS{describeErr: apiErr("ResourceNotFoundException")}
 
 	note, err := newInfra(&fakeCFN{}, kube).CloseAccess(context.Background(), target)
@@ -273,7 +273,7 @@ func TestCloseAccessOnAClusterThatIsGoneRecordsIt(t *testing.T) { // allow-legac
 	assert.Contains(t, note, "no longer exists")
 }
 
-func TestKubeTokenIsASignedCallerIdentityRequestForTheCluster(t *testing.T) { // allow-legacy-name: the AWS SDK names it so
+func TestKubeTokenIsASignedCallerIdentityRequestForTheEKSCluster(t *testing.T) {
 	token, err := newInfra(&fakeCFN{}, &fakeEKS{}).KubeToken(context.Background(), target)
 	require.NoError(t, err)
 

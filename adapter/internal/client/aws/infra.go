@@ -15,8 +15,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/cloudformation"
 	cfntypes "github.com/aws/aws-sdk-go-v2/service/cloudformation/types"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/servicequotas"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go/middleware"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
@@ -24,7 +27,7 @@ import (
 
 // adminPolicy is the access policy the control plane holds for as long
 // as an Access window is open.
-const adminPolicy = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy" // allow-legacy-name: the AWS SDK names it so
+const adminPolicy = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
 
 // tokenPrefix and tokenLifetime are those of an EKS bearer token: a presigned
 // GetCallerIdentity request that EKS replays to learn who is calling.
@@ -95,7 +98,7 @@ type cfnAPI interface {
 }
 
 type eksAPI interface {
-	DescribeCluster(context.Context, *eks.DescribeClusterInput, ...func(*eks.Options)) (*eks.DescribeClusterOutput, error) // allow-legacy-name: the AWS SDK names it so
+	DescribeCluster(context.Context, *eks.DescribeClusterInput, ...func(*eks.Options)) (*eks.DescribeClusterOutput, error)
 	UpdateClusterConfig(context.Context, *eks.UpdateClusterConfigInput, ...func(*eks.Options)) (*eks.UpdateClusterConfigOutput, error)
 	DescribeUpdate(context.Context, *eks.DescribeUpdateInput, ...func(*eks.Options)) (*eks.DescribeUpdateOutput, error)
 	CreateAccessEntry(context.Context, *eks.CreateAccessEntryInput, ...func(*eks.Options)) (*eks.CreateAccessEntryOutput, error)
@@ -109,6 +112,11 @@ type Infra struct {
 	assume func(context.Context, Target) (sdkaws.Config, error)
 	cfn    func(sdkaws.Config) cfnAPI
 	eks    func(sdkaws.Config) eksAPI
+	// quotas, regions and buckets are the best-effort reads and the bucket the
+	// create steps use besides the stack.
+	quotas  func(sdkaws.Config) quotasAPI
+	regions func(sdkaws.Config) regionsAPI
+	buckets func(sdkaws.Config) bucketAPI
 	// poll is how often a wait looks again.
 	poll time.Duration
 }
@@ -116,10 +124,13 @@ type Infra struct {
 // NewInfra builds Infra on the control plane's own identity.
 func NewInfra(base sdkaws.Config) *Infra {
 	return &Infra{
-		assume: func(ctx context.Context, t Target) (sdkaws.Config, error) { return assumeRole(ctx, base, t) },
-		cfn:    func(cfg sdkaws.Config) cfnAPI { return cloudformation.NewFromConfig(cfg) },
-		eks:    func(cfg sdkaws.Config) eksAPI { return eks.NewFromConfig(cfg) },
-		poll:   15 * time.Second,
+		assume:  func(ctx context.Context, t Target) (sdkaws.Config, error) { return assumeRole(ctx, base, t) },
+		cfn:     func(cfg sdkaws.Config) cfnAPI { return cloudformation.NewFromConfig(cfg) },
+		eks:     func(cfg sdkaws.Config) eksAPI { return eks.NewFromConfig(cfg) },
+		quotas:  func(cfg sdkaws.Config) quotasAPI { return servicequotas.NewFromConfig(cfg) },
+		regions: func(cfg sdkaws.Config) regionsAPI { return ec2.NewFromConfig(cfg) },
+		buckets: func(cfg sdkaws.Config) bucketAPI { return s3.NewFromConfig(cfg) },
+		poll:    15 * time.Second,
 	}
 }
 
@@ -259,15 +270,15 @@ func (i *Infra) OpenAccess(ctx context.Context, t Target, cidrs []string) (Clust
 	client := i.eks(session)
 
 	if _, err := client.CreateAccessEntry(ctx, &eks.CreateAccessEntryInput{
-		ClusterName:  &t.EKSName, // allow-legacy-name: the AWS SDK names it so
+		ClusterName:  &t.EKSName,
 		PrincipalArn: &t.RoleARN, Type: sdkaws.String("STANDARD"),
 	}); err != nil && errorCode(err) != "ResourceInUseException" {
 		return ClusterAccess{}, fmt.Errorf("create access entry: %w", err)
 	}
 	if _, err := client.AssociateAccessPolicy(ctx, &eks.AssociateAccessPolicyInput{
-		ClusterName:  &t.EKSName, // allow-legacy-name: the AWS SDK names it so
+		ClusterName:  &t.EKSName,
 		PrincipalArn: &t.RoleARN, PolicyArn: sdkaws.String(adminPolicy),
-		AccessScope: &ekstypes.AccessScope{Type: ekstypes.AccessScopeTypeCluster}, // allow-legacy-name: the AWS SDK names it so
+		AccessScope: &ekstypes.AccessScope{Type: ekstypes.AccessScopeTypeCluster},
 	}); err != nil {
 		return ClusterAccess{}, fmt.Errorf("associate access policy: %w", err)
 	}
@@ -320,7 +331,7 @@ func (i *Infra) CloseAccess(ctx context.Context, t Target) (string, error) {
 		did = append(did, "the endpoint was already private")
 	}
 	if _, err := client.DeleteAccessEntry(ctx, &eks.DeleteAccessEntryInput{
-		ClusterName:  &t.EKSName, // allow-legacy-name: the AWS SDK names it so
+		ClusterName:  &t.EKSName,
 		PrincipalArn: &t.RoleARN,
 	}); err != nil {
 		if errorCode(err) != "ResourceNotFoundException" {
@@ -334,7 +345,7 @@ func (i *Infra) CloseAccess(ctx context.Context, t Target) (string, error) {
 }
 
 func describe(ctx context.Context, client eksAPI, name string) (*ekstypes.Cluster, error) {
-	out, err := client.DescribeCluster(ctx, &eks.DescribeClusterInput{Name: &name}) // allow-legacy-name: the AWS SDK names it so
+	out, err := client.DescribeCluster(ctx, &eks.DescribeClusterInput{Name: &name})
 	if err != nil {
 		return nil, fmt.Errorf("describe cluster: %w", err)
 	}

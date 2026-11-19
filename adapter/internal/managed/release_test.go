@@ -21,6 +21,8 @@ func releaseInput() managed.ReleaseInput {
 		EnvironmentName: "orders",
 		ImageRepository: "ghcr.io/percona/pds-adapter",
 		ImageTag:        "0.1.0",
+		Bucket:          "pds-111122223333-0123456789ab",
+		Region:          "eu-west-1",
 	}
 }
 
@@ -64,6 +66,8 @@ func TestRenderReleaseRefusesWhatItCannotInstall(t *testing.T) {
 		"no hub url":       func(in *managed.ReleaseInput) { in.HubURL = "" },
 		"no environment":   func(in *managed.ReleaseInput) { in.EnvironmentName = "" },
 		"no image":         func(in *managed.ReleaseInput) { in.ImageRepository = "" },
+		"no bucket":        func(in *managed.ReleaseInput) { in.Bucket = "" },
+		"no region":        func(in *managed.ReleaseInput) { in.Region = "" },
 	} {
 		in := releaseInput()
 		mutate(&in)

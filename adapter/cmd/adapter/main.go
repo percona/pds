@@ -228,18 +228,24 @@ func run() error {
 		return err
 	}
 
+	managedEnvironments, err := newManagedEnvironments(ctx, cfg, db, cloudConnections, databases, logger)
+	if err != nil {
+		return err
+	}
+
 	server := api.NewServer(api.Deps{
-		Config:           cfg,
-		Version:          version,
-		Logger:           logger,
-		Auth:             api.NewSessionAuthenticator(identity, cfg.HubOperatorToken),
-		Databases:        databases,
-		Metrics:          metrics,
-		Support:          support,
-		Connections:      connections,
-		CloudConnections: cloudConnections,
-		Chat:             chat,
-		Activity:         activity,
+		Config:              cfg,
+		Version:             version,
+		Logger:              logger,
+		Auth:                api.NewSessionAuthenticator(identity, cfg.HubOperatorToken),
+		Databases:           databases,
+		Metrics:             metrics,
+		Support:             support,
+		Connections:         connections,
+		CloudConnections:    cloudConnections,
+		ManagedEnvironments: managedEnvironments,
+		Chat:                chat,
+		Activity:            activity,
 		ActivityDetails: service.NewActivityDetails(
 			activity,
 			newActivityDatabaseReader(databases),
