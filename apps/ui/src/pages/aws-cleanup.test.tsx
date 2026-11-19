@@ -116,9 +116,14 @@ describe("AWS cleanup guide", () => {
       "backup bucket",
       "backup IAM user",
       "EBS CSI role",
+      "EBS volumes",
     ]) {
       expect(text).toContain(resource);
     }
+    // Volumes are found by the Kubernetes cluster tag, not a list saved first, so
+    // one a database added late is deleted too, and one still attached is not.
+    expect(text).toContain("kubernetes.io/cluster/prod-east");
+    expect(text).toMatch(/only volumes that are available/);
     expect(text).toMatch(/every database/);
     expect(text).toMatch(/every backup/);
     expect(text).toMatch(/keep a copy of the backups/);
