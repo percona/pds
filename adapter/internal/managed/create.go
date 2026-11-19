@@ -19,6 +19,7 @@ const KindCreate = "create"
 // The names of the create steps, in order.
 const (
 	stepAssumeRole    = "assume-role"
+	stepClearStack    = "clear-stack"
 	stepCreateStack   = "create-stack"
 	stepWaitStack     = "wait-stack"
 	stepCreateBucket  = "create-bucket"
@@ -40,7 +41,7 @@ var CreateStepNames = []string{
 // a name that is not a create step.
 func Phase(step string) string {
 	switch step {
-	case stepAssumeRole, stepCreateStack, stepWaitStack, stepCreateBucket:
+	case stepAssumeRole, stepClearStack, stepCreateStack, stepWaitStack, stepCreateBucket:
 		return "Creating network and Kubernetes cluster"
 	case stepOpenAccess:
 		return "Connecting to the environment"
