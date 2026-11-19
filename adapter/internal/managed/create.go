@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/percona/pds/adapter/internal/client/aws"
+	"github.com/percona/pds/adapter/internal/hub"
 	"github.com/percona/pds/adapter/internal/provision"
 	"github.com/percona/pds/adapter/internal/store"
 )
@@ -66,6 +67,8 @@ const (
 type Records interface {
 	Get(ctx context.Context, team uint, name string) (store.ManagedEnvironment, error)
 	SetStackFailureSeen(ctx context.Context, team uint, name string, seen bool) error
+	SetChartVersion(ctx context.Context, team uint, name, version string) error
+	MarkReady(ctx context.Context, team uint, name string, now time.Time) error
 }
 
 // Connections reads the cloud connection an environment was created through.
@@ -85,6 +88,11 @@ type Cloud interface {
 	OpenAccess(ctx context.Context, t aws.Target, cidrs []string) (aws.ClusterAccess, error)
 	CloseAccess(ctx context.Context, t aws.Target) (string, error)
 	KubeToken(ctx context.Context, t aws.Target) (string, error)
+	PlanUpdate(ctx context.Context, t aws.Target, spec aws.UpdateSpec) (aws.ChangePlan, error)
+	ApplyPlan(ctx context.Context, t aws.Target, name string) error
+	DiscardPlan(ctx context.Context, t aws.Target, name string) error
+	DetectDrift(ctx context.Context, t aws.Target) ([]aws.Drift, error)
+	Cluster(ctx context.Context, t aws.Target) (aws.ClusterState, error)
 }
 
 // KubeAccess is what the control plane calls an environment's Kubernetes API
@@ -128,6 +136,9 @@ type Hub interface {
 	WriteRelease(ctx context.Context, team uint, environment string, files map[string][]byte) error
 	// Connected reports whether the environment's agent has sent a heartbeat.
 	Connected(ctx context.Context, team uint, environment string) (bool, error)
+	// Release returns what the environment's agent last reported of its pds
+	// release, and false while it has reported none.
+	Release(ctx context.Context, team uint, environment string) (hub.HeartbeatRelease, bool, error)
 }
 
 // Settings are what the steps take from the deployment.
@@ -437,8 +448,13 @@ func (d Deps) installFlux(ctx context.Context, env provision.Env, s scope) error
 }
 
 func (d Deps) writeRelease(ctx context.Context, _ provision.Env, s scope) error {
+	// A rebuild installs the version the environment ran, not the newest one.
+	version := s.rec.ChartVersion
+	if version == "" {
+		version = d.Settings.ChartVersion
+	}
 	files, err := ReleaseFiles(s.rec.Name, ReleaseInput{
-		ChartVersion: d.Settings.ChartVersion, HubURL: d.Settings.HubURL, EnvironmentName: s.rec.Name,
+		ChartVersion: version, HubURL: d.Settings.HubURL, EnvironmentName: s.rec.Name,
 		ImageRepository: d.Settings.ImageRepository, ImageTag: d.Settings.ImageTag,
 		Bucket: bucketName(s), Region: s.rec.Region,
 	})
@@ -446,6 +462,9 @@ func (d Deps) writeRelease(ctx context.Context, _ provision.Env, s scope) error 
 		return provision.Permanent(err, genericSentence)
 	}
 	if err := d.Hub.WriteRelease(ctx, s.rec.TeamID, s.rec.Name, files); err != nil {
+		return provision.Retryable(err, genericSentence)
+	}
+	if err := d.Records.SetChartVersion(ctx, s.rec.TeamID, s.rec.Name, version); err != nil {
 		return provision.Retryable(err, genericSentence)
 	}
 
@@ -485,6 +504,10 @@ func (d Deps) waitHeartbeat(ctx context.Context, _ provision.Env, s scope) error
 			return provision.Retryable(err, genericSentence)
 		}
 		if connected {
+			if err := d.Records.MarkReady(ctx, s.rec.TeamID, s.rec.Name, time.Now()); err != nil {
+				return provision.Retryable(err, genericSentence)
+			}
+
 			return nil
 		}
 		if time.Now().After(deadline) {

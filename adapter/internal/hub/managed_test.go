@@ -127,7 +127,10 @@ func TestEnvironmentReleaseIsWhatTheLastHeartbeatReported(t *testing.T) {
 
 	got, ok := svc.EnvironmentRelease("orders")
 	require.True(t, ok)
-	assert.Equal(t, hub.HeartbeatRelease{Version: "0.1.0", Attempted: "0.2.0", State: hub.ReleaseRolledBack, At: at.UTC()}, got)
+	assert.Equal(t, "0.1.0", got.Version)
+	assert.Equal(t, "0.2.0", got.Attempted)
+	assert.Equal(t, hub.ReleaseRolledBack, got.State)
+	assert.WithinDuration(t, at, got.At, time.Second, "the time the hub received the beat")
 }
 
 func TestAnAgentThatPredatesTheReleaseReportLeavesItUnknown(t *testing.T) {

@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/percona/pds/adapter/internal/client/aws"
+	"github.com/percona/pds/adapter/internal/hub"
 	"github.com/percona/pds/adapter/internal/managed"
 	"github.com/percona/pds/adapter/internal/provision"
 	"github.com/percona/pds/adapter/internal/store"
@@ -36,6 +37,15 @@ type fakeCloud struct {
 	needs     aws.Needs
 	buckets   []string
 	tags      []map[string]string
+
+	// What the update, drift and cluster reads answer, and what they were asked.
+	plans      []aws.ChangePlan
+	updates    []aws.UpdateSpec
+	applied    []string
+	discarded  []string
+	drifts     []aws.Drift
+	clusters   []aws.ClusterState
+	stackState *aws.StackState
 }
 
 func (f *fakeCloud) record(name string, t aws.Target) error {
@@ -110,6 +120,10 @@ func (f *fakeCloud) Stack(_ context.Context, t aws.Target) (aws.StackState, erro
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if len(f.stacks) == 0 {
+		if f.stackState != nil {
+			return *f.stackState, nil
+		}
+
 		return aws.StackState{Exists: true, Status: "CREATE_COMPLETE"}, nil
 	}
 	state := f.stacks[0]
@@ -171,6 +185,8 @@ type fakeHub struct {
 	written   map[string][]byte
 	joins     int
 	connected atomic.Bool
+	release   *hub.HeartbeatRelease
+	releases  []string
 }
 
 func (f *fakeHub) Join(_ context.Context, _ uint, environment string) (managed.Join, error) {
@@ -191,6 +207,16 @@ func (f *fakeHub) WriteRelease(_ context.Context, _ uint, _ string, files map[st
 
 func (f *fakeHub) Connected(context.Context, uint, string) (bool, error) {
 	return f.connected.Load(), nil
+}
+
+func (f *fakeHub) Release(context.Context, uint, string) (hub.HeartbeatRelease, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.release == nil {
+		return hub.HeartbeatRelease{}, false, nil
+	}
+
+	return *f.release, true, nil
 }
 
 type lab struct {
@@ -562,3 +588,18 @@ func TestPhasesGroupTheStepsInTheFourPhasesTheConsoleShows(t *testing.T) {
 }
 
 var _ = errors.New
+
+func TestCreateRecordsTheChartVersionItInstalledAndWhenTheEnvironmentWasReady(t *testing.T) {
+	l := newLab(t)
+	l.hub.connected.Store(true)
+	e := l.engine()
+	l.start(e)
+
+	_, err := e.RunOnce(t.Context())
+	require.NoError(t, err)
+
+	rec, err := l.db.ManagedEnvironments().Get(t.Context(), l.team, l.env)
+	require.NoError(t, err)
+	assert.Equal(t, "0.1.0", rec.ChartVersion)
+	assert.NotNil(t, rec.ReadyAt)
+}

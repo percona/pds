@@ -110,7 +110,7 @@ type HeartbeatRelease struct {
 	// Attempted is the version the last upgrade tried, when it is not Version.
 	Attempted string `json:"attempted,omitempty"`
 	State     string `json:"state"`
-	// At is when the hub received the report, set by the hub.
+	// At is when the hub received the report. Release sets it from the beat.
 	At time.Time `json:"-"`
 }
 

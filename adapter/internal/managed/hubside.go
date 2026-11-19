@@ -14,6 +14,7 @@ type TeamHub interface {
 	EnrollManaged(ctx context.Context, name string) (hub.ManagedEnrollment, error)
 	CommitFiles(ctx context.Context, environment string, files map[string][]byte, message string) error
 	EnvironmentConnected(environment string) bool
+	EnvironmentRelease(environment string) (hub.HeartbeatRelease, bool)
 }
 
 // HubSide is the Hub the create steps use: the Team's hub service answers each
@@ -57,7 +58,7 @@ func (h *HubSide) WriteRelease(ctx context.Context, team uint, environment strin
 		return err
 	}
 
-	return hubs.CommitFiles(ctx, environment, files, fmt.Sprintf("install the pds release on %s", environment))
+	return hubs.CommitFiles(ctx, environment, files, fmt.Sprintf("write the pds release of %s", environment))
 }
 
 // Connected reports whether the environment's agent has sent a heartbeat.
@@ -68,4 +69,15 @@ func (h *HubSide) Connected(ctx context.Context, team uint, environment string) 
 	}
 
 	return hubs.EnvironmentConnected(environment), nil
+}
+
+// Release reports what the environment's agent last said of its pds release.
+func (h *HubSide) Release(ctx context.Context, team uint, environment string) (hub.HeartbeatRelease, bool, error) {
+	hubs, err := h.hubs(ctx, team)
+	if err != nil {
+		return hub.HeartbeatRelease{}, false, err
+	}
+	release, ok := hubs.EnvironmentRelease(environment)
+
+	return release, ok, nil
 }
