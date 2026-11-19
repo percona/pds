@@ -10,7 +10,7 @@ Parameters:
     Type: String
     Description: The environment's id. It is the value of the percona.com/pds tag.
     AllowedPattern: "^[0-9a-f]{12}$"
-  ClusterName:
+  EksName:
     Type: String
     Description: The EKS cluster's name.
     AllowedPattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$"
@@ -22,7 +22,7 @@ Parameters:
     Type: String
     Default: "10.42.0.0/16"
     Description: The environment's own network.
-  EksClusterRoleArn:
+  EksRoleArn:
     Type: String
     Description: The cloud connection's EKS cluster role.
   NodeRoleArn:
@@ -104,7 +104,7 @@ Resources:
         - Key: "kubernetes.io/role/elb"
           Value: "1"
         - Key:
-            Fn::Sub: "kubernetes.io/cluster/${ClusterName}"
+            Fn::Sub: "kubernetes.io/cluster/${EksName}"
           Value: "shared"
 
   PublicSubnetB:
@@ -134,7 +134,7 @@ Resources:
         - Key: "kubernetes.io/role/elb"
           Value: "1"
         - Key:
-            Fn::Sub: "kubernetes.io/cluster/${ClusterName}"
+            Fn::Sub: "kubernetes.io/cluster/${EksName}"
           Value: "shared"
 
   PrivateSubnetA:
@@ -164,7 +164,7 @@ Resources:
         - Key: "kubernetes.io/role/internal-elb"
           Value: "1"
         - Key:
-            Fn::Sub: "kubernetes.io/cluster/${ClusterName}"
+            Fn::Sub: "kubernetes.io/cluster/${EksName}"
           Value: "shared"
 
   PrivateSubnetB:
@@ -194,7 +194,7 @@ Resources:
         - Key: "kubernetes.io/role/internal-elb"
           Value: "1"
         - Key:
-            Fn::Sub: "kubernetes.io/cluster/${ClusterName}"
+            Fn::Sub: "kubernetes.io/cluster/${EksName}"
           Value: "shared"
 
   NatAddress:
@@ -306,11 +306,11 @@ Resources:
     Type: AWS::EKS::Cluster
     Properties:
       Name:
-        Ref: ClusterName
+        Ref: EksName
       Version:
         Ref: KubernetesVersion
       RoleArn:
-        Ref: EksClusterRoleArn
+        Ref: EksRoleArn
       AccessConfig:
         AuthenticationMode: API
         BootstrapClusterCreatorAdminPermissions: false

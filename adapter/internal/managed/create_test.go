@@ -116,14 +116,14 @@ func (f *fakeCloud) KubeToken(_ context.Context, t aws.Target) (string, error) {
 	return "k8s-aws-v1.token", f.record("kube-token", t)
 }
 
-type fakeCluster struct {
+type fakeKube struct {
 	mu     sync.Mutex
 	fluxes []string
 	joins  []managed.Join
 	access []managed.KubeAccess
 }
 
-func (f *fakeCluster) InstallFlux(_ context.Context, access managed.KubeAccess, version string) error {
+func (f *fakeKube) InstallFlux(_ context.Context, access managed.KubeAccess, version string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.fluxes = append(f.fluxes, version)
@@ -132,7 +132,7 @@ func (f *fakeCluster) InstallFlux(_ context.Context, access managed.KubeAccess, 
 	return nil
 }
 
-func (f *fakeCluster) WriteJoin(_ context.Context, access managed.KubeAccess, join managed.Join) error {
+func (f *fakeKube) WriteJoin(_ context.Context, access managed.KubeAccess, join managed.Join) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.joins = append(f.joins, join)
@@ -169,18 +169,18 @@ func (f *fakeHub) Connected(context.Context, uint, string) (bool, error) {
 }
 
 type lab struct {
-	t       *testing.T
-	db      *store.Store
-	prov    *store.Provisioning
-	cloud   *fakeCloud
-	cluster *fakeCluster
-	hub     *fakeHub
-	team    uint
-	env     string
-	connID  string
-	envID   string
-	deps    managed.Deps
-	kind    string
+	t      *testing.T
+	db     *store.Store
+	prov   *store.Provisioning
+	cloud  *fakeCloud
+	kube   *fakeKube
+	hub    *fakeHub
+	team   uint
+	env    string
+	connID string
+	envID  string
+	deps   managed.Deps
+	kind   string
 }
 
 func newLab(t *testing.T) *lab {
@@ -217,12 +217,12 @@ func newLab(t *testing.T) *lab {
 
 	l := &lab{
 		t: t, db: db, prov: db.Provisioning(), team: team.ID, env: "orders", connID: connID, envID: envID,
-		cloud: &fakeCloud{failAt: map[string][]error{}}, cluster: &fakeCluster{}, hub: &fakeHub{},
+		cloud: &fakeCloud{failAt: map[string][]error{}}, kube: &fakeKube{}, hub: &fakeHub{},
 		kind: fmt.Sprintf("create-%d-%d", now.UnixNano(), n),
 	}
 	l.deps = managed.Deps{
 		Records: db.ManagedEnvironments(), Connections: db.CloudConnections(),
-		Cloud: l.cloud, Cluster: l.cluster, Hub: l.hub,
+		Cloud: l.cloud, Cluster: l.kube, Hub: l.hub,
 		Settings: managed.Settings{
 			OutgoingCIDRs: []string{"203.0.113.7/32"}, FluxVersion: "2.5.1", ChartVersion: "0.1.0",
 			HubURL: "https://hub.example", ImageRepository: "ghcr.io/percona/pds-adapter", ImageTag: "0.1.0",
@@ -296,10 +296,10 @@ func TestCreateBuildsTheEnvironmentAndMakesItReady(t *testing.T) {
 	require.Equal(t, store.RunSucceeded, got.Status, got.Message)
 
 	spec := l.cloud.specs[0]
-	assert.Equal(t, managed.NetworkClusterTemplate, spec.Template)
+	assert.Equal(t, managed.NetworkTemplate, spec.Template)
 	assert.Equal(t, l.envID, spec.Parameters["EnvironmentId"])
-	assert.Equal(t, "pds-"+l.envID, spec.Parameters["ClusterName"])
-	assert.Equal(t, "arn:aws:iam::111122223333:role/pds/"+l.connID+"/pds-"+l.connID+"-eks-cluster", spec.Parameters["EksClusterRoleArn"])
+	assert.Equal(t, "pds-"+l.envID, spec.Parameters["EksName"])
+	assert.Equal(t, "arn:aws:iam::111122223333:role/pds/"+l.connID+"/pds-"+l.connID+"-eks-cluster", spec.Parameters["EksRoleArn"])
 	assert.Equal(t, "arn:aws:iam::111122223333:role/pds/"+l.connID+"/pds-"+l.connID+"-cloudformation", spec.ServiceRoleARN)
 	assert.Equal(t, l.envID, spec.Tags["percona.com/pds"])
 	assert.Equal(t, "1", spec.Tags["percona.com/pds-template-revision"])
@@ -310,11 +310,11 @@ func TestCreateBuildsTheEnvironmentAndMakesItReady(t *testing.T) {
 	assert.Equal(t, "pds-env-"+l.envID, target.StackName)
 	assert.True(t, strings.HasPrefix(target.SourceIdentity, "pds-job-"))
 
-	assert.Equal(t, []string{"2.5.1"}, l.cluster.fluxes)
-	assert.Equal(t, "https://eks.example", l.cluster.access[0].Endpoint)
-	assert.Equal(t, "k8s-aws-v1.token", l.cluster.access[0].Token)
-	require.Len(t, l.cluster.joins, 1)
-	assert.Equal(t, "agt_secret", l.cluster.joins[0].AgentToken)
+	assert.Equal(t, []string{"2.5.1"}, l.kube.fluxes)
+	assert.Equal(t, "https://eks.example", l.kube.access[0].Endpoint)
+	assert.Equal(t, "k8s-aws-v1.token", l.kube.access[0].Token)
+	require.Len(t, l.kube.joins, 1)
+	assert.Equal(t, "agt_secret", l.kube.joins[0].AgentToken)
 
 	release := string(l.hub.written["clusters/orders/platform/pds/helmrelease.yaml"])
 	assert.Contains(t, release, "version: 0.1.0")
@@ -460,7 +460,7 @@ func TestCloseWindowClosesWhatTheSweeperFinds(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "Closed the public endpoint.", note)
-	assert.Equal(t, "pds-"+l.envID, l.cloud.targets[0].ClusterName)
+	assert.Equal(t, "pds-"+l.envID, l.cloud.targets[0].EKSName)
 }
 
 func TestConnectionReadyFollowsTheConnectionState(t *testing.T) {

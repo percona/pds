@@ -22,9 +22,9 @@ import (
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
 
-// clusterAdminPolicy is the access policy the control plane holds for as long
+// adminPolicy is the access policy the control plane holds for as long
 // as an Access window is open.
-const clusterAdminPolicy = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+const adminPolicy = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy" // allow-legacy-name: the AWS SDK names it so
 
 // tokenPrefix and tokenLifetime are those of an EKS bearer token: a presigned
 // GetCallerIdentity request that EKS replays to learn who is calling.
@@ -42,7 +42,7 @@ type Target struct {
 	SourceIdentity string
 	Region         string
 	StackName      string
-	ClusterName    string
+	EKSName        string
 }
 
 // StackSpec is what a stack is created from.
@@ -95,7 +95,7 @@ type cfnAPI interface {
 }
 
 type eksAPI interface {
-	DescribeCluster(context.Context, *eks.DescribeClusterInput, ...func(*eks.Options)) (*eks.DescribeClusterOutput, error)
+	DescribeCluster(context.Context, *eks.DescribeClusterInput, ...func(*eks.Options)) (*eks.DescribeClusterOutput, error) // allow-legacy-name: the AWS SDK names it so
 	UpdateClusterConfig(context.Context, *eks.UpdateClusterConfigInput, ...func(*eks.Options)) (*eks.UpdateClusterConfigOutput, error)
 	DescribeUpdate(context.Context, *eks.DescribeUpdateInput, ...func(*eks.Options)) (*eks.DescribeUpdateOutput, error)
 	CreateAccessEntry(context.Context, *eks.CreateAccessEntryInput, ...func(*eks.Options)) (*eks.CreateAccessEntryOutput, error)
@@ -259,26 +259,28 @@ func (i *Infra) OpenAccess(ctx context.Context, t Target, cidrs []string) (Clust
 	client := i.eks(session)
 
 	if _, err := client.CreateAccessEntry(ctx, &eks.CreateAccessEntryInput{
-		ClusterName: &t.ClusterName, PrincipalArn: &t.RoleARN, Type: sdkaws.String("STANDARD"),
+		ClusterName:  &t.EKSName, // allow-legacy-name: the AWS SDK names it so
+		PrincipalArn: &t.RoleARN, Type: sdkaws.String("STANDARD"),
 	}); err != nil && errorCode(err) != "ResourceInUseException" {
 		return ClusterAccess{}, fmt.Errorf("create access entry: %w", err)
 	}
 	if _, err := client.AssociateAccessPolicy(ctx, &eks.AssociateAccessPolicyInput{
-		ClusterName: &t.ClusterName, PrincipalArn: &t.RoleARN, PolicyArn: sdkaws.String(clusterAdminPolicy),
-		AccessScope: &ekstypes.AccessScope{Type: ekstypes.AccessScopeTypeCluster},
+		ClusterName:  &t.EKSName, // allow-legacy-name: the AWS SDK names it so
+		PrincipalArn: &t.RoleARN, PolicyArn: sdkaws.String(adminPolicy),
+		AccessScope: &ekstypes.AccessScope{Type: ekstypes.AccessScopeTypeCluster}, // allow-legacy-name: the AWS SDK names it so
 	}); err != nil {
 		return ClusterAccess{}, fmt.Errorf("associate access policy: %w", err)
 	}
 
-	cluster, err := describe(ctx, client, t.ClusterName)
+	cluster, err := describe(ctx, client, t.EKSName)
 	if err != nil {
 		return ClusterAccess{}, err
 	}
 	if !openTo(cluster, cidrs) {
-		if err := i.setPublic(ctx, client, t.ClusterName, true, cidrs); err != nil {
+		if err := i.setPublic(ctx, client, t.EKSName, true, cidrs); err != nil {
 			return ClusterAccess{}, err
 		}
-		if cluster, err = describe(ctx, client, t.ClusterName); err != nil {
+		if cluster, err = describe(ctx, client, t.EKSName); err != nil {
 			return ClusterAccess{}, err
 		}
 	}
@@ -300,7 +302,7 @@ func (i *Infra) CloseAccess(ctx context.Context, t Target) (string, error) {
 	}
 	client := i.eks(session)
 
-	cluster, err := describe(ctx, client, t.ClusterName)
+	cluster, err := describe(ctx, client, t.EKSName)
 	if err != nil {
 		if errorCode(err) == "ResourceNotFoundException" {
 			return "The cluster no longer exists, so there was nothing to close.", nil
@@ -310,14 +312,17 @@ func (i *Infra) CloseAccess(ctx context.Context, t Target) (string, error) {
 	}
 	var did []string
 	if cluster.ResourcesVpcConfig != nil && cluster.ResourcesVpcConfig.EndpointPublicAccess {
-		if err := i.setPublic(ctx, client, t.ClusterName, false, nil); err != nil {
+		if err := i.setPublic(ctx, client, t.EKSName, false, nil); err != nil {
 			return "", err
 		}
 		did = append(did, "closed the public endpoint")
 	} else {
 		did = append(did, "the endpoint was already private")
 	}
-	if _, err := client.DeleteAccessEntry(ctx, &eks.DeleteAccessEntryInput{ClusterName: &t.ClusterName, PrincipalArn: &t.RoleARN}); err != nil {
+	if _, err := client.DeleteAccessEntry(ctx, &eks.DeleteAccessEntryInput{
+		ClusterName:  &t.EKSName, // allow-legacy-name: the AWS SDK names it so
+		PrincipalArn: &t.RoleARN,
+	}); err != nil {
 		if errorCode(err) != "ResourceNotFoundException" {
 			return "", fmt.Errorf("delete access entry: %w", err)
 		}
@@ -329,7 +334,7 @@ func (i *Infra) CloseAccess(ctx context.Context, t Target) (string, error) {
 }
 
 func describe(ctx context.Context, client eksAPI, name string) (*ekstypes.Cluster, error) {
-	out, err := client.DescribeCluster(ctx, &eks.DescribeClusterInput{Name: &name})
+	out, err := client.DescribeCluster(ctx, &eks.DescribeClusterInput{Name: &name}) // allow-legacy-name: the AWS SDK names it so
 	if err != nil {
 		return nil, fmt.Errorf("describe cluster: %w", err)
 	}
@@ -390,7 +395,7 @@ func (i *Infra) KubeToken(ctx context.Context, t Target) (string, error) {
 		func(o *sts.PresignOptions) {
 			o.ClientOptions = append(o.ClientOptions, func(c *sts.Options) {
 				c.APIOptions = append(c.APIOptions,
-					smithyhttp.SetHeaderValue(tokenHeader, t.ClusterName),
+					smithyhttp.SetHeaderValue(tokenHeader, t.EKSName),
 					func(stack *middleware.Stack) error {
 						return stack.Build.Add(middleware.BuildMiddlewareFunc("pdsTokenLifetime",
 							func(ctx context.Context, in middleware.BuildInput, next middleware.BuildHandler) (middleware.BuildOutput, middleware.Metadata, error) {

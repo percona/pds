@@ -10,14 +10,14 @@ import _ "embed"
 // output, and a test holds the two together.
 const TemplateRevision = 1
 
-// NetworkClusterTemplate is the CloudFormation template of an environment's
+// NetworkTemplate is the CloudFormation template of an environment's
 // network and Kubernetes cluster. Only Percona changes it, through a release.
 //
 //go:embed templates/network_cluster.yaml
-var NetworkClusterTemplate string
+var NetworkTemplate string
 
 // StackParameterNames are the template parameters that have no default, which
 // the create step always passes.
 var StackParameterNames = []string{
-	"EnvironmentId", "ClusterName", "EksClusterRoleArn", "NodeRoleArn", "EbsCsiRoleArn",
+	"EnvironmentId", "EksName", "EksRoleArn", "NodeRoleArn", "EbsCsiRoleArn",
 }

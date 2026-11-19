@@ -200,7 +200,7 @@ func (d Deps) scope(ctx context.Context, run store.ProvisioningRun) (scope, erro
 			SourceIdentity: "pds-job-provision-" + strconv.FormatUint(uint64(run.ID), 10),
 			Region:         rec.Region,
 			StackName:      "pds-env-" + rec.ID,
-			ClusterName:    cluster,
+			EKSName:        cluster,
 		},
 		where: aws.Where{Account: conn.AccountID, Region: rec.Region, Cluster: run.Environment, Granted: d.Granted},
 	}, nil
@@ -289,14 +289,14 @@ func (d Deps) assumeRole(ctx context.Context, _ provision.Env, s scope) error {
 
 func (d Deps) stackSpec(s scope) aws.StackSpec {
 	return aws.StackSpec{
-		Template:       NetworkClusterTemplate,
+		Template:       NetworkTemplate,
 		ServiceRoleARN: aws.RoleARN(s.conn.AccountID, s.conn.ID, "cloudformation"),
 		Parameters: map[string]string{
-			"EnvironmentId":     s.rec.ID,
-			"ClusterName":       s.target.ClusterName,
-			"EksClusterRoleArn": aws.RoleARN(s.conn.AccountID, s.conn.ID, "eks-cluster"),
-			"NodeRoleArn":       aws.RoleARN(s.conn.AccountID, s.conn.ID, "node"),
-			"EbsCsiRoleArn":     aws.RoleARN(s.conn.AccountID, s.conn.ID, "ebs-csi"),
+			"EnvironmentId": s.rec.ID,
+			"EksName":       s.target.EKSName,
+			"EksRoleArn":    aws.RoleARN(s.conn.AccountID, s.conn.ID, "eks-cluster"),
+			"NodeRoleArn":   aws.RoleARN(s.conn.AccountID, s.conn.ID, "node"),
+			"EbsCsiRoleArn": aws.RoleARN(s.conn.AccountID, s.conn.ID, "ebs-csi"),
 		},
 		Tags: map[string]string{
 			"percona.com/pds":                   s.rec.ID,

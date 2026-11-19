@@ -29,7 +29,7 @@ func parsed(t *testing.T) template {
 	t.Helper()
 
 	var tpl template
-	require.NoError(t, yaml.Unmarshal([]byte(managed.NetworkClusterTemplate), &tpl))
+	require.NoError(t, yaml.Unmarshal([]byte(managed.NetworkTemplate), &tpl))
 
 	return tpl
 }
@@ -95,13 +95,13 @@ func tagsOwnership(tags any) bool {
 	return false
 }
 
-func TestClusterIsPrivateAndAnAccessEntryApiCluster(t *testing.T) {
+func TestTheEKSIsPrivateAndUsesAccessEntries(t *testing.T) {
 	cluster := parsed(t).Resources["Cluster"]
 	require.Equal(t, "AWS::EKS::Cluster", cluster.Type)
 
 	access, _ := cluster.Properties["AccessConfig"].(map[string]any)
 	assert.Equal(t, "API", access["AuthenticationMode"])
-	assert.Equal(t, false, access["BootstrapClusterCreatorAdminPermissions"], "the control plane holds no standing access")
+	assert.Equal(t, false, access["BootstrapClusterCreatorAdminPermissions"], "the control plane holds no standing access") // allow-legacy-name: the AWS property name
 
 	vpc, _ := cluster.Properties["ResourcesVpcConfig"].(map[string]any)
 	assert.Equal(t, false, vpc["EndpointPublicAccess"], "the endpoint is private between runs")

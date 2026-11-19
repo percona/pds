@@ -31,7 +31,7 @@ func TestClassifyTypesTheRefusalsAPersonCanFix(t *testing.T) {
 		{"quota carried in a stack event", errors.New("The maximum number of addresses has been reached. (Service: AmazonEC2; Status Code: 400; Error Code: AddressLimitExceeded; Request ID: abc)"), false, aws.ReasonQuota, "Amazon EC2", "Elastic IP addresses per Region"},
 		{"service quotas error", apiError("ServiceQuotaExceededException", "quota"), false, aws.ReasonQuota, "", ""},
 		{"permission denied for a granted action", apiError("UnauthorizedOperation", "You are not authorized to perform: ec2:CreateVpc on resource"), true, aws.ReasonPermission, "ec2", "ec2:CreateVpc"},
-		{"permission denied by the account", apiError("AccessDenied", "User: arn:aws:sts::1:assumed-role/x is not authorized to perform: eks:CreateCluster with an explicit deny in a service control policy"), false, aws.ReasonPermission, "eks", "eks:CreateCluster"},
+		{"permission denied by the account", apiError("AccessDenied", "User: arn:aws:sts::1:assumed-role/x is not authorized to perform: eks:CreateCluster with an explicit deny in a service control policy"), false, aws.ReasonPermission, "eks", "eks:CreateCluster"}, // allow-legacy-name: the AWS action name
 		{"region not enabled", apiError("OptInRequired", "You are not subscribed to this service."), false, aws.ReasonRegionNotEnabled, "", ""},
 	}
 	for _, tt := range tests {
