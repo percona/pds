@@ -176,7 +176,7 @@ func TestApplyPutsNamespacesAndDefinitionsBeforeWhatUsesThem(t *testing.T) {
 	assert.Equal(t, "customresourcedefinitions/gitrepositories.source.toolkit.fluxcd.io", names[1])
 }
 
-func TestApplyWaitsForAKindThatTheClusterDoesNotServeYet(t *testing.T) {
+func TestApplyWaitsForAKindThatTheAPIDoesNotServeYet(t *testing.T) {
 	l := newRemoteLab(t)
 	calls := 0
 	l.known = func() meta.RESTMapper {
