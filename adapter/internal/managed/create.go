@@ -221,10 +221,18 @@ func (s scope) fail(err error) error {
 		return provision.Retryable(err, busySentence)
 	}
 	if refusal, ok := aws.Classify(err, s.where); ok {
-		return provision.Permanent(err, refusal.Sentence(s.where))
+		return refused(err, refusal, s.where)
 	}
 
 	return provision.Retryable(err, genericSentence)
+}
+
+// refused is a step failure AWS caused and the customer fixes: it carries the
+// typed refusal beside the sentence.
+func refused(err error, refusal aws.Refusal, where aws.Where) error {
+	return provision.Refused(err, refusal.Sentence(where), provision.Refusal{
+		Reason: string(refusal.Reason), Service: refusal.Service, Item: refusal.Item, Region: refusal.Region,
+	})
 }
 
 // CreateKind is the run that builds a managed environment, step by step. Every
@@ -289,8 +297,8 @@ func (d Deps) assumeRole(ctx context.Context, _ provision.Env, s scope) error {
 	if err := d.Cloud.CheckRole(ctx, s.target); err != nil {
 		return s.fail(err)
 	}
-	if refusal, refused := d.Cloud.Preflight(ctx, s.target, aws.Needs{VCPUs: NodeVCPUs}); refused {
-		return provision.Permanent(errors.New("the preflight found the account cannot build the environment"), refusal.Sentence(s.where))
+	if refusal, found := d.Cloud.Preflight(ctx, s.target, aws.Needs{VCPUs: NodeVCPUs}); found {
+		return refused(errors.New("the preflight found the account cannot build the environment"), refusal, s.where)
 	}
 
 	return nil
@@ -396,7 +404,7 @@ func (d Deps) waitStack(ctx context.Context, _ provision.Env, s scope) error {
 func stackFailure(state aws.StackState, s scope) error {
 	cause := errors.New(state.FailureReason)
 	if refusal, ok := aws.Classify(cause, s.where); ok {
-		return provision.Permanent(cause, refusal.Sentence(s.where))
+		return refused(cause, refusal, s.where)
 	}
 
 	return provision.Permanent(fmt.Errorf("stack status %s: %s", state.Status, state.FailureReason), stackFailed)
