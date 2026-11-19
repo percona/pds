@@ -143,6 +143,11 @@ jobs:
       - name: free runner disk
         run: scripts/free-runner-disk.sh
 
+      # The same limits as smoke, so this lab does not hit the Ubuntu 26.04
+      # inotify default when it gains nodes.
+      - name: raise the runner's inotify limits
+        run: scripts/raise-runner-inotify.sh
+
       - uses: actions/setup-node@v4
         with:
           node-version: "26"
