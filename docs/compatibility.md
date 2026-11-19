@@ -78,6 +78,7 @@ must match.
 |-----------|---------|-------|
 | Percona Database Service chart | 0.1.0 | Source Chart.yaml. A GitHub Release publishes the OCI tag with the release version |
 | Kubernetes | >= 1.27.0-0 | Chart `kubeVersion` |
+| Flux | 2.5.1 | Installed by the join script, and by a managed environment's bootstrap. `scripts/check-compatibility.sh` checks the join script against the pin |
 | OpenEverest | 2.0.0-dev.4 | Chart `openeverest` from https://openeverest.github.io/helm-charts/ |
 | PXC provider | 0.3.1 | `provider-percona-xtradb-cluster` (`provider-pxc`) |
 | PXC operator | 1.20.0 | Installed by the PXC provider chart |
@@ -88,6 +89,23 @@ must match.
 | Backup and Restore CRDs | backup.openeverest.io/v1alpha1 | Adapter client constant |
 | MySQL (Percona XtraDB Cluster) | operator-default | The adapter does not set an engine image |
 | PostgreSQL (Percona PostgreSQL) | operator-default | The adapter does not set an engine image |
+
+## Managed environments
+
+The pin carries two more things for environments the control plane builds in a
+customer's AWS account.
+
+- **Template revision.** `managedTemplate.revision` numbers the revisions of the
+  CloudFormation templates. Every stack records its revision. `cutFor` holds the
+  chart and Flux versions the revision was last reviewed against. Changing the
+  chart or Flux version fails `scripts/check-compatibility.sh` until the revision
+  is bumped, or `cutFor` is moved to the new versions to leave the revision as it
+  is. A revision never removes or renames a parameter or output the adapter reads.
+- **Managed upgrade.** `support.managedUpgrade.from` maps a chart version an
+  environment runs to the chart versions the control plane may move it to. A
+  version with no entry has no managed upgrade, and the map starts empty. It is
+  separate from `support.update`, which is the join script's in-place update of
+  a connected environment.
 
 PMM is optional. It is not part of the create path. The OpenEverest,
 provider, and operator rows are one unit even when PMM is off.
