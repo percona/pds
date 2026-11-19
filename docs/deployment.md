@@ -502,12 +502,15 @@ Kubernetes API from addresses it declares. These settings go through the chart's
 | Variable | Default | Value |
 |----------|---------|-------|
 | `HUB_MANAGED_OUTGOING_CIDRS` | none | The addresses this control plane's AWS calls come from, as comma separated CIDRs such as `203.0.113.7/32`. Only they may reach an environment's endpoint while it is open. `0.0.0.0/0` is accepted when you choose it and leaves IAM as the only protection. Empty refuses managed environments |
+| `HUB_MANAGED_CHART_VERSION` | none | The published `pds` chart version a managed environment installs, such as `0.1.0`. It has to be a release in `oci://ghcr.io/percona/charts`. Empty refuses managed environments |
 | `HUB_PROVISION_LEASE_TTL` | `1m` | How long a provisioning run's lease lasts unrenewed. A worker that dies is replaced after it |
 | `HUB_PROVISION_MAX_ATTEMPTS` | `5` | Automatic attempts of one step before the run fails and waits for Retry |
 | `HUB_PROVISION_WINDOW_MAX_AGE` | `30m` | How long an Access window may stay open before the sweeper closes it |
 
-A managed environment installs the published chart and agent image, so a build
-whose version is `dev` cannot create one. The hub's Git write credentials act as
+A managed environment installs the published chart and the agent image in
+`HUB_AGENT_IMAGE`, so a build with neither cannot create one. The control plane
+needs the identity it assumes customer roles from, and it downloads the pinned
+Flux manifest from GitHub at create time. The hub's Git write credentials act as
 cluster-admin on every managed environment it serves. See
 [architecture.md](architecture.md#managed-environments).
 
