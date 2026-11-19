@@ -20,6 +20,7 @@ another module needs to import something. Tests sit next to the code.
 | `internal/hub` | Hub state: environment inventory, join tokens, the work queue, and the two Git stores (GitHub, or a local directory) |
 | `internal/agent` | The `agent` role: the heartbeat loop and the work it runs locally |
 | `internal/provision` | Provisioning runs: the lease-based worker, step retry and backoff, pause and resume, the Access window sweeper and run retention. It knows no cloud: a run kind brings its steps |
+| `internal/managed` | Managed environments: the create run's steps, the request that starts it, the embedded network and cluster template, and the pds HelmRelease render under its golden. AWS, Kubernetes and the hub come in through interfaces |
 | `internal/store` | The adapter's own PostgreSQL: GORM models, migration, sealing |
 | `internal/auth` | Password hashing, invite and session tokens, the signed cookie, request identity |
 | `internal/config` | Environment configuration: every setting is read and validated here |
