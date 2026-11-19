@@ -28,6 +28,13 @@ type EnvironmentRecords interface {
 	Get(ctx context.Context, team uint, name string) (store.ManagedEnvironment, error)
 }
 
+// Environments is what the API calls to create and to delete managed
+// environments.
+type Environments struct {
+	*Creator
+	*Remover
+}
+
 // Remover accepts the requests to delete a managed environment, in AWS or from
 // PDS alone.
 type Remover struct {
