@@ -11,6 +11,53 @@ type environment struct {
 	Namespace string `json:"namespace,omitempty"`
 	Status    string `json:"status"`
 	LastSeen  string `json:"lastSeen,omitempty" jsonschema:"When the environment last reported in."`
+	Origin    string `json:"origin" jsonschema:"connected when the user connected the Kubernetes cluster, managed when PDS built it."`
+	State     string `json:"state" jsonschema:"creating, ready, degraded, failed or deleting."`
+	// ConnectionID, Region and Provisioning are set on a managed environment.
+	ConnectionID string        `json:"connectionId,omitempty" jsonschema:"The AWS account a managed environment runs in."`
+	Region       string        `json:"region,omitempty"`
+	Provisioning *provisioning `json:"provisioning,omitempty" jsonschema:"How the latest run stands: its phases and, when it failed, what to do."`
+}
+
+type refusal struct {
+	Reason  string `json:"reason" jsonschema:"quota, permission or region_not_enabled."`
+	Service string `json:"service,omitempty"`
+	Item    string `json:"item,omitempty" jsonschema:"The quota or the action AWS refused."`
+	Region  string `json:"region,omitempty"`
+}
+
+type runFailure struct {
+	Sentence string   `json:"sentence" jsonschema:"What happened and what the user does next. Tell the user in these words."`
+	Action   string   `json:"action" jsonschema:"retry: call retry_environment_run once the user has fixed what the sentence says."`
+	Refusal  *refusal `json:"refusal,omitempty" jsonschema:"Set when AWS refused a step and the user fixes it in their own AWS account."`
+}
+
+type phase struct {
+	Name   string `json:"name"`
+	Status string `json:"status" jsonschema:"pending, running, waiting, succeeded or failed."`
+}
+
+type runView struct {
+	ID         uint   `json:"id"`
+	Kind       string `json:"kind" jsonschema:"create, upgrade_pds, upgrade_kubernetes, rebuild or delete."`
+	Status     string `json:"status"`
+	StartedAt  string `json:"startedAt,omitempty"`
+	FinishedAt string `json:"finishedAt,omitempty"`
+}
+
+// provisioning is how the latest run of a managed environment stands.
+type provisioning struct {
+	Run      runView     `json:"run"`
+	Progress string      `json:"progress" jsonschema:"in_progress, waiting, failed, blocked or ready. waiting is a run paused until the AWS account answers again. blocked is a delete that left something behind."`
+	Message  string      `json:"message,omitempty"`
+	Phases   []phase     `json:"phases" jsonschema:"The four phases of a create, in order."`
+	Failure  *runFailure `json:"failure,omitempty"`
+}
+
+// runStarted is what the API answers when it accepts a run.
+type runStarted struct {
+	Run          runView      `json:"run"`
+	Provisioning provisioning `json:"provisioning"`
 }
 
 type environments struct {
@@ -25,11 +72,46 @@ func environmentReads() []tool {
 		define(spec{
 			name:  "list_environments",
 			title: "List environments",
-			description: "List the environments connected to this control plane, with their status and when each was last seen. " +
+			description: "List the environments of this control plane, with their status and when each was last seen. " +
+				"origin says whether the user connected the Kubernetes cluster or PDS built the environment, and state says how it is. " +
+				"A managed environment also carries provisioning: the four phases of its latest run and, when a run failed, what to do. " +
 				"Use an environment name when creating a database.",
 			annotations: readOnly(),
 		}, listEnvironments),
+
+		define(spec{
+			name:  "get_environment",
+			title: "Get an environment",
+			description: "Get one environment with its status, origin and state. " +
+				"A managed environment carries provisioning: its latest run, the four phases (Creating network and Kubernetes cluster, Connecting to the environment, Installing PDS, Finishing) and, when a run failed, " +
+				"failure with the sentence to tell the user and the one action. When AWS refused a step, failure.refusal says which quota or permission and where.",
+			annotations: readOnly(),
+		}, getEnvironment),
 	}
+}
+
+type environmentInput struct {
+	Name string `json:"name" jsonschema:"The environment name, copied exactly from list_environments."`
+}
+
+func getEnvironment(ctx context.Context, c *call, in environmentInput) (environment, error) {
+	path, err := environmentPath(in.Name)
+	if err != nil {
+		return environment{}, err
+	}
+	var out environment
+	if err := c.get(ctx, "/api/environments/"+path, nil, &out); err != nil {
+		return environment{}, hintedAs(err, msgEnvironmentNotFoundHint)
+	}
+	if out.Provisioning != nil {
+		out.Provisioning.Phases = orEmpty(out.Provisioning.Phases)
+	}
+
+	return out, nil
+}
+
+func waitForEnvironmentCall(name string) *nextCall {
+	return &nextCall{Tool: "wait_for_environment", Arguments: map[string]any{"name": name}}
 }
 
 func listEnvironments(ctx context.Context, c *call, _ noInput) (environments, error) {
@@ -38,6 +120,11 @@ func listEnvironments(ctx context.Context, c *call, _ noInput) (environments, er
 		return environments{}, err
 	}
 	out.Environments = orEmpty(out.Environments)
+	for i := range out.Environments {
+		if p := out.Environments[i].Provisioning; p != nil {
+			p.Phases = orEmpty(p.Phases)
+		}
+	}
 
 	return out, nil
 }

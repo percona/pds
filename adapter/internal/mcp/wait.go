@@ -27,6 +27,9 @@ const (
 	outcomeUnknown    = "unknown"
 	outcomeConnected  = "connected"
 	outcomeNotFound   = "not_found"
+	outcomeDeleted    = "deleted"
+	outcomeBlocked    = "blocked"
+	outcomeWaiting    = "waiting"
 )
 
 const (
@@ -100,14 +103,17 @@ type backupWait struct {
 
 type environmentWaitInput struct {
 	timeoutInput
-	Name string `json:"name" jsonschema:"The environment name, as given to create_environment."`
+	Name  string `json:"name" jsonschema:"The environment name, as given to create_environment or create_managed_environment."`
+	Until string `json:"until,omitempty" jsonschema:"connected, the default, waits for the environment to be ready. deleted waits for a managed environment to be gone after delete_managed_environment."`
 }
 
 type environmentWait struct {
-	Outcome       string `json:"outcome" jsonschema:"One of connected, in_progress when the wait ran out, or not_found."`
-	Name          string `json:"name"`
-	Status        string `json:"status,omitempty"`
-	WaitedSeconds int    `json:"waitedSeconds"`
+	Outcome       string        `json:"outcome" jsonschema:"One of connected, deleted, failed or blocked when a run stopped, waiting when a run is paused until the AWS account answers, in_progress when the wait ran out, or not_found."`
+	Name          string        `json:"name"`
+	Status        string        `json:"status,omitempty"`
+	State         string        `json:"state,omitempty"`
+	Provisioning  *provisioning `json:"provisioning,omitempty" jsonschema:"How the latest run of a managed environment stands. On failed, tell the user failure.sentence."`
+	WaitedSeconds int           `json:"waitedSeconds"`
 }
 
 func waitTools() []tool {
@@ -281,6 +287,7 @@ func waitForBackup(ctx context.Context, c *call, in backupWaitInput) (backupWait
 }
 
 func waitForEnvironment(ctx context.Context, c *call, in environmentWaitInput) (environmentWait, error) {
+	deleting := in.Until == untilDeleted
 	var found *environment
 	waited, done, err := c.pollUntil(ctx, in.timeout(), func(ctx context.Context) (bool, error) {
 		var list environments
@@ -295,8 +302,18 @@ func waitForEnvironment(ctx context.Context, c *call, in environmentWaitInput) (
 				break
 			}
 		}
+		if found == nil {
+			return deleting, nil
+		}
+		progress := ""
+		if found.Provisioning != nil {
+			progress = found.Provisioning.Progress
+		}
+		if deleting {
+			return progress == outcomeBlocked, nil
+		}
 
-		return found != nil && found.Status == "connected", nil
+		return found.Status == "connected" && progress != "in_progress" || progress == "failed" || progress == "blocked", nil
 	})
 	if err != nil {
 		return environmentWait{}, err
@@ -304,13 +321,23 @@ func waitForEnvironment(ctx context.Context, c *call, in environmentWaitInput) (
 
 	out := environmentWait{Name: in.Name, WaitedSeconds: seconds(waited)}
 	if found != nil {
-		out.Status = found.Status
+		out.Status, out.State, out.Provisioning = found.Status, found.State, found.Provisioning
+	}
+	progress := ""
+	if out.Provisioning != nil {
+		progress = out.Provisioning.Progress
 	}
 	switch {
+	case deleting && done && found == nil:
+		out.Outcome = outcomeDeleted
+	case done && (progress == outcomeFailed || progress == outcomeBlocked):
+		out.Outcome = progress
 	case done:
 		out.Outcome = outcomeConnected
 	case found == nil:
 		out.Outcome = outcomeNotFound
+	case progress == outcomeWaiting:
+		out.Outcome = outcomeWaiting
 	default:
 		out.Outcome = outcomeInProgress
 	}

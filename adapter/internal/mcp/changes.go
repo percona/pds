@@ -49,7 +49,10 @@ type changed struct {
 	BackupID  string          `json:"backupId,omitempty"`
 	Schedule  *backupSchedule `json:"schedule,omitempty" jsonschema:"The backup schedule that was written."`
 	Warnings  []string        `json:"warnings,omitempty"`
-	Next      *nextCall       `json:"next,omitempty" jsonschema:"The call to make next to follow the change."`
+	// Provisioning is how the run a change started stands, for a managed
+	// environment.
+	Provisioning *provisioning `json:"provisioning,omitempty" jsonschema:"How the run this change started stands."`
+	Next         *nextCall     `json:"next,omitempty" jsonschema:"The call to make next to follow the change."`
 }
 
 func accepted(operation, id string) changed {
