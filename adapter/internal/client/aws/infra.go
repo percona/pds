@@ -18,6 +18,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
+	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
+	"github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/servicequotas"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
@@ -117,6 +119,12 @@ type Infra struct {
 	quotas  func(sdkaws.Config) quotasAPI
 	regions func(sdkaws.Config) regionsAPI
 	buckets func(sdkaws.Config) bucketAPI
+	// tagging, ec2, elb and emptyBuckets are the calls a delete finds and
+	// removes what the environment owns with.
+	tagging      func(sdkaws.Config) taggingAPI
+	ec2          func(sdkaws.Config) ec2SweepAPI
+	elb          func(sdkaws.Config) elbAPI
+	emptyBuckets func(sdkaws.Config) bucketEmptyAPI
 	// poll is how often a wait looks again.
 	poll time.Duration
 }
@@ -124,13 +132,17 @@ type Infra struct {
 // NewInfra builds Infra on the control plane's own identity.
 func NewInfra(base sdkaws.Config) *Infra {
 	return &Infra{
-		assume:  func(ctx context.Context, t Target) (sdkaws.Config, error) { return assumeRole(ctx, base, t) },
-		cfn:     func(cfg sdkaws.Config) cfnAPI { return cloudformation.NewFromConfig(cfg) },
-		eks:     func(cfg sdkaws.Config) eksAPI { return eks.NewFromConfig(cfg) },
-		quotas:  func(cfg sdkaws.Config) quotasAPI { return servicequotas.NewFromConfig(cfg) },
-		regions: func(cfg sdkaws.Config) regionsAPI { return ec2.NewFromConfig(cfg) },
-		buckets: func(cfg sdkaws.Config) bucketAPI { return s3.NewFromConfig(cfg) },
-		poll:    15 * time.Second,
+		assume:       func(ctx context.Context, t Target) (sdkaws.Config, error) { return assumeRole(ctx, base, t) },
+		cfn:          func(cfg sdkaws.Config) cfnAPI { return cloudformation.NewFromConfig(cfg) },
+		eks:          func(cfg sdkaws.Config) eksAPI { return eks.NewFromConfig(cfg) },
+		quotas:       func(cfg sdkaws.Config) quotasAPI { return servicequotas.NewFromConfig(cfg) },
+		regions:      func(cfg sdkaws.Config) regionsAPI { return ec2.NewFromConfig(cfg) },
+		buckets:      func(cfg sdkaws.Config) bucketAPI { return s3.NewFromConfig(cfg) },
+		tagging:      func(cfg sdkaws.Config) taggingAPI { return resourcegroupstaggingapi.NewFromConfig(cfg) },
+		ec2:          func(cfg sdkaws.Config) ec2SweepAPI { return ec2.NewFromConfig(cfg) },
+		elb:          func(cfg sdkaws.Config) elbAPI { return elasticloadbalancingv2.NewFromConfig(cfg) },
+		emptyBuckets: func(cfg sdkaws.Config) bucketEmptyAPI { return s3.NewFromConfig(cfg) },
+		poll:         15 * time.Second,
 	}
 }
 
