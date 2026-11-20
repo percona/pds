@@ -42,7 +42,7 @@ type provisionedRules struct {
 
 func readRules(t *testing.T) provisionedRules {
 	t.Helper()
-	files, err := pmmFiles("spoke-a", DefaultPMMSettings(), "1.9.1", true)
+	files, err := pmmFiles("spoke-a", DefaultPMMSettings(), "1.9.1", "", true)
 	require.NoError(t, err)
 
 	var cm struct {
@@ -76,7 +76,7 @@ func allRules(t *testing.T) map[string]provisionedRule {
 }
 
 func TestPMMFilesIncludeTheAlertRulesInTheKustomization(t *testing.T) {
-	files, err := pmmFiles("spoke-a", DefaultPMMSettings(), "1.9.1", true)
+	files, err := pmmFiles("spoke-a", DefaultPMMSettings(), "1.9.1", "", true)
 	require.NoError(t, err)
 
 	var index struct {
@@ -252,7 +252,7 @@ func TestAlertRuleThresholdsMatchTheCatalog(t *testing.T) {
 }
 
 func TestPMMHelmReleaseMountsTheRulesBesideTheChartConfigVolume(t *testing.T) {
-	files, err := pmmFiles("spoke-a", DefaultPMMSettings(), "1.9.1", true)
+	files, err := pmmFiles("spoke-a", DefaultPMMSettings(), "1.9.1", "", true)
 	require.NoError(t, err)
 
 	var doc struct {
@@ -302,7 +302,7 @@ func TestPMMHelmReleaseMountsTheRulesBesideTheChartConfigVolume(t *testing.T) {
 func TestPMMSettingsStillReadBackWithTheRulesMounted(t *testing.T) {
 	s := DefaultPMMSettings()
 	s.StorageGi = 20
-	files, err := pmmFiles("spoke-a", s, "1.9.1", true)
+	files, err := pmmFiles("spoke-a", s, "1.9.1", "", true)
 	require.NoError(t, err)
 
 	got, err := parsePMMSettings(files[pmmDir("spoke-a")+"/helmrelease.yaml"])

@@ -855,7 +855,12 @@ connected one. `internal/managed` holds the create run, and
   as succeeded with a message that says AWS was not touched, removes the
   environment from its Team's hub and forgets its record. `Remains` names what stays.
   Volumes are tagged by the EBS CSI addon (`extraVolumeTags` in the stack) and by
-  the `taggedStorageClass` the rendered release turns on.
+  the `taggedStorageClass` the rendered release turns on. Load balancers are tagged
+  by the `service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags`
+  annotation (`percona.com/pds=<environment id>`) that the hub writes on the
+  Service of every database it exposes and on monitoring's, reading the id from
+  the environment's record (`hub.Options.OwnershipID`). A create that cannot read
+  it is refused rather than written untagged. Connected environments carry none.
 
 ### Cloud connection and managed environment routes
 
