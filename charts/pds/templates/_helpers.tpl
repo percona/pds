@@ -684,6 +684,14 @@ in the Secret.
 {{- end }}
 - name: HUB_AGENT_IMAGE
   value: {{ $agentImage | quote }}
+{{- with .Values.adapter.hub.managedChartVersion }}
+- name: HUB_MANAGED_CHART_VERSION
+  value: {{ . | quote }}
+{{- end }}
+{{- with .Values.adapter.hub.managedOutgoingCIDRs }}
+- name: HUB_MANAGED_OUTGOING_CIDRS
+  value: {{ join "," . | quote }}
+{{- end }}
 {{- with .Values.adapter.hub.url }}
 - name: HUB_URL
   value: {{ . | quote }}

@@ -209,6 +209,14 @@ adapter:
     # Enrollment sends it as agentImage. A private GHCR package is pulled with
     # registryTokenKey, not the org git token.
     agentImage: ""
+    # -- Published pds chart version a managed environment installs, such as
+    # 0.1.0. Empty refuses to create a managed environment.
+    managedChartVersion: ""
+    # -- Addresses this control plane's AWS calls come from, as CIDRs such as
+    # 203.0.113.7/32. They are the only addresses a managed environment's
+    # Kubernetes API is open to while the control plane works in it. Empty
+    # refuses to create a managed environment.
+    managedOutgoingCIDRs: []
     # -- Agent role: the hub origin this spoke dials.
     url: ""
     # -- Agent role: the name the hub lists this environment under.
