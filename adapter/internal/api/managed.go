@@ -145,6 +145,39 @@ type managedCreatedResponse struct {
 
 type startRunRequest struct {
 	Kind string `json:"kind" validate:"required,oneof=upgrade_pds upgrade_kubernetes rebuild"`
+	// KubernetesVersion and ConfirmNodeGroupReplace only apply to
+	// upgrade_kubernetes. With no version it updates the stack's template.
+	KubernetesVersion       string `json:"kubernetesVersion"`
+	ConfirmNodeGroupReplace bool   `json:"confirmNodeGroupReplace"`
+}
+
+type deferRequest struct {
+	Days int `json:"days" validate:"required"`
+}
+
+type maintenanceWindowRequest struct {
+	Day      *int   `json:"day" validate:"required"`
+	Hour     *int   `json:"hour" validate:"required"`
+	TimeZone string `json:"timeZone" validate:"required"`
+}
+
+type updatePreviewRequest struct {
+	KubernetesVersion string `json:"kubernetesVersion"`
+}
+
+type changeResponse struct {
+	Resource    string `json:"resource"`
+	Type        string `json:"type"`
+	Action      string `json:"action"`
+	Replacement string `json:"replacement"`
+}
+
+// updatePreviewResponse is what an update of the stack would do. An update that
+// replaces the network or the Kubernetes cluster is never started.
+type updatePreviewResponse struct {
+	ReplacesNetwork   bool             `json:"replacesNetwork"`
+	ReplacesNodeGroup bool             `json:"replacesNodeGroup"`
+	Changes           []changeResponse `json:"changes"`
 }
 
 type deleteEnvironmentRequest struct {
@@ -281,14 +314,113 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimSpace(chi.URLParam(r, "name"))
-	run, err := s.managed.Start(r.Context(), scope, name, req.Kind)
+	run, err := s.managed.Start(r.Context(), scope, name, managed.StartRequest{
+		Kind: req.Kind, KubernetesVersion: strings.TrimSpace(req.KubernetesVersion), ConfirmNodeGroupReplace: req.ConfirmNodeGroupReplace,
+	})
 	if err != nil {
-		Respond(w, r, nil, managedError(err))
+		Respond(w, r, nil, managedErrorFor(err, invalidRun))
 
 		return
 	}
 
 	s.respondRunStarted(w, r, scope, name, run)
+}
+
+// handleDeferUpgrade puts the next chart version off.
+func (s *Server) handleDeferUpgrade(w http.ResponseWriter, r *http.Request) {
+	scope, ok := s.managerScope(w, r)
+	if !ok {
+		return
+	}
+	var req deferRequest
+	if err := s.decode(r, &req); err != nil {
+		Respond(w, r, nil, err)
+
+		return
+	}
+	name := strings.TrimSpace(chi.URLParam(r, "name"))
+	if err := s.managed.Defer(r.Context(), scope, name, req.Days); err != nil {
+		Respond(w, r, nil, managedErrorFor(err, invalidDeferral))
+
+		return
+	}
+
+	s.respondLifecycle(w, r, scope, name)
+}
+
+// handlePutMaintenanceWindow sets the weekly window the environment may be
+// upgraded in.
+func (s *Server) handlePutMaintenanceWindow(w http.ResponseWriter, r *http.Request) {
+	scope, ok := s.managerScope(w, r)
+	if !ok {
+		return
+	}
+	var req maintenanceWindowRequest
+	if err := s.decode(r, &req); err != nil {
+		Respond(w, r, nil, err)
+
+		return
+	}
+	name := strings.TrimSpace(chi.URLParam(r, "name"))
+	window := store.MaintenanceWindow{Day: time.Weekday(*req.Day), Hour: *req.Hour, Zone: strings.TrimSpace(req.TimeZone)}
+	if err := s.managed.SetWindow(r.Context(), scope, name, window); err != nil {
+		Respond(w, r, nil, managedErrorFor(err, invalidWindow))
+
+		return
+	}
+
+	s.respondLifecycle(w, r, scope, name)
+}
+
+// handlePreviewUpdate shows what an update of the stack would change. It makes a
+// change set in the customer's account and removes it again.
+func (s *Server) handlePreviewUpdate(w http.ResponseWriter, r *http.Request) {
+	scope, ok := s.managerScope(w, r)
+	if !ok {
+		return
+	}
+	var req updatePreviewRequest
+	if err := decodeOptionalBody(r, &req); err != nil {
+		Respond(w, r, nil, err)
+
+		return
+	}
+	verdict, err := s.managed.PreviewUpdate(r.Context(), scope, strings.TrimSpace(chi.URLParam(r, "name")), managed.InfraUpdate{
+		KubernetesVersion: strings.TrimSpace(req.KubernetesVersion),
+	})
+	if err != nil {
+		Respond(w, r, nil, managedErrorFor(err, invalidRun))
+
+		return
+	}
+	out := updatePreviewResponse{
+		ReplacesNetwork: verdict.ReplacesNetwork, ReplacesNodeGroup: verdict.ReplacesNodeGroup,
+		Changes: make([]changeResponse, 0, len(verdict.Plan.Changes)),
+	}
+	for _, c := range verdict.Plan.Changes {
+		out.Changes = append(out.Changes, changeResponse{Resource: c.Resource, Type: c.Type, Action: c.Action, Replacement: c.Replacement})
+	}
+
+	Respond(w, r, out, nil)
+}
+
+// respondLifecycle answers a change to the lifecycle with where it stands now.
+func (s *Server) respondLifecycle(w http.ResponseWriter, r *http.Request, scope auth.Scope, name string) {
+	envs, err := s.managed.Environments(r.Context(), scope.Team.ID)
+	if err != nil {
+		Respond(w, r, nil, managedError(err))
+
+		return
+	}
+	for _, env := range envs {
+		if env.Record.Name == name && env.Lifecycle != nil {
+			Respond(w, r, lifecycleView(*env.Lifecycle), nil)
+
+			return
+		}
+	}
+
+	Respond(w, r, nil, managedError(managed.ErrUnavailable))
 }
 
 // handleRetryRun re-runs the failed step of the environment's latest run.
@@ -415,9 +547,20 @@ func decodeOptionalBody(r *http.Request, out any) error {
 	return nil
 }
 
-// managedError maps what managed environments and their runs refuse onto the
+// What a request the managed routes cannot make sense of is told, by route.
+const (
+	invalidCreate   = "Check the environment name and the region, then try again."
+	invalidRun      = "Check the run kind and the Kubernetes version, then try again."
+	invalidDeferral = "Choose from 1 to 30 days."
+	invalidWindow   = "Choose a day, an hour from 0 to 23 and a time zone such as Europe/Berlin."
+)
+
+func managedError(err error) error { return managedErrorFor(err, invalidCreate) }
+
+// managedErrorFor maps what managed environments and their runs refuse onto the
 // API's errors. Every sentence says what to do next, and none carries AWS text.
-func managedError(err error) error {
+// invalid is the sentence for a request that makes no sense on this route.
+func managedErrorFor(err error, invalid string) error {
 	switch {
 	case err == nil:
 		return nil
@@ -426,7 +569,7 @@ func managedError(err error) error {
 	case errors.Is(err, store.ErrManagedEnvironmentExists):
 		return Conflict("An environment with that name already exists in your team. Choose another name.").WithCause(err)
 	case errors.Is(err, managed.ErrInvalid):
-		return Validation("Check the environment name and the region, then try again.").WithCause(err)
+		return Validation(invalid).WithCause(err)
 	case errors.Is(err, managed.ErrUnavailable):
 		return NotImplemented("This control plane cannot build or change managed environments. Contact Percona support.").WithCause(err)
 	case errors.Is(err, managed.ErrConnectionNotReady):
@@ -443,6 +586,20 @@ func managedError(err error) error {
 		return NotFound("That run does not exist.").WithCause(err)
 	case errors.Is(err, store.ErrCloudConnectionUnknown):
 		return cloudError(err)
+	case errors.Is(err, managed.ErrNothingToUpgrade):
+		return Conflict("This environment is up to date, so there is nothing to upgrade.").WithCause(err)
+	case errors.Is(err, managed.ErrAlreadyDeferred):
+		return Conflict("This version was already deferred once. It upgrades in the next maintenance window, or upgrade it now.").WithCause(err)
+	case errors.Is(err, managed.ErrNotReady):
+		return Conflict("This environment has not finished connecting. Wait for its first run to finish, then try again.").WithCause(err)
+	case errors.Is(err, managed.ErrLost):
+		return Conflict("This environment's infrastructure is missing. Rebuild it to bring it back.").WithCause(err)
+	case errors.Is(err, managed.ErrNotLost):
+		return Conflict("Only an environment whose infrastructure is missing can be rebuilt. Check its state, then try again.").WithCause(err)
+	case errors.Is(err, managed.ErrWouldReplace):
+		return Conflict("This update would replace the network or the Kubernetes cluster, so PDS will not run it. Contact Percona support.").WithCause(err)
+	case errors.Is(err, managed.ErrConfirmRequired):
+		return Conflict("This update replaces the node group and restarts every database. Confirm it to go on.").WithCause(err)
 	case errors.Is(err, store.ErrNotConnected):
 		return Downstream("The control plane is not available. Try again in a moment.", err)
 	}

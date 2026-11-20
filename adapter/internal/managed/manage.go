@@ -336,21 +336,81 @@ func (m *Manager) Has(ctx context.Context, team uint, name string) bool {
 	return err == nil
 }
 
-// Start queues a run on one of the Team's managed environments. A second run
-// while one is unfinished is store.ErrRunActive.
-func (m *Manager) Start(ctx context.Context, scope auth.Scope, name, kind string) (store.ProvisioningRun, error) {
-	if !slices.Contains([]string{KindUpgradePDS, KindKubernetes, KindRebuild}, kind) {
-		return store.ProvisioningRun{}, fmt.Errorf("%w: %q is not a run kind a person starts", ErrInvalid, kind)
+// StartRequest is a run a person asks for.
+type StartRequest struct {
+	Kind string
+	// KubernetesVersion is the minor version an upgrade_kubernetes run moves to.
+	// Empty updates only the stack's template revision.
+	KubernetesVersion string
+	// ConfirmNodeGroupReplace allows an upgrade_kubernetes run that replaces the
+	// node group, which restarts every database.
+	ConfirmNodeGroupReplace bool
+}
+
+// Start queues a run on one of the Team's managed environments through the
+// lifecycle, so its rules apply: nothing newer, a lost environment, a change that
+// would replace the network. A second run while one is unfinished is
+// store.ErrRunActive.
+func (m *Manager) Start(ctx context.Context, scope auth.Scope, name string, req StartRequest) (store.ProvisioningRun, error) {
+	if !slices.Contains([]string{KindUpgradePDS, KindKubernetes, KindRebuild}, req.Kind) {
+		return store.ProvisioningRun{}, fmt.Errorf("%w: %q is not a run kind a person starts", ErrInvalid, req.Kind)
+	}
+	if req.Kind != KindKubernetes && (req.KubernetesVersion != "" || req.ConfirmNodeGroupReplace) {
+		return store.ProvisioningRun{}, fmt.Errorf("%w: a Kubernetes version and a node group confirm belong to a %s run", ErrInvalid, KindKubernetes)
 	}
 	if _, err := m.roster.Get(ctx, scope.Team.ID, name); err != nil {
 		return store.ProvisioningRun{}, err
 	}
-	run, err := m.book.Start(ctx, scope.Team.ID, name, kind)
+	if m.life == nil {
+		return store.ProvisioningRun{}, fmt.Errorf("%w: upgrades are not offered", ErrUnavailable)
+	}
+
+	var run store.ProvisioningRun
+	var err error
+	switch req.Kind {
+	case KindUpgradePDS:
+		run, err = m.life.UpgradeNow(ctx, scope, name)
+	case KindKubernetes:
+		run, err = m.life.UpdateInfrastructure(ctx, scope, name, InfraUpdate{
+			KubernetesVersion: req.KubernetesVersion, ConfirmNodeGroupReplace: req.ConfirmNodeGroupReplace,
+		})
+	default:
+		run, err = m.life.Rebuild(ctx, scope, name)
+	}
 	if errors.Is(err, provision.ErrUnknownKind) {
 		return store.ProvisioningRun{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 
 	return run, err
+}
+
+// SetWindow records the weekly maintenance window of one of the Team's
+// environments.
+func (m *Manager) SetWindow(ctx context.Context, scope auth.Scope, name string, w store.MaintenanceWindow) error {
+	if m.life == nil {
+		return fmt.Errorf("%w: maintenance windows are not offered", ErrUnavailable)
+	}
+
+	return m.life.SetWindow(ctx, scope, name, w)
+}
+
+// Defer puts the environment's next chart version off for the given days.
+func (m *Manager) Defer(ctx context.Context, scope auth.Scope, name string, days int) error {
+	if m.life == nil {
+		return fmt.Errorf("%w: deferring is not offered", ErrUnavailable)
+	}
+
+	return m.life.Defer(ctx, scope, name, days)
+}
+
+// PreviewUpdate reads what an update of the environment's stack would change,
+// without changing anything.
+func (m *Manager) PreviewUpdate(ctx context.Context, scope auth.Scope, name string, in InfraUpdate) (Verdict, error) {
+	if m.life == nil {
+		return Verdict{}, fmt.Errorf("%w: updates are not offered", ErrUnavailable)
+	}
+
+	return m.life.PreviewUpdate(ctx, scope, name, in)
 }
 
 // Retry re-runs the failed step of the environment's latest run. Only the

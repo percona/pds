@@ -9,7 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/percona/pds/adapter/internal/api"
 	"github.com/percona/pds/adapter/internal/auth"
+	"github.com/percona/pds/adapter/internal/client/aws"
 	"github.com/percona/pds/adapter/internal/managed"
 	"github.com/percona/pds/adapter/internal/store"
 )
@@ -185,4 +187,206 @@ func TestWithoutALifecycleTheReadStillWorksAndOmitsIt(t *testing.T) {
 
 	assert.NotContains(t, got, "lifecycle")
 	assert.Equal(t, "orders", got["name"])
+}
+
+func (h *managedHTTP) ready(t *testing.T, name string) {
+	t.Helper()
+
+	h.create(t, name)
+	h.managed.runs[len(h.managed.runs)-1].Status = store.RunSucceeded
+}
+
+func TestARunOfEachKindAPersonStartsGoesThroughTheLifecycle(t *testing.T) {
+	for _, tc := range []struct{ body, call, kind string }{
+		{`{"kind":"upgrade_pds"}`, "upgrade", managed.KindUpgradePDS},
+		{`{"kind":"upgrade_kubernetes","kubernetesVersion":"1.34","confirmNodeGroupReplace":true}`, "update", managed.KindKubernetes},
+		{`{"kind":"rebuild"}`, "rebuild", managed.KindRebuild},
+	} {
+		h := newManagedHTTP(t)
+		h.ready(t, "orders")
+
+		rec := h.do(t, 0, http.MethodPost, "/api/environments/orders/runs", tc.body)
+
+		require.Equal(t, http.StatusAccepted, rec.Code, rec.Body.String())
+		got := jsonOf(t, rec)
+		run, _ := got["run"].(map[string]any)
+		assert.Equal(t, tc.kind, run["kind"])
+		assert.Equal(t, []string{tc.call}, h.life.calls)
+	}
+}
+
+func TestAKubernetesRunPassesTheVersionAndTheNodeGroupConfirmOn(t *testing.T) {
+	h := newManagedHTTP(t)
+	h.ready(t, "orders")
+
+	rec := h.do(t, 0, http.MethodPost, "/api/environments/orders/runs", `{"kind":"upgrade_kubernetes","kubernetesVersion":"1.34","confirmNodeGroupReplace":true}`)
+
+	require.Equal(t, http.StatusAccepted, rec.Code, rec.Body.String())
+	assert.Equal(t, managed.InfraUpdate{KubernetesVersion: "1.34", ConfirmNodeGroupReplace: true}, h.life.update)
+}
+
+func TestAnotherRunWhileOneIsActiveIsAConflictWithOneAction(t *testing.T) {
+	h := newManagedHTTP(t)
+	h.create(t, "orders")
+
+	rec := h.do(t, 0, http.MethodPost, "/api/environments/orders/runs", `{"kind":"upgrade_pds"}`)
+
+	require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+	assert.Equal(t, api.CodeConflict, jsonOf(t, rec)["code"])
+	assert.Equal(t, "This environment already has a run in progress. Wait for it to finish, or retry it if it failed.", jsonOf(t, rec)["message"])
+}
+
+func TestWhatTheLifecycleRefusesBecomesOneSafeSentenceWithOneAction(t *testing.T) {
+	for _, tc := range []struct {
+		refusal error
+		status  int
+		message string
+	}{
+		{managed.ErrNothingToUpgrade, http.StatusConflict, "This environment is up to date, so there is nothing to upgrade."},
+		{managed.ErrNotReady, http.StatusConflict, "This environment has not finished connecting. Wait for its first run to finish, then try again."},
+		{managed.ErrLost, http.StatusConflict, "This environment's infrastructure is missing. Rebuild it to bring it back."},
+		{managed.ErrNotLost, http.StatusConflict, "Only an environment whose infrastructure is missing can be rebuilt. Check its state, then try again."},
+		{managed.ErrWouldReplace, http.StatusConflict, "This update would replace the network or the Kubernetes cluster, so PDS will not run it. Contact Percona support."},
+		{managed.ErrConfirmRequired, http.StatusConflict, "This update replaces the node group and restarts every database. Confirm it to go on."},
+		{managed.ErrConnectionNotReady, http.StatusConflict, "This AWS account is not ready. Open it, check the connection, then try again."},
+		{managed.ErrInvalid, http.StatusBadRequest, "Check the run kind and the Kubernetes version, then try again."},
+		{managed.ErrUnavailable, http.StatusNotImplemented, "This control plane cannot build or change managed environments. Contact Percona support."},
+	} {
+		h := newManagedHTTP(t)
+		h.ready(t, "orders")
+		h.life.errs["update"] = tc.refusal
+
+		rec := h.do(t, 0, http.MethodPost, "/api/environments/orders/runs", `{"kind":"upgrade_kubernetes"}`)
+
+		assert.Equal(t, tc.status, rec.Code, tc.refusal.Error())
+		got := jsonOf(t, rec)
+		assert.Equal(t, tc.message, got["message"], tc.refusal.Error())
+		assert.NotContains(t, rec.Body.String(), tc.refusal.Error(), "the cause stays in the log")
+	}
+}
+
+func TestAnUnknownRunKindIsRefused(t *testing.T) {
+	h := newManagedHTTP(t)
+	h.ready(t, "orders")
+
+	for _, kind := range []string{"create", "delete", "upgrade_everything", ""} {
+		rec := h.do(t, 0, http.MethodPost, "/api/environments/orders/runs", `{"kind":"`+kind+`"}`)
+
+		assert.Equal(t, http.StatusBadRequest, rec.Code, kind)
+	}
+	assert.Empty(t, h.life.calls)
+}
+
+func TestAnotherTeamsEnvironmentAnswersNotFoundOnEveryLifecycleRoute(t *testing.T) {
+	h := newManagedHTTP(t)
+	h.ready(t, "orders")
+	h.life.errs["upgrade"] = store.ErrManagedEnvironmentUnknown
+	h.life.errs["defer"] = store.ErrManagedEnvironmentUnknown
+	h.life.errs["window"] = store.ErrManagedEnvironmentUnknown
+	h.life.errs["preview"] = store.ErrManagedEnvironmentUnknown
+
+	for _, call := range []struct{ method, path, body string }{
+		{http.MethodPost, "/api/environments/orders/runs", `{"kind":"upgrade_pds"}`},
+		{http.MethodPost, "/api/environments/orders/upgrades/defer", `{"days":3}`},
+		{http.MethodPut, "/api/environments/orders/maintenance-window", `{"day":5,"hour":22,"timeZone":"UTC"}`},
+		{http.MethodPost, "/api/environments/orders/updates/preview", `{}`},
+	} {
+		rec := h.do(t, 8, call.method, call.path, call.body)
+
+		assert.Equal(t, http.StatusNotFound, rec.Code, call.path)
+	}
+}
+
+func TestADeferralPutsTheVersionOffAndAnswersWithTheLifecycle(t *testing.T) {
+	h := newManagedHTTP(t)
+	h.ready(t, "orders")
+	h.life.status = managed.Status{ChartVersion: "0.1.0", NextChart: "0.2.0", Deferred: true}
+
+	rec := h.do(t, 0, http.MethodPost, "/api/environments/orders/upgrades/defer", `{"days":7}`)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, 7, h.life.days)
+	assert.Equal(t, true, jsonOf(t, rec)["deferred"])
+}
+
+func TestADeferralThatCannotBeMadeSaysWhy(t *testing.T) {
+	for _, tc := range []struct {
+		refusal error
+		status  int
+		message string
+	}{
+		{managed.ErrAlreadyDeferred, http.StatusConflict, "This version was already deferred once. It upgrades in the next maintenance window, or upgrade it now."},
+		{managed.ErrNothingToUpgrade, http.StatusConflict, "This environment is up to date, so there is nothing to upgrade."},
+		{managed.ErrInvalid, http.StatusBadRequest, "Choose from 1 to 30 days."},
+	} {
+		h := newManagedHTTP(t)
+		h.ready(t, "orders")
+		h.life.errs["defer"] = tc.refusal
+
+		rec := h.do(t, 0, http.MethodPost, "/api/environments/orders/upgrades/defer", `{"days":3}`)
+
+		assert.Equal(t, tc.status, rec.Code)
+		assert.Equal(t, tc.message, jsonOf(t, rec)["message"])
+	}
+}
+
+func TestADeferralNeedsTheDays(t *testing.T) {
+	h := newManagedHTTP(t)
+	h.ready(t, "orders")
+
+	assert.Equal(t, http.StatusBadRequest, h.do(t, 0, http.MethodPost, "/api/environments/orders/upgrades/defer", `{}`).Code)
+	assert.Empty(t, h.life.calls)
+}
+
+func TestTheMaintenanceWindowIsSetByDayHourAndTimeZone(t *testing.T) {
+	h := newManagedHTTP(t)
+	h.ready(t, "orders")
+
+	rec := h.do(t, 0, http.MethodPut, "/api/environments/orders/maintenance-window", `{"day":0,"hour":0,"timeZone":"Europe/Berlin"}`)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, store.MaintenanceWindow{Day: time.Sunday, Hour: 0, Zone: "Europe/Berlin"}, h.life.window, "Sunday midnight is a window, not a missing field")
+	assert.Contains(t, jsonOf(t, rec), "maintenanceWindow")
+}
+
+func TestAMaintenanceWindowThatMakesNoSenseIsRefusedWithOneSentence(t *testing.T) {
+	h := newManagedHTTP(t)
+	h.ready(t, "orders")
+
+	for _, body := range []string{`{"hour":2,"timeZone":"UTC"}`, `{"day":1,"timeZone":"UTC"}`, `{"day":1,"hour":2}`} {
+		assert.Equal(t, http.StatusBadRequest, h.do(t, 0, http.MethodPut, "/api/environments/orders/maintenance-window", body).Code, body)
+	}
+	h.life.errs["window"] = managed.ErrInvalid
+	rec := h.do(t, 0, http.MethodPut, "/api/environments/orders/maintenance-window", `{"day":9,"hour":2,"timeZone":"UTC"}`)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Equal(t, "Choose a day, an hour from 0 to 23 and a time zone such as Europe/Berlin.", jsonOf(t, rec)["message"])
+}
+
+func TestThePreviewShowsWhatAnUpdateWouldChangeWithoutStartingARun(t *testing.T) {
+	h := newManagedHTTP(t)
+	h.ready(t, "orders")
+	h.life.verdict = managed.Verdict{ReplacesNodeGroup: true}
+	h.life.verdict.Plan.Changes = []aws.Change{{Resource: "NodeGroup", Type: "AWS::EKS::Nodegroup", Action: "Modify", Replacement: "True"}}
+
+	rec := h.do(t, 0, http.MethodPost, "/api/environments/orders/updates/preview", `{"kubernetesVersion":"1.34"}`)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	got := jsonOf(t, rec)
+	assert.Equal(t, false, got["replacesNetwork"])
+	assert.Equal(t, true, got["replacesNodeGroup"])
+	assert.Equal(t, []any{map[string]any{"resource": "NodeGroup", "type": "AWS::EKS::Nodegroup", "action": "Modify", "replacement": "True"}}, got["changes"])
+	assert.Equal(t, "1.34", h.life.update.KubernetesVersion)
+	assert.Empty(t, h.managed.runs[1:], "only the create run exists")
+}
+
+func TestAPreviewOfAnUpToDateEnvironmentSaysThereIsNothingToUpgrade(t *testing.T) {
+	h := newManagedHTTP(t)
+	h.ready(t, "orders")
+	h.life.errs["preview"] = managed.ErrNothingToUpgrade
+
+	rec := h.do(t, 0, http.MethodPost, "/api/environments/orders/updates/preview", `{}`)
+
+	assert.Equal(t, http.StatusConflict, rec.Code)
+	assert.Equal(t, "This environment is up to date, so there is nothing to upgrade.", jsonOf(t, rec)["message"])
 }

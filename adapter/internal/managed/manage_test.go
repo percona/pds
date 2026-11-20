@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -252,38 +253,152 @@ func TestTheStateOfAManagedEnvironmentFollowsItsRunsThenItsHeartbeat(t *testing.
 	}
 }
 
-func TestStartingARunNeedsAManagedEnvironmentOfTheTeamAndAKnownKind(t *testing.T) {
-	book := &fakeBook{}
-	m := newManager(book, nil)
+// fakeLife answers every lifecycle call with the run or the error it is given.
+type fakeLife struct {
+	calls []string
+	err   error
+	update managed.InfraUpdate
+	window store.MaintenanceWindow
+	days  int
+}
 
-	run, err := m.Start(t.Context(), managerScope, "orders", managed.KindUpgradePDS)
+func (f *fakeLife) Describe(rec store.ManagedEnvironment) (managed.Status, bool) {
+	return managed.Status{ChartVersion: rec.ChartVersion}, true
+}
+
+func (f *fakeLife) run(call, kind string) (store.ProvisioningRun, error) {
+	f.calls = append(f.calls, call)
+
+	return store.ProvisioningRun{ID: 99, Kind: kind, Status: store.RunQueued}, f.err
+}
+
+func (f *fakeLife) UpgradeNow(context.Context, auth.Scope, string) (store.ProvisioningRun, error) {
+	return f.run("upgrade", managed.KindUpgradePDS)
+}
+
+func (f *fakeLife) UpdateInfrastructure(_ context.Context, _ auth.Scope, _ string, in managed.InfraUpdate) (store.ProvisioningRun, error) {
+	f.update = in
+
+	return f.run("update", managed.KindKubernetes)
+}
+
+func (f *fakeLife) Rebuild(context.Context, auth.Scope, string) (store.ProvisioningRun, error) {
+	return f.run("rebuild", managed.KindRebuild)
+}
+
+func (f *fakeLife) PreviewUpdate(_ context.Context, _ auth.Scope, _ string, in managed.InfraUpdate) (managed.Verdict, error) {
+	f.update = in
+	f.calls = append(f.calls, "preview")
+
+	return managed.Verdict{ReplacesNodeGroup: true}, f.err
+}
+
+func (f *fakeLife) SetWindow(_ context.Context, _ auth.Scope, _ string, w store.MaintenanceWindow) error {
+	f.window = w
+	f.calls = append(f.calls, "window")
+
+	return f.err
+}
+
+func (f *fakeLife) Defer(_ context.Context, _ auth.Scope, _ string, days int) error {
+	f.days = days
+	f.calls = append(f.calls, "defer")
+
+	return f.err
+}
+
+func newManagerWithLife(life managed.Lifecycler) *managed.Manager {
+	return managed.NewManager(
+		roster{
+			"orders": {ID: "aaaaaaaaaaaa", TeamID: 7, Name: "orders", ConnectionID: "conn1", Region: "eu-west-1"},
+			"other":  {ID: "bbbbbbbbbbbb", TeamID: 8, Name: "other", ConnectionID: "conn2", Region: "eu-west-1"},
+		},
+		&fakeBook{}, nil, life,
+	)
+}
+
+func TestARunAPersonStartsGoesThroughTheLifecycleSoItsRulesApply(t *testing.T) {
+	life := &fakeLife{}
+	m := newManagerWithLife(life)
+
+	run, err := m.Start(t.Context(), managerScope, "orders", managed.StartRequest{Kind: managed.KindUpgradePDS})
 	require.NoError(t, err)
-	assert.Equal(t, uint(99), run.ID)
-	assert.Equal(t, []string{"upgrade_pds/orders"}, book.started)
+	assert.Equal(t, managed.KindUpgradePDS, run.Kind)
+	_, err = m.Start(t.Context(), managerScope, "orders", managed.StartRequest{Kind: managed.KindKubernetes, KubernetesVersion: "1.34", ConfirmNodeGroupReplace: true})
+	require.NoError(t, err)
+	_, err = m.Start(t.Context(), managerScope, "orders", managed.StartRequest{Kind: managed.KindRebuild})
+	require.NoError(t, err)
 
-	_, err = m.Start(t.Context(), managerScope, "other", managed.KindRebuild)
+	assert.Equal(t, []string{"upgrade", "update", "rebuild"}, life.calls)
+	assert.Equal(t, managed.InfraUpdate{KubernetesVersion: "1.34", ConfirmNodeGroupReplace: true}, life.update)
+}
+
+func TestStartingARunNeedsAManagedEnvironmentOfTheTeamAndAKnownKind(t *testing.T) {
+	life := &fakeLife{}
+	m := newManagerWithLife(life)
+
+	_, err := m.Start(t.Context(), managerScope, "other", managed.StartRequest{Kind: managed.KindRebuild})
 	require.ErrorIs(t, err, store.ErrManagedEnvironmentUnknown, "another Team's environment is not found")
-	_, err = m.Start(t.Context(), managerScope, "orders", "create")
+	_, err = m.Start(t.Context(), managerScope, "orders", managed.StartRequest{Kind: "create"})
 	require.ErrorIs(t, err, managed.ErrInvalid)
-	_, err = m.Start(t.Context(), managerScope, "orders", "delete")
+	_, err = m.Start(t.Context(), managerScope, "orders", managed.StartRequest{Kind: "delete"})
 	require.ErrorIs(t, err, managed.ErrInvalid, "delete has its own route")
-	assert.Len(t, book.started, 1)
+	_, err = m.Start(t.Context(), managerScope, "orders", managed.StartRequest{Kind: managed.KindUpgradePDS, KubernetesVersion: "1.34"})
+	require.ErrorIs(t, err, managed.ErrInvalid, "a Kubernetes version belongs to a Kubernetes upgrade")
+	_, err = m.Start(t.Context(), managerScope, "orders", managed.StartRequest{Kind: managed.KindRebuild, ConfirmNodeGroupReplace: true})
+	require.ErrorIs(t, err, managed.ErrInvalid)
+	assert.Empty(t, life.calls)
 }
 
 func TestAKindNoReleaseHasStepsForIsUnavailable(t *testing.T) {
-	book := &fakeBook{startFn: func(kind string) error { return fmt.Errorf("%w %q", provision.ErrUnknownKind, kind) }}
+	m := newManagerWithLife(&fakeLife{err: fmt.Errorf("%w %q", provision.ErrUnknownKind, "rebuild")})
 
-	_, err := newManager(book, nil).Start(t.Context(), managerScope, "orders", managed.KindRebuild)
+	_, err := m.Start(t.Context(), managerScope, "orders", managed.StartRequest{Kind: managed.KindRebuild})
 
 	require.ErrorIs(t, err, managed.ErrUnavailable)
 }
 
-func TestARunAlreadyActiveIsPassedThroughForTheRouteToAnswer(t *testing.T) {
-	book := &fakeBook{startFn: func(string) error { return store.ErrRunActive }}
+func TestARunIsUnavailableWithoutALifecycle(t *testing.T) {
+	_, err := newManager(&fakeBook{}, nil).Start(t.Context(), managerScope, "orders", managed.StartRequest{Kind: managed.KindRebuild})
 
-	_, err := newManager(book, nil).Start(t.Context(), managerScope, "orders", managed.KindRebuild)
+	require.ErrorIs(t, err, managed.ErrUnavailable)
+}
 
-	require.ErrorIs(t, err, store.ErrRunActive)
+func TestWhatTheLifecycleRefusesIsPassedThroughForTheRouteToAnswer(t *testing.T) {
+	for _, refusal := range []error{
+		store.ErrRunActive, managed.ErrNothingToUpgrade, managed.ErrWouldReplace, managed.ErrConfirmRequired, managed.ErrLost, managed.ErrNotLost,
+	} {
+		m := newManagerWithLife(&fakeLife{err: refusal})
+
+		_, err := m.Start(t.Context(), managerScope, "orders", managed.StartRequest{Kind: managed.KindKubernetes})
+
+		require.ErrorIs(t, err, refusal)
+	}
+}
+
+func TestTheMaintenanceWindowTheDeferralAndThePreviewGoThroughTheLifecycle(t *testing.T) {
+	life := &fakeLife{}
+	m := newManagerWithLife(life)
+	w := store.MaintenanceWindow{Day: time.Friday, Hour: 22, Zone: "Europe/Berlin"}
+
+	require.NoError(t, m.SetWindow(t.Context(), managerScope, "orders", w))
+	require.NoError(t, m.Defer(t.Context(), managerScope, "orders", 7))
+	verdict, err := m.PreviewUpdate(t.Context(), managerScope, "orders", managed.InfraUpdate{KubernetesVersion: "1.34"})
+
+	require.NoError(t, err)
+	assert.True(t, verdict.ReplacesNodeGroup)
+	assert.Equal(t, w, life.window)
+	assert.Equal(t, 7, life.days)
+	assert.Equal(t, "1.34", life.update.KubernetesVersion)
+}
+
+func TestTheMaintenanceWindowTheDeferralAndThePreviewAreUnavailableWithoutALifecycle(t *testing.T) {
+	m := newManager(&fakeBook{}, nil)
+
+	require.ErrorIs(t, m.SetWindow(t.Context(), managerScope, "orders", store.MaintenanceWindow{}), managed.ErrUnavailable)
+	require.ErrorIs(t, m.Defer(t.Context(), managerScope, "orders", 1), managed.ErrUnavailable)
+	_, err := m.PreviewUpdate(t.Context(), managerScope, "orders", managed.InfraUpdate{})
+	require.ErrorIs(t, err, managed.ErrUnavailable)
 }
 
 func TestRetryNeedsTheLatestRunOfAManagedEnvironment(t *testing.T) {
