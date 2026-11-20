@@ -12,11 +12,57 @@ type environment struct {
 	Status    string `json:"status"`
 	LastSeen  string `json:"lastSeen,omitempty" jsonschema:"When the environment last reported in."`
 	Origin    string `json:"origin" jsonschema:"connected when the user connected the Kubernetes cluster, managed when PDS built it."`
-	State     string `json:"state" jsonschema:"creating, ready, degraded, failed or deleting."`
-	// ConnectionID, Region and Provisioning are set on a managed environment.
+	State     string `json:"state" jsonschema:"creating, ready, degraded, failed, deleting or lost. lost means the Kubernetes cluster is gone from the AWS account: the user rebuilds it or removes it from PDS."`
+	// ConnectionID, Region, Provisioning and Lifecycle are set on a managed environment.
 	ConnectionID string        `json:"connectionId,omitempty" jsonschema:"The AWS account a managed environment runs in."`
 	Region       string        `json:"region,omitempty"`
 	Provisioning *provisioning `json:"provisioning,omitempty" jsonschema:"How the latest run stands: its phases and, when it failed, what to do."`
+	Lifecycle    *lifecycle    `json:"lifecycle,omitempty" jsonschema:"Upgrades, changes made outside PDS and loss of a managed environment."`
+}
+
+type maintenanceWindow struct {
+	Day       int    `json:"day" jsonschema:"0 for Sunday to 6 for Saturday."`
+	Hour      int    `json:"hour" jsonschema:"0 to 23, in timeZone."`
+	TimeZone  string `json:"timeZone"`
+	NextStart string `json:"nextStart" jsonschema:"The window that is open now, or the next one."`
+	NextEnd   string `json:"nextEnd"`
+}
+
+type driftItem struct {
+	Resource string `json:"resource" jsonschema:"The resource in the AWS account that was changed."`
+	Detail   string `json:"detail" jsonschema:"Changed outside PDS or Deleted outside PDS."`
+}
+
+// lifecycle is what the control plane knows of a managed environment's upgrades,
+// drift and loss, as the hourly check last read it.
+type lifecycle struct {
+	ChartVersion               string            `json:"chartVersion,omitempty" jsonschema:"The PDS version on the environment."`
+	PendingChartVersion        string            `json:"pendingChartVersion,omitempty" jsonschema:"A newer PDS version that upgrades in the maintenance window, or now with upgrade_environment."`
+	SkippedChartVersion        string            `json:"skippedChartVersion,omitempty" jsonschema:"A version that failed here and was rolled back. It is not tried again until the user retries."`
+	Deferred                   bool              `json:"deferred" jsonschema:"The user put pendingChartVersion off until deferredUntil."`
+	DeferredUntil              string            `json:"deferredUntil,omitempty"`
+	MaintenanceWindow          maintenanceWindow `json:"maintenanceWindow"`
+	TemplateRevision           int               `json:"templateRevision"`
+	LatestTemplateRevision     int               `json:"latestTemplateRevision"`
+	TemplateOutOfDate          bool              `json:"templateOutOfDate" jsonschema:"The infrastructure template is older than the one this PDS ships. upgrade_environment with kind kubernetes and no kubernetesVersion updates it."`
+	TemplateSummary            string            `json:"templateSummary,omitempty" jsonschema:"Tell the user in these words, for example Template revision 1, latest 2."`
+	KubernetesVersion          string            `json:"kubernetesVersion,omitempty"`
+	KubernetesUpgradeAvailable bool              `json:"kubernetesUpgradeAvailable"`
+	Drift                      []driftItem       `json:"drift" jsonschema:"What was changed outside PDS, by resource. PDS only reports it and never overwrites it."`
+	DriftCheckedAt             string            `json:"driftCheckedAt,omitempty"`
+	Lost                       bool              `json:"lost"`
+	LostReason                 string            `json:"lostReason,omitempty" jsonschema:"Infrastructure missing."`
+	LostAt                     string            `json:"lostAt,omitempty"`
+}
+
+// tidy makes the lists a tool answers with arrays, never null.
+func (e *environment) tidy() {
+	if e.Provisioning != nil {
+		e.Provisioning.Phases = orEmpty(e.Provisioning.Phases)
+	}
+	if e.Lifecycle != nil {
+		e.Lifecycle.Drift = orEmpty(e.Lifecycle.Drift)
+	}
 }
 
 type refusal struct {
@@ -74,7 +120,8 @@ func environmentReads() []tool {
 			title: "List environments",
 			description: "List the environments of this control plane, with their status and when each was last seen. " +
 				"origin says whether the user connected the Kubernetes cluster or PDS built the environment, and state says how it is. " +
-				"A managed environment also carries provisioning: the four phases of its latest run and, when a run failed, what to do. " +
+				"A managed environment also carries provisioning: the four phases of its latest run and, when a run failed, what to do, " +
+				"and lifecycle: a newer PDS version, the maintenance window, changes made outside PDS and whether its infrastructure is lost. " +
 				"Use an environment name when creating a database.",
 			annotations: readOnly(),
 		}, listEnvironments),
@@ -84,7 +131,10 @@ func environmentReads() []tool {
 			title: "Get an environment",
 			description: "Get one environment with its status, origin and state. " +
 				"A managed environment carries provisioning: its latest run, the four phases (Creating network and Kubernetes cluster, Connecting to the environment, Installing PDS, Finishing) and, when a run failed, " +
-				"failure with the sentence to tell the user and the one action. When AWS refused a step, failure.refusal says which quota or permission and where.",
+				"failure with the sentence to tell the user and the one action. When AWS refused a step, failure.refusal says which quota or permission and where. " +
+				"lifecycle names a pending PDS version, its deferral, the maintenance window, templateSummary when the infrastructure template is old, kubernetesUpgradeAvailable, " +
+				"drift by resource (changed outside PDS: report it, PDS never overwrites it) and lostReason when the Kubernetes cluster is gone. " +
+				"When state is lost, ask the user whether to rebuild it with rebuild_environment. Removing it from PDS only is for the user in the console.",
 			annotations: readOnly(),
 		}, getEnvironment),
 	}
@@ -103,9 +153,7 @@ func getEnvironment(ctx context.Context, c *call, in environmentInput) (environm
 	if err := c.get(ctx, "/api/environments/"+path, nil, &out); err != nil {
 		return environment{}, hintedAs(err, msgEnvironmentNotFoundHint)
 	}
-	if out.Provisioning != nil {
-		out.Provisioning.Phases = orEmpty(out.Provisioning.Phases)
-	}
+	out.tidy()
 
 	return out, nil
 }
@@ -121,9 +169,7 @@ func listEnvironments(ctx context.Context, c *call, _ noInput) (environments, er
 	}
 	out.Environments = orEmpty(out.Environments)
 	for i := range out.Environments {
-		if p := out.Environments[i].Provisioning; p != nil {
-			p.Phases = orEmpty(p.Phases)
-		}
+		out.Environments[i].tidy()
 	}
 
 	return out, nil

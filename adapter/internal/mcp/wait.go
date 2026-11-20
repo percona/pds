@@ -29,7 +29,10 @@ const (
 	outcomeNotFound   = "not_found"
 	outcomeDeleted    = "deleted"
 	outcomeBlocked    = "blocked"
-	outcomeWaiting    = "waiting"
+	outcomeLost       = "lost"
+	// stateLost is the state of an environment whose infrastructure is gone.
+	stateLost      = "lost"
+	outcomeWaiting = "waiting"
 )
 
 const (
@@ -108,7 +111,7 @@ type environmentWaitInput struct {
 }
 
 type environmentWait struct {
-	Outcome       string        `json:"outcome" jsonschema:"One of connected, deleted, failed or blocked when a run stopped, waiting when a run is paused until the AWS account answers, in_progress when the wait ran out, or not_found."`
+	Outcome       string        `json:"outcome" jsonschema:"One of connected, deleted, failed or blocked when a run stopped, lost when the Kubernetes cluster is gone from the AWS account, waiting when a run is paused until the AWS account answers, in_progress when the wait ran out, or not_found."`
 	Name          string        `json:"name"`
 	Status        string        `json:"status,omitempty"`
 	State         string        `json:"state,omitempty"`
@@ -313,7 +316,7 @@ func waitForEnvironment(ctx context.Context, c *call, in environmentWaitInput) (
 			return progress == outcomeBlocked, nil
 		}
 
-		return found.Status == "connected" && progress != "in_progress" || progress == "failed" || progress == "blocked", nil
+		return found.Status == "connected" && progress != "in_progress" || progress == "failed" || progress == "blocked" || found.State == stateLost, nil
 	})
 	if err != nil {
 		return environmentWait{}, err
@@ -332,6 +335,8 @@ func waitForEnvironment(ctx context.Context, c *call, in environmentWaitInput) (
 		out.Outcome = outcomeDeleted
 	case done && (progress == outcomeFailed || progress == outcomeBlocked):
 		out.Outcome = progress
+	case done && out.State == stateLost:
+		out.Outcome = outcomeLost
 	case done:
 		out.Outcome = outcomeConnected
 	case found == nil:
