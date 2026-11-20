@@ -25,8 +25,8 @@ type BackupKeyUsers interface {
 	Remove(ctx context.Context, spec backupkey.Spec) error
 }
 
-// BackupKeyCluster is what the agent reads and writes in its own environment.
-type BackupKeyCluster interface {
+// BackupKeyEnvironment is what the agent reads and writes in its own environment.
+type BackupKeyEnvironment interface {
 	// Secret returns the backup Secret's data, and nothing when there is none.
 	Secret(ctx context.Context) (map[string]string, error)
 	// WriteSecret creates the Secret or sets these keys on it.
@@ -43,16 +43,16 @@ type BackupKeyCluster interface {
 // environment, it removes the user, which the role the control plane assumes in
 // the customer's account has no permission to do.
 type BackupKey struct {
-	Users   BackupKeyUsers
-	Cluster BackupKeyCluster
-	Spec    backupkey.Spec
+	Users       BackupKeyUsers
+	Environment BackupKeyEnvironment
+	Spec        backupkey.Spec
 }
 
 // Reconcile is safe to run on every beat. A key that is in the Secret is left
 // alone, because IAM cannot show a secret again. A write that failed after the
 // key was made leaves the Secret without it, and the next run makes a new one.
 func (b BackupKey) Reconcile(ctx context.Context) error {
-	requested, done, err := b.Cluster.Removal(ctx)
+	requested, done, err := b.Environment.Removal(ctx)
 	if err != nil {
 		return fmt.Errorf("read the backup user removal request: %w", err)
 	}
@@ -64,10 +64,10 @@ func (b BackupKey) Reconcile(ctx context.Context) error {
 			return err
 		}
 
-		return b.Cluster.MarkRemoved(ctx)
+		return b.Environment.MarkRemoved(ctx)
 	}
 
-	values, err := b.Cluster.Secret(ctx)
+	values, err := b.Environment.Secret(ctx)
 	if err != nil {
 		return fmt.Errorf("read the backup Secret: %w", err)
 	}
@@ -82,7 +82,7 @@ func (b BackupKey) Reconcile(ctx context.Context) error {
 		return err
 	}
 
-	return b.Cluster.WriteSecret(ctx, map[string]string{backupKeyID: key.ID, backupKeySecret: key.Secret})
+	return b.Environment.WriteSecret(ctx, map[string]string{backupKeyID: key.ID, backupKeySecret: key.Secret})
 }
 
 // reconcileBackupKey runs the environment's backup key reconcile for the beat.

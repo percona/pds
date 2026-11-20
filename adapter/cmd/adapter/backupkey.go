@@ -29,24 +29,24 @@ func newBackupKey(ctx context.Context, cfg config.Config, environment *kube.Clie
 		return nil, err
 	}
 	key := agent.BackupKey{
-		Users:   users,
-		Cluster: kubeBackupCluster{client: environment, namespace: cfg.ConnectionsNamespace(), secret: cfg.AgentBackup.Secret},
-		Spec:    backupSpec(cfg.AgentBackup),
+		Users:       users,
+		Environment: kubeBackupEnvironment{client: environment, namespace: cfg.ConnectionsNamespace(), secret: cfg.AgentBackup.Secret},
+		Spec:        backupSpec(cfg.AgentBackup),
 	}
 
 	return key.Reconcile, nil
 }
 
-// kubeBackupCluster is the agent's own namespace as the backup key sees it: the
+// kubeBackupEnvironment is the agent's own namespace as the backup key sees it: the
 // Secret the key is written to, and the ConfigMap the control plane asks for
 // the user's removal through.
-type kubeBackupCluster struct {
+type kubeBackupEnvironment struct {
 	client    *kube.Client
 	namespace string
 	secret    string
 }
 
-func (k kubeBackupCluster) Secret(ctx context.Context) (map[string]string, error) {
+func (k kubeBackupEnvironment) Secret(ctx context.Context) (map[string]string, error) {
 	values, err := k.client.GetSecret(ctx, k.namespace, k.secret)
 	if errors.Is(err, kube.ErrSecretNotFound) {
 		return nil, nil
@@ -55,11 +55,11 @@ func (k kubeBackupCluster) Secret(ctx context.Context) (map[string]string, error
 	return values, err
 }
 
-func (k kubeBackupCluster) WriteSecret(ctx context.Context, values map[string]string) error {
+func (k kubeBackupEnvironment) WriteSecret(ctx context.Context, values map[string]string) error {
 	return k.client.PutSecret(ctx, k.namespace, k.secret, values)
 }
 
-func (k kubeBackupCluster) Removal(ctx context.Context) (requested, done bool, err error) {
+func (k kubeBackupEnvironment) Removal(ctx context.Context) (requested, done bool, err error) {
 	values, err := k.client.GetConfigMap(ctx, k.namespace, managed.BackupUserRequest)
 	if errors.Is(err, kube.ErrConfigMapNotFound) {
 		return false, false, nil
@@ -71,6 +71,6 @@ func (k kubeBackupCluster) Removal(ctx context.Context) (requested, done bool, e
 	return values[managed.BackupUserRequestKey] == managed.BackupUserRemove, values[managed.BackupUserRemovedKey] == "true", nil
 }
 
-func (k kubeBackupCluster) MarkRemoved(ctx context.Context) error {
+func (k kubeBackupEnvironment) MarkRemoved(ctx context.Context) error {
 	return k.client.PutConfigMap(ctx, k.namespace, managed.BackupUserRequest, map[string]string{managed.BackupUserRemovedKey: "true"})
 }

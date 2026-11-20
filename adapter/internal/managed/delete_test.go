@@ -363,7 +363,7 @@ func TestDeleteStepNamesAreInTheOrderTheyRunAndEachHasAPhase(t *testing.T) {
 	assert.True(t, strings.Contains(fmt.Sprint(managed.DeletePhase("delete-stack")), "Kubernetes cluster"))
 }
 
-func TestDeleteWaitsForTheAgentToRemoveItsBackupUserBeforeTheEKSClusterGoes(t *testing.T) {
+func TestDeleteWaitsForTheAgentToRemoveItsBackupUserBeforeTheStackGoes(t *testing.T) {
 	d := newDeleteLab(t)
 	d.drainer.backup = []int{1, 1, 0}
 	e := d.engine()

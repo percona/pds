@@ -84,7 +84,7 @@ func (e *environment) MarkRemoved(context.Context) error {
 func TestTheAgentMakesTheUserAndWritesTheKeyStraightToTheSecret(t *testing.T) {
 	account, env := &iamAccount{}, &environment{}
 
-	require.NoError(t, agent.BackupKey{Users: account, Cluster: env, Spec: keySpec}.Reconcile(t.Context()))
+	require.NoError(t, agent.BackupKey{Users: account, Environment: env, Spec: keySpec}.Reconcile(t.Context()))
 
 	assert.Equal(t, map[string]string{"AWS_ACCESS_KEY_ID": "AKIAFAKE", "AWS_SECRET_ACCESS_KEY": "shh"}, env.secret)
 	assert.Equal(t, 1, account.ensured)
@@ -94,7 +94,7 @@ func TestTheAgentMakesTheUserAndWritesTheKeyStraightToTheSecret(t *testing.T) {
 func TestTheAgentLeavesAKeyThatIsAlreadyInTheSecret(t *testing.T) {
 	account := &iamAccount{}
 	env := &environment{secret: map[string]string{"AWS_ACCESS_KEY_ID": "AKIAOLD", "AWS_SECRET_ACCESS_KEY": "old"}}
-	key := agent.BackupKey{Users: account, Cluster: env, Spec: keySpec}
+	key := agent.BackupKey{Users: account, Environment: env, Spec: keySpec}
 
 	require.NoError(t, key.Reconcile(t.Context()))
 	require.NoError(t, key.Reconcile(t.Context()))
@@ -108,7 +108,7 @@ func TestTheAgentMakesANewKeyWhenTheSecretLostIt(t *testing.T) {
 	account := &iamAccount{}
 	env := &environment{secret: map[string]string{"AWS_ACCESS_KEY_ID": "AKIAOLD"}}
 
-	require.NoError(t, agent.BackupKey{Users: account, Cluster: env, Spec: keySpec}.Reconcile(t.Context()))
+	require.NoError(t, agent.BackupKey{Users: account, Environment: env, Spec: keySpec}.Reconcile(t.Context()))
 
 	assert.Equal(t, "shh", env.secret["AWS_SECRET_ACCESS_KEY"])
 	assert.Equal(t, 1, account.minted)
@@ -117,7 +117,7 @@ func TestTheAgentMakesANewKeyWhenTheSecretLostIt(t *testing.T) {
 func TestAKeyThatCouldNotBeWrittenIsMadeAgainOnTheNextBeat(t *testing.T) {
 	account := &iamAccount{}
 	env := &environment{failWrite: errors.New("the API is down")}
-	key := agent.BackupKey{Users: account, Cluster: env, Spec: keySpec}
+	key := agent.BackupKey{Users: account, Environment: env, Spec: keySpec}
 
 	require.Error(t, key.Reconcile(t.Context()))
 	env.failWrite = nil
@@ -130,7 +130,7 @@ func TestAKeyThatCouldNotBeWrittenIsMadeAgainOnTheNextBeat(t *testing.T) {
 func TestAnIAMRefusalIsReturnedAndNothingIsWritten(t *testing.T) {
 	account, env := &iamAccount{err: errors.New("AccessDenied")}, &environment{}
 
-	err := agent.BackupKey{Users: account, Cluster: env, Spec: keySpec}.Reconcile(t.Context())
+	err := agent.BackupKey{Users: account, Environment: env, Spec: keySpec}.Reconcile(t.Context())
 
 	require.Error(t, err)
 	assert.Zero(t, env.secretWrites)
@@ -139,7 +139,7 @@ func TestAnIAMRefusalIsReturnedAndNothingIsWritten(t *testing.T) {
 func TestTheAgentRemovesTheUserWhenTheControlPlaneAsksAndSaysSo(t *testing.T) {
 	account := &iamAccount{user: true}
 	env := &environment{requested: true, secret: map[string]string{"AWS_ACCESS_KEY_ID": "AKIAOLD", "AWS_SECRET_ACCESS_KEY": "old"}}
-	key := agent.BackupKey{Users: account, Cluster: env, Spec: keySpec}
+	key := agent.BackupKey{Users: account, Environment: env, Spec: keySpec}
 
 	require.NoError(t, key.Reconcile(t.Context()))
 	require.NoError(t, key.Reconcile(t.Context()))
@@ -152,7 +152,7 @@ func TestTheAgentRemovesTheUserWhenTheControlPlaneAsksAndSaysSo(t *testing.T) {
 func TestTheAgentNeverMakesAKeyWhileARemovalIsRequested(t *testing.T) {
 	account, env := &iamAccount{}, &environment{requested: true}
 
-	require.NoError(t, agent.BackupKey{Users: account, Cluster: env, Spec: keySpec}.Reconcile(t.Context()))
+	require.NoError(t, agent.BackupKey{Users: account, Environment: env, Spec: keySpec}.Reconcile(t.Context()))
 
 	assert.Zero(t, account.minted)
 	assert.Zero(t, env.secretWrites)
@@ -161,7 +161,7 @@ func TestTheAgentNeverMakesAKeyWhileARemovalIsRequested(t *testing.T) {
 func TestARemovalIAMRefusedIsNotReportedDone(t *testing.T) {
 	account, env := &iamAccount{err: errors.New("AccessDenied")}, &environment{requested: true}
 
-	require.Error(t, agent.BackupKey{Users: account, Cluster: env, Spec: keySpec}.Reconcile(t.Context()))
+	require.Error(t, agent.BackupKey{Users: account, Environment: env, Spec: keySpec}.Reconcile(t.Context()))
 
 	assert.False(t, env.removed)
 }

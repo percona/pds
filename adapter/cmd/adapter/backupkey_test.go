@@ -13,30 +13,30 @@ import (
 	"github.com/percona/pds/adapter/internal/managed"
 )
 
-func newBackupCluster() (kubeBackupCluster, *kube.Client) {
+func newBackupEnvironment() (kubeBackupEnvironment, *kube.Client) {
 	client := kube.New(clientfake.NewClientset())
 
-	return kubeBackupCluster{client: client, namespace: "everest-system", secret: "pds-s3"}, client
+	return kubeBackupEnvironment{client: client, namespace: "everest-system", secret: "pds-s3"}, client
 }
 
 func TestTheBackupSecretIsWrittenAndReadBackAndAbsentIsNothing(t *testing.T) {
-	cluster, _ := newBackupCluster()
+	environment, _ := newBackupEnvironment()
 
-	got, err := cluster.Secret(t.Context())
+	got, err := environment.Secret(t.Context())
 	require.NoError(t, err)
 	assert.Empty(t, got)
 
-	require.NoError(t, cluster.WriteSecret(t.Context(), map[string]string{"AWS_ACCESS_KEY_ID": "AKIA", "AWS_SECRET_ACCESS_KEY": "shh"}))
+	require.NoError(t, environment.WriteSecret(t.Context(), map[string]string{"AWS_ACCESS_KEY_ID": "AKIA", "AWS_SECRET_ACCESS_KEY": "shh"}))
 
-	got, err = cluster.Secret(t.Context())
+	got, err = environment.Secret(t.Context())
 	require.NoError(t, err)
 	assert.Equal(t, "AKIA", got["AWS_ACCESS_KEY_ID"])
 }
 
 func TestARemovalNobodyAskedForIsNotRequested(t *testing.T) {
-	cluster, _ := newBackupCluster()
+	environment, _ := newBackupEnvironment()
 
-	requested, done, err := cluster.Removal(t.Context())
+	requested, done, err := environment.Removal(t.Context())
 
 	require.NoError(t, err)
 	assert.False(t, requested)
@@ -44,17 +44,17 @@ func TestARemovalNobodyAskedForIsNotRequested(t *testing.T) {
 }
 
 func TestARemovalTheControlPlaneAskedForIsRequestedUntilTheAgentMarksItDone(t *testing.T) {
-	cluster, client := newBackupCluster()
+	environment, client := newBackupEnvironment()
 	require.NoError(t, client.PutConfigMap(t.Context(), "everest-system", managed.BackupUserRequest, map[string]string{"request": "remove"}))
 
-	requested, done, err := cluster.Removal(t.Context())
+	requested, done, err := environment.Removal(t.Context())
 	require.NoError(t, err)
 	assert.True(t, requested)
 	assert.False(t, done)
 
-	require.NoError(t, cluster.MarkRemoved(t.Context()))
+	require.NoError(t, environment.MarkRemoved(t.Context()))
 
-	requested, done, err = cluster.Removal(t.Context())
+	requested, done, err = environment.Removal(t.Context())
 	require.NoError(t, err)
 	assert.True(t, requested, "the request stays, so a restarted agent never makes the key again")
 	assert.True(t, done)
