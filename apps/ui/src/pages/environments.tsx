@@ -113,6 +113,7 @@ function EnvironmentRow({
   });
 
   const managed = environment.origin === "managed";
+  const operable = !managed || environment.state === "ready";
   const pill = managedPill(environment.state);
   const unreachable = !managed && environment.status === "unreachable";
   // A row appears the moment a token is minted, so most of the time an
@@ -193,25 +194,29 @@ function EnvironmentRow({
             </div>
           ) : (
             <div className="flex items-center gap-1">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                aria-expanded={monitoringOpen}
-                onClick={() => setMonitoringOpen((open) => !open)}
-              >
-                Monitoring
-              </Button>
-              {supportAccess ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  aria-expanded={supportOpen}
-                  onClick={() => setSupportOpen((open) => !open)}
-                >
-                  Support access
-                </Button>
+              {operable ? (
+                <>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-expanded={monitoringOpen}
+                    onClick={() => setMonitoringOpen((open) => !open)}
+                  >
+                    Monitoring
+                  </Button>
+                  {supportAccess ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-expanded={supportOpen}
+                      onClick={() => setSupportOpen((open) => !open)}
+                    >
+                      Support access
+                    </Button>
+                  ) : null}
+                </>
               ) : null}
               {joining || managed ? null : (
                 <Button asChild variant="ghost" size="sm">

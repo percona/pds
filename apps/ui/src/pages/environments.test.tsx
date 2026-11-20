@@ -662,6 +662,9 @@ describe("EnvironmentsPage managed environments", () => {
     expect(screen.getByText("Finishing")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Disconnect" })).not.toBeInTheDocument();
+    // There is nothing to monitor or open support on until the environment exists.
+    expect(screen.queryByRole("button", { name: "Monitoring" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Support access" })).not.toBeInTheDocument();
   });
 
   it("offers Retry after a failure and links an unreachable account to its fix", async () => {
