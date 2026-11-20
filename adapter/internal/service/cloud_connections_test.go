@@ -212,12 +212,12 @@ func TestACheckExplainsEachWayAnAccountIsNotReady(t *testing.T) {
 	}{
 		{"role refused", aws.Inspection{}, aws.ErrAssumeDenied, store.CloudPending, "role"},
 		{"aws unreachable", aws.Inspection{}, errors.New("dial tcp: i/o timeout"), store.CloudPending, "could not check"},
-		{"other account", aws.Inspection{AccountID: "999999999999", StackStatus: "CREATE_COMPLETE", TemplateVersion: 1}, nil, store.CloudPending, "different AWS account"},
-		{"stack still creating", aws.Inspection{AccountID: "123456789012", StackStatus: "CREATE_IN_PROGRESS", TemplateVersion: 1}, nil, store.CloudPending, "still being created"},
-		{"stack rolled back", aws.Inspection{AccountID: "123456789012", StackStatus: "ROLLBACK_COMPLETE", TemplateVersion: 1}, nil, store.CloudPending, "stack"},
-		{"role missing", aws.Inspection{AccountID: "123456789012", StackStatus: "UPDATE_COMPLETE", TemplateVersion: 1, MissingRoles: []string{"pds-x-node"}}, nil, store.CloudPending, "pds-x-node"},
-		{"old template", aws.Inspection{AccountID: "123456789012", StackStatus: "UPDATE_COMPLETE", TemplateVersion: 0}, nil, store.CloudOutOfDate, "Rerun"},
-		{"healthy after rollback of an update", aws.Inspection{AccountID: "123456789012", StackStatus: "UPDATE_ROLLBACK_COMPLETE", TemplateVersion: 1}, nil, store.CloudReady, ""},
+		{"other account", aws.Inspection{AccountID: "999999999999", StackStatus: "CREATE_COMPLETE", TemplateVersion: service.CloudTemplateVersion}, nil, store.CloudPending, "different AWS account"},
+		{"stack still creating", aws.Inspection{AccountID: "123456789012", StackStatus: "CREATE_IN_PROGRESS", TemplateVersion: service.CloudTemplateVersion}, nil, store.CloudPending, "still being created"},
+		{"stack rolled back", aws.Inspection{AccountID: "123456789012", StackStatus: "ROLLBACK_COMPLETE", TemplateVersion: service.CloudTemplateVersion}, nil, store.CloudPending, "stack"},
+		{"role missing", aws.Inspection{AccountID: "123456789012", StackStatus: "UPDATE_COMPLETE", TemplateVersion: service.CloudTemplateVersion, MissingRoles: []string{"pds-x-node"}}, nil, store.CloudPending, "pds-x-node"},
+		{"old template", aws.Inspection{AccountID: "123456789012", StackStatus: "UPDATE_COMPLETE", TemplateVersion: service.CloudTemplateVersion - 1}, nil, store.CloudOutOfDate, "Rerun"},
+		{"healthy after rollback of an update", aws.Inspection{AccountID: "123456789012", StackStatus: "UPDATE_ROLLBACK_COMPLETE", TemplateVersion: service.CloudTemplateVersion}, nil, store.CloudReady, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

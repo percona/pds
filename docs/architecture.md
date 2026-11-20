@@ -696,13 +696,28 @@ kubeconfig is stored, only what makes the next assume possible.
   that setting enroll, events and verify answer 501.
 - **Permissions.** The control plane role passes the service role to
   CloudFormation, drives `pds-*` stacks only through it and never changes its own
-  stack, and reads. The writes live on the service role, split over four managed
-  policies to stay under the 6144 character limit of one: tag-scoped on
+  stack, and reads. `DeleteStack`, `ExecuteChangeSet` and `DeleteChangeSet` carry
+  no role, so only the calls that start a stack require the service role by name.
+  The writes that build an environment live on the service role, split over three
+  managed policies to stay under the 6144 character limit of one: tag-scoped on
   `percona.com/pds`, tagging allowed only at creation (`ec2:CreateTags` with
-  `ec2:CreateAction`), service-linked roles named by `iam:AWSServiceName`, S3 by
-  a `pds-*` bucket name and `s3:ResourceAccount`, and every regional write limited
-  to the connection's regions. The policy has not been run against a live
-  account yet.
+  `ec2:CreateAction`), service-linked roles named by `iam:AWSServiceName`, and
+  every regional write limited to the connection's regions. A fourth managed
+  policy sits on the control plane role, because the sweep and the backup bucket
+  are the control plane's own calls: it deletes volumes, snapshots, network
+  interfaces, security groups, load balancers and target groups only when they
+  carry `percona.com/pds`, or the `elbv2.k8s.aws/cluster` or `aws:eks:cluster-name`
+  tag of a `pds-*` cluster, and manages S3 by a `pds-*` bucket name and
+  `s3:ResourceAccount`, objects and versions included. The tag
+  `kubernetes.io/cluster/<name>` names its cluster in the key, which an IAM
+  condition cannot match, so a resource that carries only that tag is reported
+  as blocking the delete and left. Access entries are named by their `pds-*`
+  cluster, since they are made without tags. A test lists every AWS call the
+  `internal/client/aws` package declares and fails when the control plane role
+  is not granted its action. Template version 2 adds the drift reads, moves the
+  sweep to the control plane, and fixes the stack role condition, so a
+  connection made from version 1 is Out of date until its command is rerun. The
+  policy has not been run against a live account yet.
 - **Connect script.** It reads the account and enrolls with a connect token,
   creates or updates the stack with `aws cloudformation deploy`, turns on
   termination protection, and asks the control plane to check. A step is reported

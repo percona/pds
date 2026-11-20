@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -144,11 +146,17 @@ func TestEachManagedPolicyFitsTheLimitWithRoomToGrow(t *testing.T) {
 	}
 }
 
-func TestTheServiceRoleCarriesEveryManagedPolicyAndTheControlPlaneOnlyPassesRoleAndDrivesStacks(t *testing.T) {
+func TestTheServiceRoleCarriesTheBuildPoliciesAndTheControlPlaneCarriesTheSweepPolicy(t *testing.T) {
 	tpl := loadCloudTemplate(t)
 	policies := tpl.ofType("AWS::IAM::ManagedPolicy")
 	attached := asList(tpl.Resources["ServiceRole"].Properties["ManagedPolicyArns"])
 	for name := range policies {
+		if name == "CleanupPolicy" {
+			assert.NotContains(t, fmt.Sprint(tpl.Resources["ServiceRole"].Properties["ManagedPolicyArns"]), name, "the sweep runs as the control plane")
+			assert.Contains(t, fmt.Sprint(tpl.Resources["ControlPlaneRole"].Properties["ManagedPolicyArns"]), name, "%s is attached", name)
+
+			continue
+		}
 		assert.Contains(t, fmt.Sprint(tpl.Resources["ServiceRole"].Properties["ManagedPolicyArns"]), name, "%s is attached", name)
 	}
 	assert.LessOrEqual(t, len(attached), 10, "a role holds ten managed policies by default")
@@ -256,4 +264,192 @@ func contains(list []string, want string) bool {
 	}
 
 	return false
+}
+
+// sdkAction maps a method of an AWS SDK service the aws client calls to the IAM
+// actions the call needs. A method the client declares and this table lacks
+// fails the audit below, so a new call cannot ship without being granted.
+var sdkActions = map[string][]string{
+	"cloudformation.CreateStack":                       {"cloudformation:CreateStack"},
+	"cloudformation.DeleteStack":                       {"cloudformation:DeleteStack"},
+	"cloudformation.DescribeStacks":                    {"cloudformation:DescribeStacks"},
+	"cloudformation.DescribeStackEvents":               {"cloudformation:DescribeStackEvents"},
+	"cloudformation.CreateChangeSet":                   {"cloudformation:CreateChangeSet"},
+	"cloudformation.DescribeChangeSet":                 {"cloudformation:DescribeChangeSet"},
+	"cloudformation.ExecuteChangeSet":                  {"cloudformation:ExecuteChangeSet"},
+	"cloudformation.DeleteChangeSet":                   {"cloudformation:DeleteChangeSet"},
+	"cloudformation.DetectStackDrift":                  {"cloudformation:DetectStackDrift"},
+	"cloudformation.DescribeStackDriftDetectionStatus": {"cloudformation:DescribeStackDriftDetectionStatus"},
+	"cloudformation.DescribeStackResourceDrifts":       {"cloudformation:DescribeStackResourceDrifts"},
+	"eks.UpdateClusterConfig":                          {"eks:UpdateClusterConfig"},
+	"eks.CreateAccessEntry":                            {"eks:CreateAccessEntry"},
+	"eks.DeleteAccessEntry":                            {"eks:DeleteAccessEntry"},
+	"eks.AssociateAccessPolicy":                        {"eks:AssociateAccessPolicy"},
+	"eks.DescribeCluster":                              {"eks:DescribeCluster"},
+	"eks.DescribeUpdate":                               {"eks:DescribeUpdate"},
+	"eks.ListNodegroups":                               {"eks:ListNodegroups"},
+	"eks.DescribeNodegroup":                            {"eks:DescribeNodegroup"},
+	"ec2.DescribeRegions":                              {"ec2:DescribeRegions"},
+	"ec2.DeleteVolume":                                 {"ec2:DeleteVolume"},
+	"ec2.DeleteSnapshot":                               {"ec2:DeleteSnapshot"},
+	"ec2.DeleteNetworkInterface":                       {"ec2:DeleteNetworkInterface"},
+	"ec2.DeleteSecurityGroup":                          {"ec2:DeleteSecurityGroup"},
+	"elasticloadbalancingv2.DeleteLoadBalancer":        {"elasticloadbalancing:DeleteLoadBalancer"},
+	"elasticloadbalancingv2.DeleteTargetGroup":         {"elasticloadbalancing:DeleteTargetGroup"},
+	"resourcegroupstaggingapi.GetResources":            {"tag:GetResources"},
+	"servicequotas.GetServiceQuota":                    {"servicequotas:GetServiceQuota"},
+	"s3.CreateBucket":                                  {"s3:CreateBucket"},
+	"s3.PutPublicAccessBlock":                          {"s3:PutBucketPublicAccessBlock"},
+	"s3.PutBucketTagging":                              {"s3:PutBucketTagging"},
+	"s3.GetBucketTagging":                              {"s3:GetBucketTagging"},
+	"s3.ListObjectVersions":                            {"s3:ListBucketVersions"},
+	"s3.DeleteObjects":                                 {"s3:DeleteObject", "s3:DeleteObjectVersion"},
+	"s3.DeleteBucket":                                  {"s3:DeleteBucket"},
+}
+
+// declaredSDKCalls is every SDK method the aws client names in an interface,
+// which is how each of its calls is declared and faked.
+func declaredSDKCalls(t *testing.T) []string {
+	t.Helper()
+
+	files, err := filepath.Glob("../client/aws/*.go")
+	require.NoError(t, err)
+	declared := regexp.MustCompile(`(?m)^\s+([A-Z][A-Za-z]+)\(context\.Context, \*([a-z0-9]+)\.[A-Za-z]+Input`)
+	seen := map[string]bool{}
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		body, err := os.ReadFile(file)
+		require.NoError(t, err)
+		for _, m := range declared.FindAllStringSubmatch(string(body), -1) {
+			seen[m[2]+"."+m[1]] = true
+		}
+	}
+	require.NotEmpty(t, seen)
+
+	out := make([]string, 0, len(seen))
+	for call := range seen {
+		out = append(out, call)
+	}
+
+	return out
+}
+
+// grantedTo is every action a role's policies allow: its inline policies and the
+// managed policies it lists.
+func grantedTo(t *testing.T, tpl cfn, role string) []string {
+	t.Helper()
+
+	var documents []any
+	if inline, ok := tpl.Resources[role].Properties["Policies"].([]any); ok {
+		for _, entry := range inline {
+			documents = append(documents, entry.(map[string]any)["PolicyDocument"])
+		}
+	}
+	if attached, ok := tpl.Resources[role].Properties["ManagedPolicyArns"].([]any); ok {
+		for _, arn := range attached {
+			if ref, ok := arn.(map[string]any)["Ref"].(string); ok {
+				if policy, ok := tpl.Resources[ref]; ok && policy.Type == "AWS::IAM::ManagedPolicy" {
+					documents = append(documents, policy.Properties["PolicyDocument"])
+				}
+			}
+		}
+	}
+	var actions []string
+	for _, document := range documents {
+		for _, statement := range statements(t, document) {
+			if statement["Effect"] == "Allow" {
+				actions = append(actions, asList(statement["Action"])...)
+			}
+		}
+	}
+
+	return actions
+}
+
+func allows(granted []string, action string) bool {
+	for _, pattern := range granted {
+		if ok, _ := filepath.Match(pattern, action); ok {
+			return true
+		}
+	}
+
+	return false
+}
+
+func TestEveryAWSCallTheControlPlaneMakesIsGrantedToItsRole(t *testing.T) {
+	tpl := loadCloudTemplate(t)
+	granted := grantedTo(t, tpl, "ControlPlaneRole")
+
+	for _, call := range declaredSDKCalls(t) {
+		needs, known := sdkActions[call]
+		require.True(t, known, "%s is called by the aws client and the audit does not know which actions it needs", call)
+		for _, action := range needs {
+			assert.True(t, allows(granted, action), "%s needs %s, which the control plane role is not granted", call, action)
+		}
+	}
+	assert.True(t, allows(granted, "iam:GetRole"), "the connection check reads the roles")
+}
+
+func TestTheControlPlaneRoleIsNotGrantedTheCreateActionsOfTheServiceRole(t *testing.T) {
+	granted := grantedTo(t, loadCloudTemplate(t), "ControlPlaneRole")
+
+	for _, action := range granted {
+		assert.NotRegexp(t, `^(ec2:(Create|Allocate|Attach|Authorize|Run)|eks:(CreateCluster|CreateNodegroup|CreateAddon)|iam:(Create|Put|Attach|Update))`, action,
+			"%s lets the control plane build what only the service role may", action)
+	}
+}
+
+func TestCloudFormationCallsThatCarryNoRoleAreNotRequiredToNameOne(t *testing.T) {
+	tpl := loadCloudTemplate(t)
+	carries := map[string]bool{"cloudformation:CreateStack": true, "cloudformation:CreateChangeSet": true, "cloudformation:UpdateStack": true}
+
+	found := map[string]bool{}
+	for _, entry := range tpl.Resources["ControlPlaneRole"].Properties["Policies"].([]any) {
+		for _, statement := range statements(t, entry.(map[string]any)["PolicyDocument"]) {
+			if statement["Effect"] != "Allow" {
+				continue
+			}
+			condition, _ := statement["Condition"].(map[string]any)
+			for _, action := range asList(statement["Action"]) {
+				if !strings.HasPrefix(action, "cloudformation:") {
+					continue
+				}
+				found[action] = true
+				if carries[action] {
+					assert.Contains(t, condition, "StringEquals", "%s names the service role", action)
+					assert.Contains(t, fmt.Sprint(condition["StringEquals"]), "cloudformation:RoleArn", action)
+
+					continue
+				}
+				assert.NotContains(t, fmt.Sprint(condition["StringEquals"]), "cloudformation:RoleArn",
+					"%s is called without a role, so a StringEquals on it would refuse every call", action)
+			}
+		}
+	}
+	for _, action := range []string{"cloudformation:DeleteStack", "cloudformation:ExecuteChangeSet", "cloudformation:DeleteChangeSet"} {
+		assert.True(t, found[action], action)
+	}
+}
+
+func TestEveryDestructiveActionOfTheControlPlaneNeedsAnOwnershipTag(t *testing.T) {
+	tpl := loadCloudTemplate(t)
+	destructive := regexp.MustCompile(`^(ec2:Delete|elasticloadbalancing:Delete)`)
+
+	for _, policy := range tpl.ofType("AWS::IAM::ManagedPolicy") {
+		for _, statement := range statements(t, policy.Properties["PolicyDocument"]) {
+			if statement["Effect"] != "Allow" {
+				continue
+			}
+			for _, action := range asList(statement["Action"]) {
+				if !destructive.MatchString(action) || !allows(grantedTo(t, tpl, "ControlPlaneRole"), action) {
+					continue
+				}
+				condition, _ := statement["Condition"].(map[string]any)
+				assert.Regexp(t, `aws:ResourceTag/(percona\.com/pds|elbv2\.k8s\.aws/cluster|aws:eks:cluster-name)`, fmt.Sprint(condition),
+					"%s may delete anything in the account without an ownership tag", action)
+			}
+		}
+	}
 }
