@@ -84,7 +84,9 @@ export function connectProgress(
 
   const done = roles === "succeeded" && verify === "succeeded";
   const failed = roles === "failed" || verify === "failed";
-  const lastSignal = account.signalAt ? Date.parse(account.signalAt) : Date.parse(account.createdAt);
+  const lastSignal = account.signalAt
+    ? Date.parse(account.signalAt)
+    : Date.parse(account.createdAt);
   const stopped = !done && !failed && now.getTime() - lastSignal > quietMs;
 
   return {
