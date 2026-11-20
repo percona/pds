@@ -12,6 +12,9 @@ import (
 	"sync"
 	"time"
 
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	"github.com/percona/pds/adapter/internal/api"
 	"github.com/percona/pds/adapter/internal/auth"
 	"github.com/percona/pds/adapter/internal/client/aws"
 	"github.com/percona/pds/adapter/internal/client/kube"
@@ -70,6 +73,25 @@ func managedGitURL(cfg config.Config) func(repo string) string {
 		}
 
 		return cfg.HubGitURL
+	}
+}
+
+// helmReleases is the Flux kind the control plane keeps the pds release in.
+var helmReleases = schema.GroupVersionResource{Group: "helm.toolkit.fluxcd.io", Version: "v2", Resource: "helmreleases"}
+
+// fluxReleaseReader reads the HelmRelease an agent reports, and nothing when
+// there is none: a connected environment has no such release.
+func fluxReleaseReader(client *kube.Client, namespace, name string) func(ctx context.Context) (map[string]any, error) {
+	return func(ctx context.Context) (map[string]any, error) {
+		object, err := client.GetObject(ctx, helmReleases, namespace, name)
+		if errors.Is(err, kube.ErrObjectNotFound) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		return object.Object, nil
 	}
 }
 
@@ -331,6 +353,10 @@ func newManagedEnvironments(
 	}
 
 	settings, creatorSettings := managedSettings(cfg)
+	granted, err := api.CloudTemplateGrants()
+	if err != nil {
+		return nil, nil, err
+	}
 	deps := managed.Deps{
 		Records:     records,
 		Connections: db.CloudConnections(),
@@ -348,6 +374,7 @@ func newManagedEnvironments(
 		),
 		Hub:      hubSide,
 		Settings: settings,
+		Granted:  granted,
 	}
 
 	late, lateLife := &lateRuns{}, &lateLifecycle{}

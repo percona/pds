@@ -66,6 +66,14 @@ type Config struct {
 	// ManagedChartVersion is the published pds chart a managed environment
 	// installs. Empty refuses managed environments.
 	ManagedChartVersion string
+	// AgentReleaseNamespace and AgentReleaseName name the Flux HelmRelease an
+	// agent reports on its heartbeat. Empty means the environment has none, as a
+	// connected environment does.
+	AgentReleaseNamespace string
+	AgentReleaseName      string
+	// AgentBackup is the IAM user a managed environment's agent makes for its
+	// backups. An empty User means the environment keeps its key some other way.
+	AgentBackup AgentBackup
 	// ProvisionLeaseTTL is how long a provisioning run's lease lasts unrenewed.
 	ProvisionLeaseTTL time.Duration
 	// ProvisionMaxAttempts caps the automatic attempts of one step.
@@ -1095,6 +1103,69 @@ func validateDatabaseURL(raw string) error {
 	return nil
 }
 
+// AgentBackup names the IAM user an agent makes for its environment's backups
+// and the Secret it writes the key to.
+type AgentBackup struct {
+	User        string
+	Path        string
+	BoundaryARN string
+	Bucket      string
+	// Secret is the Secret in the pod's namespace that holds the key.
+	Secret string
+	// Tag is the value of the percona.com/pds tag on the user.
+	Tag    string
+	Region string
+}
+
+var (
+	iamName     = regexp.MustCompile(`^[A-Za-z0-9+=,.@_-]{1,64}$`)
+	iamPath     = regexp.MustCompile(`^/([A-Za-z0-9+=,.@_-]+/)+$`)
+	boundaryARN = regexp.MustCompile(`^arn:aws:iam::[0-9]{12}:policy/([A-Za-z0-9+=,.@_-]+/)*[A-Za-z0-9+=,.@_-]+$`)
+	bucketName  = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{2,62}$`)
+	tagValue    = regexp.MustCompile(`^[A-Za-z0-9]{1,64}$`)
+)
+
+// loadAgentBackup reads the backup key settings. The release sets them all
+// together, so one that is set without the rest, or that cannot be used, is
+// refused: the agent would otherwise never make a key and say nothing.
+func loadAgentBackup(cfg *Config, lookup func(key, fallback string) string) error {
+	user := strings.TrimSpace(lookup("AGENT_BACKUP_USER", ""))
+	if user == "" {
+		return nil
+	}
+	backup := AgentBackup{
+		User:        user,
+		Path:        strings.TrimSpace(lookup("AGENT_BACKUP_USER_PATH", "")),
+		BoundaryARN: strings.TrimSpace(lookup("AGENT_BACKUP_BOUNDARY_ARN", "")),
+		Bucket:      strings.TrimSpace(lookup("AGENT_BACKUP_BUCKET", "")),
+		Secret:      strings.TrimSpace(lookup("AGENT_BACKUP_SECRET", "")),
+		Tag:         strings.TrimSpace(lookup("AGENT_BACKUP_TAG", "")),
+		Region:      strings.TrimSpace(lookup("AWS_REGION", "")),
+	}
+	for _, check := range []struct {
+		name  string
+		value string
+		ok    *regexp.Regexp
+	}{
+		{"AGENT_BACKUP_USER", backup.User, iamName},
+		{"AGENT_BACKUP_USER_PATH", backup.Path, iamPath},
+		{"AGENT_BACKUP_BOUNDARY_ARN", backup.BoundaryARN, boundaryARN},
+		{"AGENT_BACKUP_BUCKET", backup.Bucket, bucketName},
+		{"AGENT_BACKUP_SECRET", backup.Secret, dnsLabel},
+		{"AGENT_BACKUP_TAG", backup.Tag, tagValue},
+		{"AWS_REGION", backup.Region, regionName},
+	} {
+		if !check.ok.MatchString(check.value) {
+			return fmt.Errorf("%s: %q is not usable for the backup key", check.name, check.value)
+		}
+	}
+	cfg.AgentBackup = backup
+
+	return nil
+}
+
+var regionName = regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-[0-9]$`)
+
 // loadProvisioning reads the settings of provisioning runs and the Access
 // window. Each value that is set must be usable: a typo would otherwise turn
 // into a run that never gets a lease or a window that never closes.
@@ -1132,6 +1203,18 @@ func loadProvisioning(cfg *Config, lookup func(key, fallback string) string) err
 		cfg.ManagedChartVersion = version
 	}
 
+	if ref := strings.TrimSpace(lookup("AGENT_RELEASE_REF", "")); ref != "" {
+		namespace, name, ok := strings.Cut(ref, "/")
+		if !ok || !dnsLabel.MatchString(namespace) || !dnsLabel.MatchString(name) {
+			return fmt.Errorf("AGENT_RELEASE_REF: %q is not a namespace and a name such as flux-system/pds", ref)
+		}
+		cfg.AgentReleaseNamespace, cfg.AgentReleaseName = namespace, name
+	}
+
+	if err := loadAgentBackup(cfg, lookup); err != nil {
+		return err
+	}
+
 	attempts, err := strconv.Atoi(lookup("HUB_PROVISION_MAX_ATTEMPTS", "5"))
 	if err != nil || attempts < 1 {
 		return errors.New("HUB_PROVISION_MAX_ATTEMPTS must be a whole number of at least 1")
@@ -1140,6 +1223,8 @@ func loadProvisioning(cfg *Config, lookup func(key, fallback string) string) err
 
 	return nil
 }
+
+var dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 var chartVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`)
 

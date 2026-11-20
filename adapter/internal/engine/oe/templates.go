@@ -95,6 +95,10 @@ func (p *Plugin) toInstance(in *everest.Instance, fallbackNamespace string) engi
 const (
 	AnnotationAWSLoadBalancerInternal = "service.beta.kubernetes.io/aws-load-balancer-internal"
 	AnnotationAWSLoadBalancerScheme   = "service.beta.kubernetes.io/aws-load-balancer-scheme"
+	// AnnotationAWSLoadBalancerTags makes the cloud tag the load balancer it
+	// creates, which is how a managed environment's delete finds it.
+	AnnotationAWSLoadBalancerTags = "service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags"
+	ownershipTagKey               = "percona.com/pds"
 
 	awsSchemeInternal       = "internal"
 	awsSchemeInternetFacing = "internet-facing"
@@ -105,8 +109,18 @@ const (
 // public one. A private one admits the private address ranges only, so a
 // cloud that ignores the annotations still does not open it to the internet.
 // A public one always names its allow list. Open to the internet is
-// 0.0.0.0/0, never an omitted list.
-func LoadBalancerServiceFor(exposure engine.Exposure) *everest.ServiceSpec {
+// 0.0.0.0/0, never an omitted list. A managed environment passes its ID, and
+// the load balancer is tagged with it; an empty ID leaves it untagged.
+func LoadBalancerServiceFor(exposure engine.Exposure, environmentID string) *everest.ServiceSpec {
+	svc := loadBalancerService(exposure)
+	if environmentID != "" {
+		svc.Annotations[AnnotationAWSLoadBalancerTags] = ownershipTagKey + "=" + environmentID
+	}
+
+	return svc
+}
+
+func loadBalancerService(exposure engine.Exposure) *everest.ServiceSpec {
 	svc := &everest.ServiceSpec{ServiceType: everest.ServiceTypeLoadBalancer}
 	if exposure.Private {
 		svc.Annotations = map[string]string{

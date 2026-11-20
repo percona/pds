@@ -2,6 +2,9 @@ package managed_test
 
 import (
 	"fmt"
+	"maps"
+	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -51,9 +54,12 @@ func TestKubernetesUpgradeUpdatesTheStackThroughAChangeSetAndWaitsForIt(t *testi
 	require.Len(t, l.cloud.updates, 1)
 	spec := l.cloud.updates[0]
 	assert.Equal(t, managed.NetworkTemplate, spec.Template, "an update always carries the template this release embeds")
-	assert.Equal(t, map[string]string{"KubernetesVersion": "1.34"}, spec.Parameters, "every other parameter keeps its value")
+	assert.Equal(t, map[string]string{
+		"KubernetesVersion": "1.34",
+		"AgentRoleArn":      "arn:aws:iam::111122223333:role/pds/" + l.connID + "/pds-" + l.connID + "-agent",
+	}, spec.Parameters, "every other parameter keeps its value, and the agent role is the one a stack made before revision 2 lacks")
 	assert.Equal(t, "arn:aws:iam::111122223333:role/pds/"+l.connID+"/pds-"+l.connID+"-cloudformation", spec.ServiceRoleARN)
-	assert.Equal(t, "1", spec.Tags["percona.com/pds-template-revision"])
+	assert.Equal(t, strconv.Itoa(managed.TemplateRevision), spec.Tags["percona.com/pds-template-revision"])
 	assert.Equal(t, l.envID, spec.Tags["percona.com/pds"])
 	assert.Equal(t, []string{spec.Name}, l.cloud.applied)
 	assert.Equal(t, 1, l.cloud.count("check-role"))
@@ -162,7 +168,8 @@ func TestATemplateOnlyUpdateChangesNoParameter(t *testing.T) {
 	l.work(e)
 
 	require.Equal(t, store.RunSucceeded, l.run(run.ID).Status, l.run(run.ID).Message)
-	assert.Empty(t, l.cloud.updates[0].Parameters)
+	assert.Equal(t, []string{"AgentRoleArn"}, slices.Sorted(maps.Keys(l.cloud.updates[0].Parameters)),
+		"only the parameter a stack made before revision 2 lacks, and no value that is already there")
 }
 
 func TestAnUpdateThatNeverFinishesFailsTheStepWithASentence(t *testing.T) {

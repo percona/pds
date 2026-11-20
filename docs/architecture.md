@@ -682,8 +682,9 @@ kubeconfig is stored, only what makes the next assume possible.
 - **Template.** `internal/api/cloud_connection_template.yaml` is embedded and
   served as is, the same text to everybody, and `cfn-lint` checks it in CI. Under
   the path `/pds/<connection id>/` it creates the role the control plane assumes,
-  the CloudFormation service role, the EKS cluster role, the node role and the
-  EBS CSI Pod Identity role, with ARNs that follow from the connection id. The
+  the CloudFormation service role, the EKS cluster role, the node role, the
+  EBS CSI Pod Identity role and the agent's Pod Identity role (with the
+  permissions boundary of the backup user it makes), with ARNs that follow from the connection id. The
   stack reports `TemplateVersion`, and the control plane requires at least
   `service.CloudTemplateVersion`: a lower one is Out of date. This version is the
   bootstrap template's own, apart from the revision in
@@ -696,13 +697,28 @@ kubeconfig is stored, only what makes the next assume possible.
   that setting enroll, events and verify answer 501.
 - **Permissions.** The control plane role passes the service role to
   CloudFormation, drives `pds-*` stacks only through it and never changes its own
-  stack, and reads. The writes live on the service role, split over four managed
-  policies to stay under the 6144 character limit of one: tag-scoped on
+  stack, and reads. `DeleteStack`, `ExecuteChangeSet` and `DeleteChangeSet` carry
+  no role, so only the calls that start a stack require the service role by name.
+  The writes that build an environment live on the service role, split over three
+  managed policies to stay under the 6144 character limit of one: tag-scoped on
   `percona.com/pds`, tagging allowed only at creation (`ec2:CreateTags` with
-  `ec2:CreateAction`), service-linked roles named by `iam:AWSServiceName`, S3 by
-  a `pds-*` bucket name and `s3:ResourceAccount`, and every regional write limited
-  to the connection's regions. The policy has not been run against a live
-  account yet.
+  `ec2:CreateAction`), service-linked roles named by `iam:AWSServiceName`, and
+  every regional write limited to the connection's regions. A fourth managed
+  policy sits on the control plane role, because the sweep and the backup bucket
+  are the control plane's own calls: it deletes volumes, snapshots, network
+  interfaces, security groups, load balancers and target groups only when they
+  carry `percona.com/pds`, or the `elbv2.k8s.aws/cluster` or `aws:eks:cluster-name`
+  tag of a `pds-*` cluster, and manages S3 by a `pds-*` bucket name and
+  `s3:ResourceAccount`, objects and versions included. The tag
+  `kubernetes.io/cluster/<name>` names its cluster in the key, which an IAM
+  condition cannot match, so a resource that carries only that tag is reported
+  as blocking the delete and left. Access entries are named by their `pds-*`
+  cluster, since they are made without tags. A test lists every AWS call the
+  `internal/client/aws` package declares and fails when the control plane role
+  is not granted its action. Template version 2 adds the drift reads, moves the
+  sweep to the control plane, and fixes the stack role condition, so a
+  connection made from version 1 is Out of date until its command is rerun. The
+  policy has not been run against a live account yet.
 - **Connect script.** It reads the account and enrolls with a connect token,
   creates or updates the stack with `aws cloudformation deploy`, turns on
   termination protection, and asks the control plane to check. A step is reported
@@ -743,7 +759,8 @@ connected one. `internal/managed` holds the create run, and
   run only through the connection's service role: a dedicated VPC, an EKS
   cluster with `authenticationMode` API, no creator admin rights and a private
   endpoint, a node group, and the Pod Identity agent, CoreDNS and EBS CSI
-  add-ons. Every resource carries `percona.com/pds`, and the EBS CSI driver tags
+  add-ons, and a Pod Identity association that gives the release's agent its role.
+  Every resource carries `percona.com/pds`, and the EBS CSI driver tags
   its volumes. The stack records `managed.TemplateRevision` as a tag and an
   output, and a test holds it equal to `managedTemplate.revision` in
   `charts/pds/compatibility.yaml`.
@@ -804,7 +821,11 @@ connected one. `internal/managed` holds the create run, and
   `support.managedUpgrade.from` lists for the version the environment runs
   (`internal/managed/compatibility.yaml` is a copy of the pin a test keeps
   equal). The run commits the version to Git and waits for the agent's heartbeat
-  to report the release (`Heartbeat.Release`); no AWS role is involved. The
+  to report the release (`Heartbeat.Release`); no AWS role is involved. The agent
+  reads the HelmRelease named by `AGENT_RELEASE_REF` (the rendered release sets
+  `flux-system/pds`, and the chart grants `get` on that one name) and reports the
+  newest Helm revision marked deployed, the version the last upgrade tried, and
+  ready, upgrading or rolled back. A read that fails sends nothing. The
   release rolls back after one attempt, the run fails with "Upgrade failed,
   rolled back to <version>", Git is put back, and the version is skipped until a
   User upgrades early or a newer version is listed. A User may defer a version
@@ -822,10 +843,21 @@ connected one. `internal/managed` holds the create run, and
   environment's Region, blocks public access and tags it with
   `percona.com/pds`. It is outside the stack because a stack cannot delete a
   bucket that holds objects. The release registers the bucket as the BackupStorage
-  `s3`, reading its access key from the Secret `pds-s3`. The control plane never makes
-  that key: it would pass through a stack output or its logs, and the connection's
-  role has no IAM user permissions. Until the Secret exists in the environment,
-  the BackupStorage has no key to read.
+  `s3`, reading its access key from the Secret `pds-s3`. The agent makes that
+  key, in the environment: it runs as the connection's agent role (EKS Pod
+  Identity, through the stack's `AgentPodIdentity` for the release's
+  ServiceAccount) and creates the IAM user `pds-<environment id>-backup` under
+  `/pds/<connection id>/`, with the connection's `backup-boundary` as its
+  permissions boundary, an inline policy for its own bucket and the ownership
+  tag, then an access key, and writes the key straight to `pds-s3` (the
+  chart's `adapter.backupKey`, read as `AGENT_BACKUP_*`; `agent.BackupKey`
+  reconciles it on every beat). The key never reaches the control plane, Git, a
+  stack output or a log, and the role the control plane assumes has no IAM user
+  permissions. The agent role may only touch the user named after the cluster its
+  session is tagged with, and the boundary caps the user at buckets named
+  `pds-<account>-*`. A key that is in the Secret is left alone, because IAM
+  cannot show a secret again; one lost to a failed write is made again. The
+  S3 BackupStorage job retries until the Secret exists.
 - **Refusals.** AWS errors become a step that fails with a typed reason (quota,
   permission, region not enabled) and one sentence that names the AWS account
   and the Kubernetes cluster and shows no raw AWS text. Throttling and role
@@ -835,7 +867,12 @@ connected one. `internal/managed` holds the create run, and
   including a failed create; it preempts a run in progress. Steps run inside-out:
   `remove-databases` suspends the three Kustomizations, deletes every Instance
   and waits; `remove-services` deletes LoadBalancer Services and volume claims;
-  `close-access`; `delete-stack`; `sweep`; `delete-bucket`; `forget`. If the
+  `remove-backup-user` creates the ConfigMap `pds-backup-user` in the release's
+  namespace, which makes the agent delete the IAM user, its keys and policy and
+  answer on the same object (the control plane's role cannot, and the user lives
+  in the customer's account). It waits `Settings.BackupUserWait` (5 minutes),
+  and an agent that never answers does not hold the delete: the step records
+  which user stays in the account. `close-access`; `delete-stack`; `sweep`; `delete-bucket`; `forget`. If the
   Kubernetes API stays silent for `Settings.APIWait` the step records that in
   its note and the delete goes on to the cluster, so it never continues
   silently. Nothing is stored about what exists: every attempt calls
@@ -849,13 +886,19 @@ connected one. `internal/managed` holds the create run, and
   `Delete blocked.` and names the resources; Retry re-runs only that step. There
   is no force delete. `delete-bucket` empties every version and deletes the
   bucket only when it carries the environment's tag. The role the customer owns is
-  left, and so is the backup IAM user the agent made.
+  left, and so is the backup IAM user when the agent could not remove it, which a
+  Delete from PDS only or an unreachable cluster also leaves.
   `managed.Remover.RemoveFromPDS` is the one thing a person can do while the
   connection is Unreachable or the environment is Lost: it cancels the environment's runs, records a delete run
   as succeeded with a message that says AWS was not touched, removes the
   environment from its Team's hub and forgets its record. `Remains` names what stays.
   Volumes are tagged by the EBS CSI addon (`extraVolumeTags` in the stack) and by
-  the `taggedStorageClass` the rendered release turns on.
+  the `taggedStorageClass` the rendered release turns on. Load balancers are tagged
+  by the `service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags`
+  annotation (`percona.com/pds=<environment id>`) that the hub writes on the
+  Service of every database it exposes and on monitoring's, reading the id from
+  the environment's record (`hub.Options.OwnershipID`). A create that cannot read
+  it is refused rather than written untagged. Connected environments carry none.
 
 ### Cloud connection and managed environment routes
 

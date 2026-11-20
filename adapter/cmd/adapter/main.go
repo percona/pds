@@ -881,6 +881,7 @@ func buildHubService(
 		SupportAccess:    persists.SupportAccess,
 		Context:          processCtx,
 		OnSupportExpired: supportExpired(activity, support, team),
+		OwnershipID:      managedOwnership(state, team),
 	})
 
 	if err := (hub.Hydration{
@@ -898,6 +899,25 @@ func buildHubService(
 	go hubSvc.RunSupportSweeper(processCtx)
 
 	return hubSvc, nil
+}
+
+// managedOwnership names the ID a Team's managed environment tags its AWS
+// resources with. An environment that is not a managed one has none, and with
+// no database no environment is.
+func managedOwnership(state *store.Lazy, team uint) func(ctx context.Context, environment string) (string, error) {
+	if state == nil {
+		return nil
+	}
+	scoped := state.For(team)
+
+	return func(ctx context.Context, environment string) (string, error) {
+		id, err := scoped.ManagedEnvironmentID(ctx, environment)
+		if errors.Is(err, store.ErrManagedEnvironmentUnknown) {
+			return "", nil
+		}
+
+		return id, err
+	}
 }
 
 // supportExpired records that the sweep closed a window and tells its case. No

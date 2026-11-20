@@ -39,7 +39,7 @@ flux:
 # Changing the chart or Flux version fails the check until revision is bumped,
 # or cutFor is moved to the new versions to leave the revision as it is.
 managedTemplate:
-  revision: 1
+  revision: 2
   cutFor:
     chart: "0.1.0"
     flux: "2.5.1"

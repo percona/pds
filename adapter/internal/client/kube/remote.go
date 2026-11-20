@@ -340,6 +340,25 @@ func (r *Remote) DeleteLoadBalancerServices(ctx context.Context) (int, error) {
 	return left, nil
 }
 
+// EnsureConfigMap creates the ConfigMap with data when it is not there, and
+// returns the data it holds. One that exists is left as it is: whoever reads it
+// may have answered on it.
+func (r *Remote) EnsureConfigMap(ctx context.Context, namespace, name string, data map[string]string) (map[string]string, error) {
+	maps := r.clientset.CoreV1().ConfigMaps(namespace)
+	held, err := maps.Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		held, err = maps.Create(ctx, &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{"app.kubernetes.io/managed-by": "pds"}},
+			Data:       data,
+		}, metav1.CreateOptions{})
+	}
+	if err != nil {
+		return nil, fmt.Errorf("ask through ConfigMap %s: %w", name, scrubStatus(err))
+	}
+
+	return held.Data, nil
+}
+
 // until looks every poll until done, an error or the patience runs out.
 func (r *Remote) until(ctx context.Context, what string, done func() (bool, error)) error {
 	deadline := time.Now().Add(r.patience)

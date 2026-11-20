@@ -102,6 +102,21 @@ func (l *Lazy) resolve() (*HubState, error) {
 	return state, nil
 }
 
+// ManagedEnvironmentID returns the ID of the Team's managed environment of that
+// name, and ErrManagedEnvironmentUnknown for an environment the control plane
+// did not build.
+func (l *Lazy) ManagedEnvironmentID(ctx context.Context, name string) (string, error) {
+	if l == nil || l.starter == nil {
+		return "", ErrNotConnected
+	}
+	rec, err := l.starter.ManagedEnvironments().Get(ctx, l.team, name)
+	if err != nil {
+		return "", err
+	}
+
+	return rec.ID, nil
+}
+
 // Environments returns every environment document this team holds.
 func (l *Lazy) Environments(ctx context.Context) (map[string]string, error) {
 	state, err := l.resolve()

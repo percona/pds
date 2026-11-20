@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -432,7 +433,7 @@ func (l *lifecycleLab) stack(revision, version string) {
 func TestAnInfrastructureUpdateStartsAKubernetesRunAfterShowingTheChangeSet(t *testing.T) {
 	l := newLifecycleLab(t)
 	l.ready("0.1.0")
-	l.stack("1", "1.33")
+	l.stack(strconv.Itoa(managed.TemplateRevision), "1.33")
 
 	run, err := l.life.UpdateInfrastructure(t.Context(), l.who, l.env, managed.InfraUpdate{KubernetesVersion: "1.34"})
 
@@ -440,7 +441,10 @@ func TestAnInfrastructureUpdateStartsAKubernetesRunAfterShowingTheChangeSet(t *t
 	assert.Equal(t, managed.KindKubernetes, run.Kind)
 	assert.JSONEq(t, `{"kubernetesVersion":"1.34"}`, l.only(t).in)
 	require.Len(t, l.cloud.updates, 1, "the change set is made and read before the run starts")
-	assert.Equal(t, map[string]string{"KubernetesVersion": "1.34"}, l.cloud.updates[0].Parameters)
+	assert.Equal(t, map[string]string{
+		"KubernetesVersion": "1.34",
+		"AgentRoleArn":      "arn:aws:iam::111122223333:role/pds/" + l.connID + "/pds-" + l.connID + "-agent",
+	}, l.cloud.updates[0].Parameters, "the agent role is the parameter a stack made before revision 2 has no value for")
 	assert.Equal(t, []string{l.cloud.updates[0].Name}, l.cloud.discarded, "and removed, since the run makes its own")
 	assert.Zero(t, l.cloud.count("apply-plan"), "starting a run changes nothing in AWS")
 }
@@ -452,7 +456,7 @@ func TestKubernetesMovesOneMinorAtATimeAndNeverBack(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			l := newLifecycleLab(t)
 			l.ready("0.1.0")
-			l.stack("1", "1.33")
+			l.stack(strconv.Itoa(managed.TemplateRevision), "1.33")
 
 			_, err := l.life.UpdateInfrastructure(t.Context(), l.who, l.env, managed.InfraUpdate{KubernetesVersion: version})
 
@@ -466,7 +470,7 @@ func TestKubernetesMovesOneMinorAtATimeAndNeverBack(t *testing.T) {
 func TestATemplateUpdateWithNothingToChangeIsRefused(t *testing.T) {
 	l := newLifecycleLab(t)
 	l.ready("0.1.0")
-	l.stack("1", "1.33")
+	l.stack(strconv.Itoa(managed.TemplateRevision), "1.33")
 
 	_, err := l.life.UpdateInfrastructure(t.Context(), l.who, l.env, managed.InfraUpdate{})
 

@@ -91,6 +91,11 @@ type Options struct {
 	// background work a heartbeat starts. Nil means work that is never
 	// cancelled.
 	Context context.Context
+	// OwnershipID returns the ID a managed environment's AWS resources are
+	// tagged with, and empty for an environment the control plane did not build.
+	// The load balancers the hub asks for carry it. Nil means no environment has
+	// one.
+	OwnershipID func(ctx context.Context, environment string) (string, error)
 }
 
 // Service is the hub-mode database backend.
@@ -123,6 +128,7 @@ type Service struct {
 	cloneKeys        map[string]CloneKey
 	cloneUnpersisted map[string]bool
 	pmmVersion       string
+	ownership        func(ctx context.Context, environment string) (string, error)
 	rulesGate        *alertRulesGate
 	// restoreFailed holds the PostgreSQL copies whose seed failed, by
 	// environment and name, with the reason the agent gave, so the developer
@@ -185,6 +191,7 @@ func NewService(store Store, inv *Inventory, opts Options) *Service {
 		cloneKeys:        map[string]CloneKey{},
 		cloneUnpersisted: map[string]bool{},
 		pmmVersion:       strings.TrimSpace(opts.PMMChartVersion),
+		ownership:        opts.OwnershipID,
 		rulesGate:        newAlertRulesGate(),
 		restoreFailed:    map[string]string{},
 		supportEvents:    map[string][]SupportEvent{},
@@ -237,6 +244,16 @@ func (s *Service) targetsFor(environment string) environmentTargets {
 	}
 }
 
+// ownershipID is the ID that tags what a managed environment owns in AWS, and
+// empty for an environment the control plane did not build.
+func (s *Service) ownershipID(ctx context.Context, environment string) (string, error) {
+	if s.ownership == nil {
+		return "", nil
+	}
+
+	return s.ownership(ctx, environment)
+}
+
 // Create writes an Instance manifest for a connected environment.
 func (s *Service) Create(ctx context.Context, in engine.CreateInput) (*engine.Instance, error) {
 	environment := strings.TrimSpace(in.Environment)
@@ -285,9 +302,17 @@ func (s *Service) Create(ctx context.Context, in engine.CreateInput) (*engine.In
 		return nil, err
 	}
 
+	targets := s.targetsFor(environment)
+	if exposure.External {
+		// A database that cannot be tagged would leave a load balancer the delete
+		// never finds, so a failed lookup refuses the create.
+		if targets.OwnershipID, err = s.ownershipID(ctx, environment); err != nil {
+			return nil, fmt.Errorf("read the environment's ownership tag: %w", err)
+		}
+	}
 	ns := s.namespaceFor(environment)
 	body, p, err := instanceYAML(name, ns, environment, flavor, strings.ToLower(strings.TrimSpace(in.Profile)),
-		s.targetsFor(environment), in.Overrides, exposure)
+		targets, in.Overrides, exposure)
 	if err != nil {
 		return nil, err
 	}
@@ -1826,7 +1851,11 @@ func (s *Service) seedPMM(ctx context.Context, environment string) error {
 	if _, err := s.store.Get(ctx, pmmDir(environment)+"/kustomization.yaml"); err == nil {
 		return nil
 	}
-	files, err := pmmFiles(environment, DefaultPMMSettings(), s.pmmVersion, true)
+	ownershipID, err := s.ownershipID(ctx, environment)
+	if err != nil {
+		return fmt.Errorf("read the environment's ownership tag: %w", err)
+	}
+	files, err := pmmFiles(environment, DefaultPMMSettings(), s.pmmVersion, ownershipID, true)
 	if err != nil {
 		return err
 	}

@@ -28,6 +28,10 @@ Parameters:
   NodeRoleArn:
     Type: String
     Description: The cloud connection's node role.
+  AgentRoleArn:
+    Type: String
+    Default: ""
+    Description: The role the agent runs as in the environment. It makes the IAM user the backups write as. Empty leaves the agent without one.
   EbsCsiRoleArn:
     Type: String
     Description: The cloud connection's EBS CSI Pod Identity role.
@@ -41,6 +45,13 @@ Parameters:
     MinValue: 3
     MaxValue: 12
     Description: The number of nodes. Three keeps a database's members apart.
+
+Conditions:
+  HasAgentRole:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: AgentRoleArn
+          - ""
 
 Resources:
   Vpc:
@@ -398,10 +409,26 @@ Resources:
           Value:
             Ref: EnvironmentId
 
+  AgentPodIdentity:
+    Type: AWS::EKS::PodIdentityAssociation
+    Condition: HasAgentRole
+    DependsOn: PodIdentityAgentAddon
+    Properties:
+      ClusterName:
+        Ref: Cluster
+      Namespace: everest-system
+      ServiceAccount: pds
+      RoleArn:
+        Ref: AgentRoleArn
+      Tags:
+        - Key: "percona.com/pds"
+          Value:
+            Ref: EnvironmentId
+
 Outputs:
   TemplateRevision:
     Description: The revision of this template. A control plane upgrade never changes a stack that carries an older one.
-    Value: "1"
+    Value: "2"
   ClusterName:
     Value:
       Ref: Cluster

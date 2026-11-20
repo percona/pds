@@ -16,6 +16,25 @@ type fakeCleaner struct {
 	deleted   []string
 	lbLeft    int
 	failOn    string
+	userDone  bool
+	asked     int
+}
+
+func (f *fakeCleaner) EnsureConfigMap(_ context.Context, namespace, name string, data map[string]string) (map[string]string, error) {
+	f.asked++
+	if f.failOn == "request" {
+		return nil, errors.New("the Kubernetes API answered Forbidden")
+	}
+	held := map[string]string{}
+	for k, v := range data {
+		held[k] = v
+	}
+	if f.userDone {
+		held["removed"] = "true"
+	}
+	f.deleted = append(f.deleted, "ConfigMap/"+namespace+"/"+name)
+
+	return held, nil
 }
 
 func (f *fakeCleaner) Suspend(_ context.Context, _, kind, namespace, name string) error {
@@ -77,6 +96,28 @@ func TestRemoveVolumeUsersDeletesLoadBalancerServicesAndVolumeClaims(t *testing.
 
 func TestDrainReportsAnEnvironmentItCannotReach(t *testing.T) {
 	_, err := drainWith(&fakeCleaner{}, errors.New("dial: i/o timeout")).RemoveDatabases(t.Context(), managed.KubeAccess{})
+
+	require.Error(t, err)
+}
+
+func TestRemoveBackupUserAsksTheAgentAndReportsOneLeftUntilItIsDone(t *testing.T) {
+	c := &fakeCleaner{}
+	drain := drainWith(c, nil)
+
+	left, err := drain.RemoveBackupUser(t.Context(), managed.KubeAccess{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, left)
+	assert.Equal(t, []string{"ConfigMap/everest-system/pds-backup-user"}, c.deleted, "the request is made in the release's namespace")
+
+	c.userDone = true
+	left, err = drain.RemoveBackupUser(t.Context(), managed.KubeAccess{})
+	require.NoError(t, err)
+	assert.Zero(t, left)
+	assert.Equal(t, 2, c.asked)
+}
+
+func TestRemoveBackupUserReturnsWhatTheEnvironmentRefused(t *testing.T) {
+	_, err := drainWith(&fakeCleaner{failOn: "request"}, nil).RemoveBackupUser(t.Context(), managed.KubeAccess{})
 
 	require.Error(t, err)
 }

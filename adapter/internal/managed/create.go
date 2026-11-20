@@ -168,6 +168,10 @@ type Settings struct {
 	DeleteWait time.Duration
 	DrainWait  time.Duration
 	APIWait    time.Duration
+	// BackupUserWait is how long a delete waits for the environment's agent to
+	// remove its IAM user. It is short because an agent that never started has
+	// nothing to answer with.
+	BackupUserWait time.Duration
 }
 
 func (s Settings) withDefaults() Settings {
@@ -191,6 +195,9 @@ func (s Settings) withDefaults() Settings {
 	}
 	if s.APIWait <= 0 {
 		s.APIWait = 3 * time.Minute
+	}
+	if s.BackupUserWait <= 0 {
+		s.BackupUserWait = 5 * time.Minute
 	}
 
 	return s
@@ -386,6 +393,7 @@ func (d Deps) stackSpec(s scope) aws.StackSpec {
 			"EksRoleArn":    aws.RoleARN(s.conn.AccountID, s.conn.ID, "eks-cluster"),
 			"NodeRoleArn":   aws.RoleARN(s.conn.AccountID, s.conn.ID, "node"),
 			"EbsCsiRoleArn": aws.RoleARN(s.conn.AccountID, s.conn.ID, "ebs-csi"),
+			"AgentRoleArn":  aws.RoleARN(s.conn.AccountID, s.conn.ID, "agent"),
 		},
 		Tags: map[string]string{
 			OwnershipTag:                        s.rec.ID,
@@ -521,6 +529,8 @@ func (d Deps) commitRelease(ctx context.Context, s scope, version string) error 
 		ChartVersion: version, HubURL: d.Settings.HubURL, EnvironmentName: s.rec.Name, EnvironmentID: s.rec.ID,
 		ImageRepository: d.Settings.ImageRepository, ImageTag: d.Settings.ImageTag,
 		Bucket: bucketName(s), Region: s.rec.Region,
+		BackupUser: BackupUserName(s.rec.ID), BackupUserPath: aws.ConnectionPath(s.conn.ID),
+		BackupBoundaryARN: aws.PolicyARN(s.conn.AccountID, s.conn.ID, "backup-boundary"),
 	})
 	if err != nil {
 		return provision.Permanent(err, genericSentence)

@@ -11,6 +11,9 @@ type Cleaner interface {
 	Suspend(ctx context.Context, apiVersion, kind, namespace, name string) error
 	DeleteAll(ctx context.Context, apiVersion, kind, namespace string) (left int, err error)
 	DeleteLoadBalancerServices(ctx context.Context) (left int, err error)
+	// EnsureConfigMap creates the ConfigMap with data when it is not there, and
+	// returns the data it holds.
+	EnsureConfigMap(ctx context.Context, namespace, name string, data map[string]string) (map[string]string, error)
 }
 
 // Drain removes, from inside an environment, what holds volumes and load
@@ -62,4 +65,24 @@ func (d *Drain) RemoveVolumeUsers(ctx context.Context, access KubeAccess) (int, 
 	}
 
 	return services + claims, nil
+}
+
+// RemoveBackupUser asks the environment's agent to remove the IAM user it made
+// for backups, and returns 1 until it says it did. The user is the agent's to
+// remove: the role the control plane assumes has no IAM user permissions. It is
+// idempotent.
+func (d *Drain) RemoveBackupUser(ctx context.Context, access KubeAccess) (int, error) {
+	cluster, err := d.dial(access)
+	if err != nil {
+		return 0, err
+	}
+	held, err := cluster.EnsureConfigMap(ctx, ReleaseNamespace, BackupUserRequest, map[string]string{BackupUserRequestKey: BackupUserRemove})
+	if err != nil {
+		return 0, err
+	}
+	if held[BackupUserRemovedKey] == "true" {
+		return 0, nil
+	}
+
+	return 1, nil
 }

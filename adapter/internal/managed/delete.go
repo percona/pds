@@ -21,6 +21,7 @@ const KindDelete = store.KindDelete
 const (
 	stepRemoveDatabases = "remove-databases"
 	stepRemoveServices  = "remove-services"
+	stepRemoveBackupKey = "remove-backup-user"
 	stepDeleteStack     = "delete-stack"
 	stepSweep           = "sweep"
 	stepDeleteBucket    = "delete-bucket"
@@ -31,7 +32,7 @@ const (
 // inside-out: what runs in the environment, then what holds AWS resources, then
 // the stack, then what the stack leaves, then the backups.
 var DeleteStepNames = []string{
-	stepAssumeRole, stepRemoveDatabases, stepRemoveServices, stepCloseAccess, stepDeleteStack, stepSweep, stepDeleteBucket, stepForget,
+	stepAssumeRole, stepRemoveDatabases, stepRemoveServices, stepRemoveBackupKey, stepCloseAccess, stepDeleteStack, stepSweep, stepDeleteBucket, stepForget,
 }
 
 // DeletePhase is the phase of a delete the console shows a step under, or empty
@@ -46,7 +47,7 @@ func DeletePhase(step string) string {
 		return "Kubernetes cluster"
 	case stepSweep:
 		return "Network"
-	case stepDeleteBucket, stepForget:
+	case stepRemoveBackupKey, stepDeleteBucket, stepForget:
 		return "Backups"
 	}
 
@@ -62,6 +63,8 @@ const (
 	stillRemoving = "Delete blocked. Databases or volume claims are still being removed from the environment. Retry in a few minutes."
 	stackBlocked  = "Delete blocked. AWS could not delete the network and the Kubernetes cluster. Retry. Contact Percona support if it fails again."
 	apiSilent     = "The Kubernetes API did not answer, so the %s were not removed from inside it. The cluster is deleted next and what it leaves is swept by tag."
+	// backupUserStays is for a delete whose environment did not remove its IAM user.
+	backupUserStays = "The IAM user %s stays in your AWS account, because the environment did not remove it. Delete it in the IAM console."
 )
 
 // maxListed bounds the resources a blocked sentence names: the sentence is kept
@@ -85,6 +88,9 @@ type Drainer interface {
 	// RemoveDatabases and RemoveVolumeUsers return what is left.
 	RemoveDatabases(ctx context.Context, access KubeAccess) (int, error)
 	RemoveVolumeUsers(ctx context.Context, access KubeAccess) (int, error)
+	// RemoveBackupUser asks the environment's agent to remove the IAM user it
+	// made for backups, and returns 1 until it has.
+	RemoveBackupUser(ctx context.Context, access KubeAccess) (int, error)
 }
 
 // DeleteKind is the run that removes a managed environment, step by step. Every
@@ -96,6 +102,7 @@ func DeleteKind(d Deps) provision.Kind {
 		stepAssumeRole:      d.deleteAssumeRole,
 		stepRemoveDatabases: d.removeDatabases,
 		stepRemoveServices:  d.removeServices,
+		stepRemoveBackupKey: d.removeBackupKey,
 		stepCloseAccess:     d.closeAccess,
 		stepDeleteStack:     d.deleteStack,
 		stepSweep:           d.sweep,
@@ -142,7 +149,7 @@ func (d Deps) deleteAssumeRole(ctx context.Context, _ provision.Env, s scope) er
 // step records it, and the deletion goes on to the cluster and the sweep.
 func (d Deps) insideEnvironment(
 	ctx context.Context, env provision.Env, s scope, what string,
-	remove func(KubeAccess) (int, error),
+	wait time.Duration, remove func(KubeAccess) (int, error), timedOut func(left int) error,
 ) error {
 	access, err := d.open(ctx, env, s)
 	if aws.EKSMissing(err) {
@@ -155,7 +162,7 @@ func (d Deps) insideEnvironment(
 	}
 
 	now := time.Now()
-	deadline := now.Add(d.Settings.DrainWait)
+	deadline := now.Add(wait)
 	silentSince := now
 	for {
 		left, err := remove(access)
@@ -170,7 +177,7 @@ func (d Deps) insideEnvironment(
 			silentSince = time.Now()
 		}
 		if time.Now().After(deadline) {
-			return provision.Permanent(fmt.Errorf("%d %s are still in the environment", left, what), stillRemoving)
+			return timedOut(left)
 		}
 		select {
 		case <-ctx.Done():
@@ -185,14 +192,34 @@ func (d Deps) insideEnvironment(
 }
 
 func (d Deps) removeDatabases(ctx context.Context, env provision.Env, s scope) error {
-	return d.insideEnvironment(ctx, env, s, "databases", func(a KubeAccess) (int, error) {
+	return d.insideEnvironment(ctx, env, s, "databases", d.Settings.DrainWait, func(a KubeAccess) (int, error) {
 		return d.Drainer.RemoveDatabases(ctx, a)
-	})
+	}, stillInEnvironment("databases"))
 }
 
 func (d Deps) removeServices(ctx context.Context, env provision.Env, s scope) error {
-	return d.insideEnvironment(ctx, env, s, "load balancers and volume claims", func(a KubeAccess) (int, error) {
+	return d.insideEnvironment(ctx, env, s, "load balancers and volume claims", d.Settings.DrainWait, func(a KubeAccess) (int, error) {
 		return d.Drainer.RemoveVolumeUsers(ctx, a)
+	}, stillInEnvironment("load balancers and volume claims"))
+}
+
+func stillInEnvironment(what string) func(left int) error {
+	return func(left int) error {
+		return provision.Permanent(fmt.Errorf("%d %s are still in the environment", left, what), stillRemoving)
+	}
+}
+
+// removeBackupKey asks the agent to remove the IAM user it made for backups,
+// because the control plane's role cannot. An agent that does not answer in the
+// time a delete waits for the environment is not waited on for ever: the step
+// says which user stays, and the customer removes it.
+func (d Deps) removeBackupKey(ctx context.Context, env provision.Env, s scope) error {
+	return d.insideEnvironment(ctx, env, s, "backup users", d.Settings.BackupUserWait, func(a KubeAccess) (int, error) {
+		return d.Drainer.RemoveBackupUser(ctx, a)
+	}, func(int) error {
+		env.Note(fmt.Sprintf(backupUserStays, BackupUserName(s.rec.ID)))
+
+		return nil
 	})
 }
 

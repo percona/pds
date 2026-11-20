@@ -496,8 +496,9 @@ template, the connect script and how a connection is checked are in
 ## Managed environments
 
 A control plane builds managed environments only when it can reach their
-Kubernetes API from addresses it declares. These settings go through the chart's
-`adapter.extraEnv`:
+Kubernetes API from addresses it declares. The chart sets the first two from
+`adapter.hub.managedOutgoingCIDRs` (a list) and `adapter.hub.managedChartVersion`;
+the Compose stack reads all of them from `pds.env`:
 
 | Variable | Default | Value |
 |----------|---------|-------|

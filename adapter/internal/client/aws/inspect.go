@@ -166,6 +166,16 @@ func errorCode(err error) string {
 // them the same way.
 func RoleName(connectionID, role string) string { return "pds-" + connectionID + "-" + role }
 
+// ConnectionPath is the IAM path every role, policy and user of a connection
+// sits under.
+func ConnectionPath(connectionID string) string { return "/pds/" + connectionID + "/" }
+
+// PolicyARN is the deterministic ARN of one of a connection's managed policies.
+// They sit under the same path as its roles.
+func PolicyARN(account, connectionID, policy string) string {
+	return "arn:aws:iam::" + account + ":policy/pds/" + connectionID + "/pds-" + connectionID + "-" + policy
+}
+
 // RoleARN is the deterministic ARN of one of a connection's roles. They all
 // sit under the path /pds/<connection id>/.
 func RoleARN(account, connectionID, role string) string {

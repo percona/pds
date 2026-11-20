@@ -34,6 +34,8 @@ Resources:
       Path:
         Fn::Sub: "/pds/${ConnectionId}/"
       MaxSessionDuration: 3600
+      ManagedPolicyArns:
+        - Ref: CleanupPolicy
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -57,22 +59,32 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              - Sid: DriveEnvironmentStacksThroughTheServiceRole
+              - Sid: StartEnvironmentStacksThroughTheServiceRole
                 Effect: Allow
                 Action:
                   - "cloudformation:CreateStack"
                   - "cloudformation:UpdateStack"
-                  - "cloudformation:DeleteStack"
                   - "cloudformation:CreateChangeSet"
-                  - "cloudformation:ExecuteChangeSet"
-                  - "cloudformation:DeleteChangeSet"
-                  - "cloudformation:UpdateTerminationProtection"
                 Resource:
                   Fn::Sub: "arn:aws:cloudformation:*:${AWS::AccountId}:stack/pds-*/*"
                 Condition:
                   StringEquals:
                     "cloudformation:RoleArn":
                       Fn::GetAtt: [ServiceRole, Arn]
+                    "aws:RequestedRegion":
+                      Ref: AllowedRegions
+              # These calls carry no role: CloudFormation uses the one the stack
+              # was made with. A condition on the role would refuse every call.
+              - Sid: FinishAndRemoveEnvironmentStacks
+                Effect: Allow
+                Action:
+                  - "cloudformation:DeleteStack"
+                  - "cloudformation:ExecuteChangeSet"
+                  - "cloudformation:DeleteChangeSet"
+                Resource:
+                  Fn::Sub: "arn:aws:cloudformation:*:${AWS::AccountId}:stack/pds-*/*"
+                Condition:
+                  StringEquals:
                     "aws:RequestedRegion":
                       Ref: AllowedRegions
               - Sid: ReadStacks
@@ -84,8 +96,14 @@ Resources:
                   - "cloudformation:DescribeChangeSet"
                   - "cloudformation:GetTemplate"
                   - "cloudformation:ListStackResources"
+                  - "cloudformation:DetectStackDrift"
+                  - "cloudformation:DescribeStackResourceDrifts"
                 Resource:
                   Fn::Sub: "arn:aws:cloudformation:*:${AWS::AccountId}:stack/pds-*/*"
+              - Sid: ReadTheOutcomeOfADriftCheck
+                Effect: Allow
+                Action: "cloudformation:DescribeStackDriftDetectionStatus"
+                Resource: "*"
               - Sid: NeverTouchThisStack
                 Effect: Deny
                 Action:
@@ -93,6 +111,7 @@ Resources:
                   - "cloudformation:DeleteStack"
                   - "cloudformation:CreateChangeSet"
                   - "cloudformation:ExecuteChangeSet"
+                  - "cloudformation:DeleteChangeSet"
                   - "cloudformation:UpdateTerminationProtection"
                 Resource:
                   Fn::Sub: "arn:aws:cloudformation:*:${AWS::AccountId}:stack/pds-${ConnectionId}/*"
@@ -104,19 +123,31 @@ Resources:
                 Condition:
                   StringEquals:
                     "iam:PassedToService": "cloudformation.amazonaws.com"
-              - Sid: OpenAndCloseTheAccessWindowOnOwnedClusters
+              - Sid: OpenTheAccessWindowOnOwnedClusters
                 Effect: Allow
                 Action:
                   - "eks:UpdateClusterConfig"
                   - "eks:CreateAccessEntry"
+                Resource:
+                  Fn::Sub: "arn:aws:eks:*:${AWS::AccountId}:cluster/pds-*"
+                Condition:
+                  "Null":
+                    "aws:ResourceTag/percona.com/pds": "false"
+                  StringEquals:
+                    "aws:RequestedRegion":
+                      Ref: AllowedRegions
+              # An access entry is made with no tags, so it is named by its
+              # cluster instead of by a tag it does not carry.
+              - Sid: CloseTheAccessWindowOnOwnedClusters
+                Effect: Allow
+                Action:
                   - "eks:DeleteAccessEntry"
                   - "eks:UpdateAccessEntry"
                   - "eks:AssociateAccessPolicy"
                   - "eks:DisassociateAccessPolicy"
-                Resource: "*"
+                Resource:
+                  Fn::Sub: "arn:aws:eks:*:${AWS::AccountId}:access-entry/pds-*/*"
                 Condition:
-                  "Null":
-                    "aws:ResourceTag/percona.com/pds": "false"
                   StringEquals:
                     "aws:RequestedRegion":
                       Ref: AllowedRegions
@@ -156,7 +187,6 @@ Resources:
         - Ref: NetworkPolicy
         - Ref: EksPolicy
         - Ref: IamPolicy
-        - Ref: CleanupPolicy
       Tags:
         - Key: "percona.com/pds-connection"
           Value:
@@ -343,6 +373,7 @@ Resources:
               - Fn::GetAtt: [EksClusterRole, Arn]
               - Fn::GetAtt: [NodeRole, Arn]
               - Fn::GetAtt: [EbsCsiRole, Arn]
+              - Fn::GetAtt: [AgentRole, Arn]
             Condition:
               StringEquals:
                 "iam:PassedToService":
@@ -384,6 +415,10 @@ Resources:
             Resource:
               Fn::Sub: "arn:aws:iam::${AWS::AccountId}:role/pds/${ConnectionId}/*"
 
+  # The control plane calls these itself, outside any stack: after the cluster
+  # is gone it sweeps what the cluster's controllers left, and it makes and
+  # empties the backup bucket. Every delete needs an ownership tag, and nothing
+  # here creates anything but the bucket.
   CleanupPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -394,15 +429,15 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          - Sid: RemoveOwnedVolumesAndLoadBalancers
+          - Sid: RemoveWhatCarriesTheOwnershipTag
             Effect: Allow
             Action:
-              - "ec2:DetachVolume"
               - "ec2:DeleteVolume"
+              - "ec2:DeleteSnapshot"
               - "ec2:DeleteNetworkInterface"
+              - "ec2:DeleteSecurityGroup"
               - "elasticloadbalancing:DeleteLoadBalancer"
               - "elasticloadbalancing:DeleteTargetGroup"
-              - "elasticloadbalancing:DeleteListener"
             Resource: "*"
             Condition:
               "Null":
@@ -410,26 +445,52 @@ Resources:
               StringEquals:
                 "aws:RequestedRegion":
                   Ref: AllowedRegions
-          - Sid: FindWhatTheEnvironmentOwns
+          - Sid: RemoveWhatTheLoadBalancerControllerOfAnOwnedClusterMade
             Effect: Allow
             Action:
-              - "tag:GetResources"
-              - "elasticloadbalancing:Describe*"
-              - "ec2:DescribeVolumes"
-              - "ec2:DescribeNetworkInterfaces"
+              - "ec2:DeleteNetworkInterface"
+              - "ec2:DeleteSecurityGroup"
+              - "elasticloadbalancing:DeleteLoadBalancer"
+              - "elasticloadbalancing:DeleteTargetGroup"
             Resource: "*"
+            Condition:
+              StringLike:
+                "aws:ResourceTag/elbv2.k8s.aws/cluster": "pds-*"
+              StringEquals:
+                "aws:RequestedRegion":
+                  Ref: AllowedRegions
+          - Sid: RemoveWhatEksMadeForAnOwnedCluster
+            Effect: Allow
+            Action:
+              - "ec2:DeleteNetworkInterface"
+              - "ec2:DeleteSecurityGroup"
+            Resource: "*"
+            Condition:
+              StringLike:
+                "aws:ResourceTag/aws:eks:cluster-name": "pds-*"
+              StringEquals:
+                "aws:RequestedRegion":
+                  Ref: AllowedRegions
           - Sid: ManageBackupBucketsByNameInThisAccount
             Effect: Allow
             Action:
               - "s3:CreateBucket"
               - "s3:DeleteBucket"
               - "s3:PutBucketTagging"
-              - "s3:PutBucketVersioning"
-              - "s3:PutEncryptionConfiguration"
+              - "s3:GetBucketTagging"
               - "s3:PutBucketPublicAccessBlock"
-              - "s3:GetBucketLocation"
-              - "s3:ListBucket"
+              - "s3:ListBucketVersions"
             Resource: "arn:aws:s3:::pds-*"
+            Condition:
+              StringEquals:
+                "s3:ResourceAccount":
+                  Ref: "AWS::AccountId"
+          - Sid: EmptyBackupBucketsIncludingEveryVersion
+            Effect: Allow
+            Action:
+              - "s3:DeleteObject"
+              - "s3:DeleteObjectVersion"
+            Resource: "arn:aws:s3:::pds-*/*"
             Condition:
               StringEquals:
                 "s3:ResourceAccount":
@@ -502,10 +563,91 @@ Resources:
           Value:
             Ref: ConnectionId
 
+  # The agent in an environment runs as this role through EKS Pod Identity, and
+  # makes the IAM user its backups write as, so the key is born in the
+  # environment and never passes through the control plane. Pod Identity puts the
+  # cluster's name on the session, and the policy lets the role touch only the
+  # user named after that cluster.
+  AgentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: "pds-${ConnectionId}-agent"
+      Path:
+        Fn::Sub: "/pds/${ConnectionId}/"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: "pods.eks.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+              - "sts:TagSession"
+      Policies:
+        - PolicyName: make-the-backup-user-of-this-cluster
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: MakeTheUserOnlyWithTheBoundary
+                Effect: Allow
+                Action: "iam:CreateUser"
+                Resource:
+                  Fn::Sub: "arn:aws:iam::${AWS::AccountId}:user/pds/${ConnectionId}/${!aws:PrincipalTag/eks-cluster-name}-backup"
+                Condition:
+                  StringEquals:
+                    "iam:PermissionsBoundary":
+                      Ref: BackupUserBoundary
+              - Sid: ManageTheUserOfThisCluster
+                Effect: Allow
+                Action:
+                  - "iam:TagUser"
+                  - "iam:PutUserPolicy"
+                  - "iam:DeleteUserPolicy"
+                  - "iam:ListUserPolicies"
+                  - "iam:CreateAccessKey"
+                  - "iam:ListAccessKeys"
+                  - "iam:DeleteAccessKey"
+                  - "iam:DeleteUser"
+                Resource:
+                  Fn::Sub: "arn:aws:iam::${AWS::AccountId}:user/pds/${ConnectionId}/${!aws:PrincipalTag/eks-cluster-name}-backup"
+      Tags:
+        - Key: "percona.com/pds-connection"
+          Value:
+            Ref: ConnectionId
+
+  # Caps what the backup user can ever be granted, whatever policy the agent
+  # attaches to it: its own environment's bucket, which is named after the
+  # account and the environment.
+  BackupUserBoundary:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: "pds-${ConnectionId}-backup-boundary"
+      Path:
+        Fn::Sub: "/pds/${ConnectionId}/"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: BackupBucketsOfThisAccount
+            Effect: Allow
+            Action:
+              - "s3:GetObject"
+              - "s3:PutObject"
+              - "s3:DeleteObject"
+              - "s3:ListBucket"
+              - "s3:GetBucketLocation"
+              - "s3:AbortMultipartUpload"
+              - "s3:ListBucketMultipartUploads"
+              - "s3:ListMultipartUploadParts"
+            Resource:
+              - Fn::Sub: "arn:aws:s3:::pds-${AWS::AccountId}-*"
+              - Fn::Sub: "arn:aws:s3:::pds-${AWS::AccountId}-*/*"
+
 Outputs:
   TemplateVersion:
     Description: The version of this template. The control plane asks for at least the version it ships.
-    Value: "1"
+    Value: "2"
   ConnectionId:
     Value:
       Ref: ConnectionId
@@ -524,3 +666,6 @@ Outputs:
   EbsCsiRoleArn:
     Value:
       Fn::GetAtt: [EbsCsiRole, Arn]
+  AgentRoleArn:
+    Value:
+      Fn::GetAtt: [AgentRole, Arn]

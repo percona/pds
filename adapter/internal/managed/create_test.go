@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -351,9 +352,11 @@ func TestCreateBuildsTheEnvironmentAndMakesItReady(t *testing.T) {
 	assert.Equal(t, l.envID, spec.Parameters["EnvironmentId"])
 	assert.Equal(t, "pds-"+l.envID, spec.Parameters["EksName"])
 	assert.Equal(t, "arn:aws:iam::111122223333:role/pds/"+l.connID+"/pds-"+l.connID+"-eks-cluster", spec.Parameters["EksRoleArn"])
+	assert.Equal(t, "arn:aws:iam::111122223333:role/pds/"+l.connID+"/pds-"+l.connID+"-agent", spec.Parameters["AgentRoleArn"],
+		"the agent runs as the connection's agent role, which is how it reaches IAM")
 	assert.Equal(t, "arn:aws:iam::111122223333:role/pds/"+l.connID+"/pds-"+l.connID+"-cloudformation", spec.ServiceRoleARN)
 	assert.Equal(t, l.envID, spec.Tags["percona.com/pds"])
-	assert.Equal(t, "1", spec.Tags["percona.com/pds-template-revision"])
+	assert.Equal(t, strconv.Itoa(managed.TemplateRevision), spec.Tags["percona.com/pds-template-revision"])
 
 	target := l.cloud.targets[0]
 	assert.Equal(t, "arn:aws:iam::111122223333:role/pds/"+l.connID+"/pds-"+l.connID+"-control-plane", target.RoleARN)

@@ -166,7 +166,7 @@ func minInt(a, b int) int {
 // withRules adds the alert rules ConfigMap and its mount. An environment whose
 // agent cannot apply a ConfigMap gets a tree without them, because Flux drops
 // the whole apply when one resource is refused.
-func pmmFiles(environment string, in PMMSettings, chartVersion string, withRules bool) (map[string][]byte, error) {
+func pmmFiles(environment string, in PMMSettings, chartVersion, ownershipID string, withRules bool) (map[string][]byte, error) {
 	s, err := in.Normalize()
 	if err != nil {
 		return nil, err
@@ -183,7 +183,7 @@ func pmmFiles(environment string, in PMMSettings, chartVersion string, withRules
 	if s.Access != PMMAccessCluster {
 		// The annotations come from the same place a database's do, so the two
 		// cannot drift on what private and public mean to a cloud.
-		lb := oe.LoadBalancerServiceFor(engine.Exposure{External: true, Private: s.Access == PMMAccessPrivate})
+		lb := oe.LoadBalancerServiceFor(engine.Exposure{External: true, Private: s.Access == PMMAccessPrivate}, ownershipID)
 		service["type"] = lb.ServiceType
 		service["annotations"] = lb.Annotations
 		// The chart renders no loadBalancerSourceRanges, so the list is added
