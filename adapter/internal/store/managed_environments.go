@@ -61,10 +61,10 @@ type ManagedEnvironment struct {
 	DriftCheckedAt *time.Time
 	// TemplateRevision and KubernetesVersion are what the latest check read from
 	// the stack and the cluster. Zero and empty mean it has not read them yet.
-	TemplateRevision  int    `gorm:"not null;default:0"`
-	KubernetesVersion string `gorm:"size:16;not null;default:''"`
-	CreatedAt      time.Time `gorm:"not null"`
-	UpdatedAt      time.Time `gorm:"not null"`
+	TemplateRevision  int       `gorm:"not null;default:0"`
+	KubernetesVersion string    `gorm:"size:16;not null;default:''"`
+	CreatedAt         time.Time `gorm:"not null"`
+	UpdatedAt         time.Time `gorm:"not null"`
 }
 
 // DriftItem is one thing in an environment's infrastructure that was changed
