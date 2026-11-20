@@ -1,5 +1,5 @@
 import type { StatusKind } from "@/features/databases";
-import type { EnvironmentState } from "./types";
+import type { EnvironmentState, Lifecycle } from "./types";
 
 type ManagedPill = { kind: StatusKind; label: string };
 
@@ -19,4 +19,26 @@ export function managedPill(state: EnvironmentState | undefined): ManagedPill {
     default:
       return { kind: "ready", label: "Ready" };
   }
+}
+
+export type LifecycleNote = { kind: "update" | "drift"; label: string };
+
+/** What a managed environment's row says about its upgrades and drift, in words. */
+export function lifecycleNotes(lifecycle: Lifecycle | undefined): LifecycleNote[] {
+  if (!lifecycle) {
+    return [];
+  }
+  const notes: LifecycleNote[] = [];
+  if (
+    lifecycle.pendingChartVersion ||
+    lifecycle.templateOutOfDate ||
+    lifecycle.kubernetesUpgradeAvailable
+  ) {
+    notes.push({ kind: "update", label: "Update available" });
+  }
+  if (lifecycle.drift.length > 0) {
+    notes.push({ kind: "drift", label: "Changed outside PDS" });
+  }
+
+  return notes;
 }

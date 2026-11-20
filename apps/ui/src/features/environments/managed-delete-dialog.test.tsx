@@ -4,18 +4,35 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/utils";
 import { ManagedDeleteDialog } from "./managed-delete-dialog";
 
+const remains = {
+  accountId: "123456789012",
+  region: "eu-west-1",
+  stackName: "pds-orders",
+  eksName: "pds-orders-eks",
+  bucket: "pds-orders-backups",
+};
+
 function stubDelete(status = 202, body: unknown = { run: { id: 9 }, provisioning: {} }) {
-  const fetchMock = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>(() =>
+  const fetchMock = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>((input) =>
     Promise.resolve(
-      new Response(status === 204 ? null : JSON.stringify(body), {
-        status,
-        headers: { "Content-Type": "application/json" },
-      }),
+      String(input).endsWith("/remains")
+        ? new Response(JSON.stringify(remains), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          })
+        : new Response(status === 204 ? null : JSON.stringify(body), {
+            status,
+            headers: { "Content-Type": "application/json" },
+          }),
     ),
   );
   vi.stubGlobal("fetch", fetchMock);
 
   return fetchMock;
+}
+
+function deleteCalls(fetchMock: ReturnType<typeof stubDelete>) {
+  return fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE");
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -117,10 +134,68 @@ describe("ManagedDeleteDialog", () => {
     await user.type(screen.getByLabelText("Environment name"), "orders");
     await user.click(screen.getByRole("button", { name: "Remove from PDS only" }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+    await waitFor(() => expect(deleteCalls(fetchMock)).toHaveLength(1));
+    expect(JSON.parse(String(deleteCalls(fetchMock)[0][1]?.body))).toEqual({
       confirm: "orders",
       scope: "pds_only",
     });
+  });
+
+  it("names what stays in the AWS account before Remove from PDS only", async () => {
+    stubDelete(204);
+
+    renderWithProviders(
+      <ManagedDeleteDialog
+        environment="orders"
+        account="payments"
+        accountUnreachable
+        open
+        onOpenChange={vi.fn()}
+      />,
+    );
+
+    const stays = await screen.findByRole("list", { name: "What stays in AWS" });
+    expect(stays).toHaveTextContent("pds-orders");
+    expect(stays).toHaveTextContent("pds-orders-eks");
+    expect(stays).toHaveTextContent("pds-orders-backups");
+    expect(stays).toHaveTextContent("eu-west-1");
+  });
+
+  it("offers only Remove from PDS only for a lost environment", async () => {
+    const fetchMock = stubDelete(204);
+    const user = userEvent.setup();
+
+    renderWithProviders(
+      <ManagedDeleteDialog
+        environment="orders"
+        account="payments"
+        lost
+        open
+        onOpenChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+    const remove = screen.getByRole("button", { name: "Remove from PDS only" });
+    expect(remove).toBeDisabled();
+    expect(await screen.findByRole("list", { name: "What stays in AWS" })).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Environment name"), "orders");
+    await user.click(remove);
+
+    await waitFor(() => expect(deleteCalls(fetchMock)).toHaveLength(1));
+    expect(JSON.parse(String(deleteCalls(fetchMock)[0][1]?.body))).toEqual({
+      confirm: "orders",
+      scope: "pds_only",
+    });
+  });
+
+  it("does not read the remains for an ordinary delete", () => {
+    const fetchMock = stubDelete();
+
+    renderWithProviders(
+      <ManagedDeleteDialog environment="orders" account="payments" open onOpenChange={vi.fn()} />,
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

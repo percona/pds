@@ -250,8 +250,16 @@ for (const theme of ["light", "dark"] as const) {
         },
       }),
     );
-    await page.route("**/api/cloud-connections", (route) =>
-      route.fulfill({ json: { cloudConnections: [row()] } }),
+    await page.route("**/api/cloud-connection-tokens/tok_1", (route) =>
+      route.fulfill({
+        json: {
+          id: "tok_1",
+          state: "connecting",
+          connectionId: "cc_1",
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+          allowedRegions: ["eu-west-1"],
+        },
+      }),
     );
     await page.route("**/api/cloud-connections/cc_1", (route) =>
       route.fulfill({

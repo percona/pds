@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router";
 import type { Alert, AlertEnvironment, AlertReport } from "@/features/alerts";
 import type { ActivityDetail, ActivityEntry, ActivityPage } from "@/features/activity";
 import type { Backup, Database } from "@/features/databases";
+import type { Lifecycle } from "@/features/environments";
 import type { MetricKind, MetricPoint, MetricSeries, MetricsSnapshot } from "@/features/monitoring";
 import {
   FeatureFlagProvider,
@@ -298,6 +299,29 @@ export function createMockAlertReport(overrides?: Partial<AlertReport>): AlertRe
     environments: [createMockAlertEnvironment({ total: alerts.length, shown: alerts.length })],
     alerts,
     criticals: alerts.filter((alert) => alert.severity === "critical").length,
+    ...overrides,
+  };
+}
+
+/** A lifecycle read with nothing to do, for tests and screenshots to override. */
+export function createMockLifecycle(overrides: Partial<Lifecycle> = {}): Lifecycle {
+  return {
+    chartVersion: "1.4.0",
+    deferred: false,
+    maintenanceWindow: {
+      day: 0,
+      hour: 2,
+      timeZone: "Europe/Berlin",
+      nextStart: "2026-11-22T01:00:00Z",
+      nextEnd: "2026-11-22T03:00:00Z",
+    },
+    templateRevision: 3,
+    latestTemplateRevision: 3,
+    templateOutOfDate: false,
+    kubernetesVersion: "1.31",
+    kubernetesUpgradeAvailable: false,
+    drift: [],
+    lost: false,
     ...overrides,
   };
 }

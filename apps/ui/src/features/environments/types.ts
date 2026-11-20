@@ -40,6 +40,66 @@ export type SupportSummary = {
   expiresAt: string;
 };
 
+/** One resource found changed in AWS outside PDS. PDS reports it and changes nothing. */
+export type Drift = { resource: string; detail: string };
+
+/** When upgrades may start: a day (0 is Sunday) and hour in a time zone, and the next open window. */
+export type MaintenanceWindow = {
+  day: number;
+  hour: number;
+  timeZone: string;
+  nextStart: string;
+  nextEnd: string;
+};
+
+/** What the control plane knows about a managed environment's upgrades, drift and loss. */
+export type Lifecycle = {
+  chartVersion?: string;
+  pendingChartVersion?: string;
+  skippedChartVersion?: string;
+  deferred: boolean;
+  deferredUntil?: string;
+  maintenanceWindow: MaintenanceWindow;
+  templateRevision: number;
+  latestTemplateRevision: number;
+  templateOutOfDate: boolean;
+  templateSummary?: string;
+  kubernetesVersion?: string;
+  kubernetesUpgradeAvailable: boolean;
+  drift: Drift[];
+  driftCheckedAt?: string;
+  lost: boolean;
+  lostReason?: string;
+  lostAt?: string;
+};
+
+export type RunKind = "upgrade_pds" | "upgrade_kubernetes" | "rebuild";
+
+export type StartRunInput = {
+  kind: RunKind;
+  kubernetesVersion?: string;
+  confirmNodeGroupReplace?: boolean;
+};
+
+/** One change an update would make to the stack. */
+export type UpdateChange = { resource: string; type: string; action: string; replacement: string };
+
+/** What an update would do. One that replaces the network or the Kubernetes cluster is never started. */
+export type UpdatePreview = {
+  replacesNetwork: boolean;
+  replacesNodeGroup: boolean;
+  changes: UpdateChange[];
+};
+
+/** What Remove from PDS only leaves in the AWS account. */
+export type Remains = {
+  accountId?: string;
+  region: string;
+  stackName: string;
+  eksName: string;
+  bucket?: string;
+};
+
 export type Environment = {
   name: string;
   namespace?: string;
@@ -55,6 +115,7 @@ export type Environment = {
   connectionId?: string;
   region?: string;
   provisioning?: Provisioning;
+  lifecycle?: Lifecycle;
 };
 
 /**

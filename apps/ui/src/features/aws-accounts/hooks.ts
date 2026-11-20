@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { fetchAwsAccount, fetchAwsAccounts } from "./api";
+import { fetchAwsAccount, fetchAwsAccounts, fetchAwsConnectStatus } from "./api";
 
 export const awsAccountsKey = ["aws-accounts", "list"] as const;
 
@@ -22,6 +22,16 @@ export function useAwsAccount(id: string | undefined, pollMs: number) {
   return useQuery({
     queryKey: ["aws-accounts", "one", id],
     queryFn: ({ signal }) => fetchAwsAccount(id ?? "", signal),
+    enabled: id !== undefined,
+    refetchInterval: pollMs,
+  });
+}
+
+/** Where a connect command stands, polled while the person runs it. */
+export function useAwsConnectStatus(id: string | undefined, pollMs: number) {
+  return useQuery({
+    queryKey: ["aws-accounts", "token", id],
+    queryFn: ({ signal }) => fetchAwsConnectStatus(id ?? "", signal),
     enabled: id !== undefined,
     refetchInterval: pollMs,
   });

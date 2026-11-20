@@ -12,27 +12,9 @@ export type ConnectProgress = {
   stopped: boolean;
 };
 
-/**
- * Command clocks and the control plane's differ a little, so an account that
- * moved just before the command was made still counts as this command's.
- */
+/** Command clocks and the control plane's differ a little, so a step just before the command was made still counts. */
 const clockSlackMs = 30_000;
 const quietMs = 90_000;
-
-/**
- * The account the command a person just made is working on. A new account was
- * created by it, and an existing one was updated by it. The command's token
- * does not name the account, so the console tells them apart by time.
- */
-export function findConnectedAccount(accounts: AwsAccount[], since: Date): AwsAccount | undefined {
-  const from = since.getTime() - clockSlackMs;
-
-  return accounts.find(
-    (candidate) =>
-      Date.parse(candidate.createdAt) >= from ||
-      (candidate.signalAt !== undefined && Date.parse(candidate.signalAt) >= from),
-  );
-}
 
 function reported(steps: AwsAccountStep[], from: number, names: string[]): AwsAccountStep[] {
   return steps.filter((step) => names.includes(step.step) && Date.parse(step.at) >= from);

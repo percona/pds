@@ -1,5 +1,5 @@
 import { requestJson } from "@/lib/api";
-import type { AwsAccount, AwsConnectCommand } from "./types";
+import type { AwsAccount, AwsConnectCommand, AwsConnectStatus } from "./types";
 
 export async function fetchAwsAccounts(signal?: AbortSignal): Promise<AwsAccount[]> {
   const payload = await requestJson<{ cloudConnections?: AwsAccount[] }>("/api/cloud-connections", {
@@ -28,6 +28,13 @@ export function issueAwsConnectCommand(
     method: "POST",
     body: allowedRegions.length > 0 ? { allowedRegions } : {},
     team,
+    signal,
+  });
+}
+
+/** Where a connect command stands. It names the account once the command has found it. */
+export function fetchAwsConnectStatus(id: string, signal?: AbortSignal): Promise<AwsConnectStatus> {
+  return requestJson<AwsConnectStatus>(`/api/cloud-connection-tokens/${encodeURIComponent(id)}`, {
     signal,
   });
 }
