@@ -379,11 +379,11 @@ func (s *Server) failManaged(w http.ResponseWriter, r *http.Request, e service.A
 }
 
 type remainsResponse struct {
-	AccountID      string `json:"accountId,omitempty"`
-	Region         string `json:"region"`
-	StackName      string `json:"stackName"`
-	EKSClusterName string `json:"eksClusterName"`
-	Bucket         string `json:"bucket,omitempty"`
+	AccountID string `json:"accountId,omitempty"`
+	Region    string `json:"region"`
+	StackName string `json:"stackName"`
+	EKSName   string `json:"eksName"`
+	Bucket    string `json:"bucket,omitempty"`
 }
 
 // handleGetRemains names what Remove from PDS only leaves in the AWS account, for
@@ -401,7 +401,7 @@ func (s *Server) handleGetRemains(w http.ResponseWriter, r *http.Request) {
 	}
 
 	Respond(w, r, remainsResponse{
-		AccountID: got.AccountID, Region: got.Region, StackName: got.StackName, EKSClusterName: got.ClusterName, Bucket: got.Bucket,
+		AccountID: got.AccountID, Region: got.Region, StackName: got.StackName, EKSName: got.ClusterName, Bucket: got.Bucket,
 	}, nil)
 }
 

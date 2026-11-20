@@ -687,7 +687,7 @@ func TestTheRemainsReadNamesWhatStaysInTheAccountAndNothingSecret(t *testing.T) 
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.Equal(t, map[string]any{
 		"accountId": "123456789012", "region": "eu-west-1", "stackName": "pds-env-" + id,
-		"eksClusterName": "pds-" + id, "bucket": "pds-123456789012-" + id,
+		"eksName": "pds-" + id, "bucket": "pds-123456789012-" + id,
 	}, jsonOf(t, rec))
 	assert.NotContains(t, strings.ToLower(rec.Body.String()), "externalid")
 	assert.NotContains(t, rec.Body.String(), "arn:aws")
