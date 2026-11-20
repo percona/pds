@@ -2,7 +2,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppRoutes } from "@/routes";
-import { createMockDatabase, renderWithProviders } from "@/test/utils";
+import { createMockDatabase, createMockLifecycle, renderWithProviders } from "@/test/utils";
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -701,5 +701,53 @@ describe("EnvironmentsPage managed environments", () => {
     renderWithProviders(<AppRoutes />, { route: "/environments" });
 
     expect(await screen.findByRole("heading", { name: "AWS accounts" })).toBeInTheDocument();
+  });
+
+  it("notes an available update and drift on the row and opens the lifecycle panel", async () => {
+    stubManaged(
+      managedRow({
+        state: "ready",
+        provisioning: undefined,
+        status: "connected",
+        lastSeen: now,
+        lifecycle: createMockLifecycle({
+          pendingChartVersion: "1.5.0",
+          drift: [{ resource: "NodeGroup", detail: "Instance type changed" }],
+        }),
+      }),
+    );
+    const user = userEvent.setup();
+
+    renderWithProviders(<AppRoutes />, { route: "/environments" });
+
+    expect(await screen.findByText("Update available")).toBeInTheDocument();
+    expect(screen.getByText("Changed outside PDS")).toBeInTheDocument();
+    expect(screen.queryByText("PDS 1.5.0 is available.")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Updates" }));
+
+    expect(await screen.findByText("PDS 1.5.0 is available.")).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Changed outside PDS" })).toHaveTextContent(
+      "NodeGroup",
+    );
+  });
+
+  it("shows a lost environment with Rebuild or Remove from PDS only, and no Delete", async () => {
+    stubManaged(
+      managedRow({
+        state: "lost",
+        provisioning: undefined,
+        status: "pending",
+        lifecycle: createMockLifecycle({ lost: true, lostReason: "Infrastructure missing" }),
+      }),
+    );
+
+    renderWithProviders(<AppRoutes />, { route: "/environments" });
+
+    expect(await screen.findByText("Lost")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Infrastructure missing");
+    expect(screen.getByRole("button", { name: "Rebuild" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove from PDS only" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Monitoring" })).not.toBeInTheDocument();
   });
 });

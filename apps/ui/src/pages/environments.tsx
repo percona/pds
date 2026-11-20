@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CircleAlert, Server } from "lucide-react";
+import { CircleAlert, CircleArrowUp, Server, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
@@ -11,6 +11,9 @@ import {
   awsCleanupPath,
   environmentsKey,
   disconnectEnvironment,
+  lifecycleNotes,
+  LifecyclePanel,
+  LostPanel,
   managedPill,
   ManagedDeleteDialog,
   MonitoringPanel,
@@ -96,6 +99,7 @@ function EnvironmentRow({
   const [monitoringOpen, setMonitoringOpen] = useState(false);
   const [supportOpen, setSupportOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [lifecycleOpen, setLifecycleOpen] = useState(false);
   const isAdmin = useIsAdmin();
   const supportAccess = useFeature("support-access");
   const cleanup = awsCleanupPath(environment.name, environment.namespace);
@@ -113,7 +117,9 @@ function EnvironmentRow({
   });
 
   const managed = environment.origin === "managed";
+  const lost = managed && environment.state === "lost";
   const operable = !managed || environment.state === "ready";
+  const notes = managed && !lost ? lifecycleNotes(environment.lifecycle) : [];
   const pill = managedPill(environment.state);
   const unreachable = !managed && environment.status === "unreachable";
   // A row appears the moment a token is minted, so most of the time an
@@ -152,6 +158,27 @@ function EnvironmentRow({
                   </>
                 ) : null}
               </p>
+            ) : null}
+            {notes.length > 0 ? (
+              <ul className="flex flex-wrap gap-x-4 gap-y-1">
+                {notes.map((note) => (
+                  <li
+                    key={note.kind}
+                    className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                  >
+                    {note.kind === "update" ? (
+                      <CircleArrowUp className="size-3.5" strokeWidth={1.5} aria-hidden="true" />
+                    ) : (
+                      <TriangleAlert
+                        className="size-3.5 text-warning"
+                        strokeWidth={1.5}
+                        aria-hidden="true"
+                      />
+                    )}
+                    {note.label}
+                  </li>
+                ))}
+              </ul>
             ) : null}
           </div>
           {managed ? (
@@ -205,6 +232,17 @@ function EnvironmentRow({
                   >
                     Monitoring
                   </Button>
+                  {managed && environment.lifecycle ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-expanded={lifecycleOpen}
+                      onClick={() => setLifecycleOpen((open) => !open)}
+                    >
+                      Updates
+                    </Button>
+                  ) : null}
                   {supportAccess ? (
                     <Button
                       type="button"
@@ -224,9 +262,11 @@ function EnvironmentRow({
                 </Button>
               )}
               {managed ? (
-                <Button type="button" variant="ghost" size="sm" onClick={() => setDeleting(true)}>
-                  Delete
-                </Button>
+                lost ? null : (
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setDeleting(true)}>
+                    Delete
+                  </Button>
+                )
               ) : (
                 <Button type="button" variant="ghost" size="sm" onClick={() => setConfirming(true)}>
                   Disconnect
@@ -255,11 +295,26 @@ function EnvironmentRow({
           />
         </div>
       ) : null}
+      {lost && environment.lifecycle ? (
+        <div className="border-t border-border px-5 py-5">
+          <LostPanel
+            environment={environment.name}
+            lifecycle={environment.lifecycle}
+            onRemove={() => setDeleting(true)}
+          />
+        </div>
+      ) : null}
+      {managed && !lost && lifecycleOpen && environment.lifecycle ? (
+        <div className="border-t border-border px-5 py-5">
+          <LifecyclePanel environment={environment.name} lifecycle={environment.lifecycle} />
+        </div>
+      ) : null}
       {managed ? (
         <ManagedDeleteDialog
           environment={environment.name}
           account={account ? accountName(account) : (environment.connectionId ?? "")}
           accountUnreachable={account?.state === "unreachable"}
+          lost={lost}
           open={deleting}
           onOpenChange={setDeleting}
         />
