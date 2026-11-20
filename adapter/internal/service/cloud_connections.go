@@ -55,6 +55,7 @@ type CloudStore interface {
 	RevokeToken(ctx context.Context, teamID uint, hash string, now time.Time) error
 	RevokeTokenByID(ctx context.Context, teamID uint, id string, now time.Time) (store.CloudToken, error)
 	TokenTeam(ctx context.Context, hash string, now time.Time) (store.CloudToken, error)
+	TokenByID(ctx context.Context, teamID uint, id string) (store.CloudToken, error)
 	Enroll(ctx context.Context, in store.CloudEnrollment, now time.Time) (store.CloudConnection, error)
 	Get(ctx context.Context, teamID uint, id string) (store.CloudConnection, error)
 	List(ctx context.Context, teamID uint) ([]store.CloudConnection, error)
@@ -188,6 +189,51 @@ func (c *CloudConnections) IssueToken(ctx context.Context, scope auth.Scope, reg
 	}
 
 	return CloudToken{ID: auth.HashToken(token)[:16], Token: token, ExpiresAt: expires, AllowedRegions: regions}, nil
+}
+
+// Where a connect command stands, as the console follows it.
+const (
+	// CloudTokenWaiting is a command nobody has run yet.
+	CloudTokenWaiting = "waiting"
+	// CloudTokenConnecting is a command that named its AWS account, so the
+	// connection it made can be followed.
+	CloudTokenConnecting = "connecting"
+	// CloudTokenEnded is a command that was cancelled or whose connection is Ready.
+	CloudTokenEnded = "ended"
+	// CloudTokenExpired is a command that ran out of time.
+	CloudTokenExpired = "expired"
+)
+
+// CloudTokenStatus is where a connect command stands. It never holds the token.
+type CloudTokenStatus struct {
+	ID    string
+	State string
+	// ConnectionID is the connection the command made, once it named its account.
+	ConnectionID   string
+	ExpiresAt      time.Time
+	AllowedRegions []string
+}
+
+// TokenStatus reads where one of the scope's Team's connect commands stands. A
+// command that is unknown or another Team's reads as invalid.
+func (c *CloudConnections) TokenStatus(ctx context.Context, scope auth.Scope, id string) (CloudTokenStatus, error) {
+	token, err := c.store.TokenByID(ctx, scope.Team.ID, id)
+	if err != nil {
+		return CloudTokenStatus{}, err
+	}
+	state := CloudTokenWaiting
+	switch {
+	case token.RevokedAt != nil:
+		state = CloudTokenEnded
+	case !token.ExpiresAt.After(c.opts.Now()):
+		state = CloudTokenExpired
+	case token.ConnectionID != "":
+		state = CloudTokenConnecting
+	}
+
+	return CloudTokenStatus{
+		ID: id, State: state, ConnectionID: token.ConnectionID, ExpiresAt: token.ExpiresAt.UTC(), AllowedRegions: token.AllowedRegions,
+	}, nil
 }
 
 // CancelToken ends a connect token. The connection it started is dropped when

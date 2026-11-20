@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/percona/pds/adapter/internal/auth"
 	"github.com/percona/pds/adapter/internal/config"
 	"github.com/percona/pds/adapter/internal/managed"
 	"github.com/percona/pds/adapter/internal/store"
@@ -102,6 +103,38 @@ func TestLateRunsRefuseUntilTheDatabaseHasConnected(t *testing.T) {
 	steps, err := late.Steps(t.Context(), 5)
 	require.NoError(t, err)
 	assert.Len(t, steps, 1)
+}
+
+type recordedLifecycle struct{ builtLifecycle }
+
+func (recordedLifecycle) Describe(rec store.ManagedEnvironment) managed.Status {
+	return managed.Status{ChartVersion: rec.ChartVersion}
+}
+
+func (recordedLifecycle) Defer(context.Context, auth.Scope, string, int) error { return nil }
+
+func TestLateLifecycleHasNothingToSayAndRefusesUntilItIsBuilt(t *testing.T) {
+	late := &lateLifecycle{}
+
+	_, ok := late.Describe(store.ManagedEnvironment{})
+	assert.False(t, ok)
+	require.ErrorIs(t, late.Defer(t.Context(), auth.Scope{}, "orders", 3), managed.ErrUnavailable)
+	_, err := late.UpgradeNow(t.Context(), auth.Scope{}, "orders")
+	require.ErrorIs(t, err, managed.ErrUnavailable)
+	_, err = late.UpdateInfrastructure(t.Context(), auth.Scope{}, "orders", managed.InfraUpdate{})
+	require.ErrorIs(t, err, managed.ErrUnavailable)
+	_, err = late.PreviewUpdate(t.Context(), auth.Scope{}, "orders", managed.InfraUpdate{})
+	require.ErrorIs(t, err, managed.ErrUnavailable)
+	_, err = late.Rebuild(t.Context(), auth.Scope{}, "orders")
+	require.ErrorIs(t, err, managed.ErrUnavailable)
+	require.ErrorIs(t, late.SetWindow(t.Context(), auth.Scope{}, "orders", store.MaintenanceWindow{}), managed.ErrUnavailable)
+
+	late.set(recordedLifecycle{})
+	status, ok := late.Describe(store.ManagedEnvironment{ChartVersion: "0.1.0"})
+
+	assert.True(t, ok)
+	assert.Equal(t, "0.1.0", status.ChartVersion)
+	require.NoError(t, late.Defer(t.Context(), auth.Scope{}, "orders", 3))
 }
 
 func TestWorkerOwnerNamesTheReplica(t *testing.T) {

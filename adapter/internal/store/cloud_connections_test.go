@@ -109,6 +109,33 @@ func TestATokenBindsToTheFirstAccountItEnrolls(t *testing.T) {
 	assert.ErrorIs(t, err, store.ErrCloudTokenAccount)
 }
 
+func TestATokenIsReadByItsPublicIDForItsOwnTeamOnlyAndKeepsReadingAfterItEnds(t *testing.T) {
+	db, admin := newOrganizationWithAdmin(t)
+	other, err := db.Identity().CreateTeam(t.Context(), admin.OrganizationID, "payments", time.Now())
+	require.NoError(t, err)
+	cc := db.CloudConnections()
+	hash := "0123456789abcdef0123"
+	require.NoError(t, cc.CreateToken(t.Context(), newCloudToken(admin.TeamID, hash, time.Hour)))
+
+	got, err := cc.TokenByID(t.Context(), admin.TeamID, hash[:16])
+	require.NoError(t, err)
+	assert.Empty(t, got.ConnectionID)
+	assert.Nil(t, got.RevokedAt)
+
+	row, err := cc.Enroll(t.Context(), enrollInput(hash, "123456789012", "aaaaaaaaaaaa"), time.Now())
+	require.NoError(t, err)
+	require.NoError(t, cc.RevokeToken(t.Context(), admin.TeamID, hash, time.Now()))
+	got, err = cc.TokenByID(t.Context(), admin.TeamID, hash[:16])
+	require.NoError(t, err)
+	assert.Equal(t, row.ID, got.ConnectionID)
+	assert.NotNil(t, got.RevokedAt)
+
+	_, err = cc.TokenByID(t.Context(), other.ID, hash[:16])
+	assert.ErrorIs(t, err, store.ErrCloudTokenInvalid, "another Team's token reads as missing")
+	_, err = cc.TokenByID(t.Context(), admin.TeamID, "short")
+	assert.ErrorIs(t, err, store.ErrCloudTokenInvalid)
+}
+
 func TestReachingReadyRevokesTheConnectionsTokensOnce(t *testing.T) {
 	db, admin := newOrganizationWithAdmin(t)
 	cc := db.CloudConnections()

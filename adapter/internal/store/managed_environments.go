@@ -59,8 +59,12 @@ type ManagedEnvironment struct {
 	// Drift lists what was changed outside PDS as of DriftCheckedAt.
 	Drift          []DriftItem `gorm:"type:jsonb;serializer:json"`
 	DriftCheckedAt *time.Time
-	CreatedAt      time.Time `gorm:"not null"`
-	UpdatedAt      time.Time `gorm:"not null"`
+	// TemplateRevision and KubernetesVersion are what the latest check read from
+	// the stack and the cluster. Zero and empty mean it has not read them yet.
+	TemplateRevision  int       `gorm:"not null;default:0"`
+	KubernetesVersion string    `gorm:"size:16;not null;default:''"`
+	CreatedAt         time.Time `gorm:"not null"`
+	UpdatedAt         time.Time `gorm:"not null"`
 }
 
 // DriftItem is one thing in an environment's infrastructure that was changed
@@ -291,6 +295,12 @@ func (m *ManagedEnvironments) SetDeferral(ctx context.Context, teamID uint, name
 // back, or clears it with an empty version.
 func (m *ManagedEnvironments) SetSkippedVersion(ctx context.Context, teamID uint, name, version string) error {
 	return m.update(ctx, teamID, name, map[string]any{"skipped_version": version})
+}
+
+// SetObserved records the template revision of the stack and the Kubernetes
+// version of the cluster the latest check read.
+func (m *ManagedEnvironments) SetObserved(ctx context.Context, teamID uint, name string, templateRevision int, kubernetesVersion string) error {
+	return m.update(ctx, teamID, name, map[string]any{"template_revision": templateRevision, "kubernetes_version": kubernetesVersion})
 }
 
 // SetDrift records what the latest check found changed outside PDS.

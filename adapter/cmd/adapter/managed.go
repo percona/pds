@@ -133,6 +133,105 @@ func (l *lateRuns) Steps(ctx context.Context, runID uint) ([]store.ProvisioningS
 	return runs.Steps(ctx, runID)
 }
 
+// lateLifecycle is the managed lifecycle once the database has connected and the
+// pin lists the upgrade paths. Until then there is no lifecycle to describe, and
+// a change is unavailable.
+type lateLifecycle struct {
+	mu   sync.RWMutex
+	life builtLifecycle
+}
+
+// builtLifecycle is *managed.Lifecycle: managed.Lifecycler, but its Describe
+// always has an answer.
+type builtLifecycle interface {
+	Describe(rec store.ManagedEnvironment) managed.Status
+	SetWindow(ctx context.Context, who auth.Scope, name string, w store.MaintenanceWindow) error
+	Defer(ctx context.Context, who auth.Scope, name string, days int) error
+	UpgradeNow(ctx context.Context, who auth.Scope, name string) (store.ProvisioningRun, error)
+	PreviewUpdate(ctx context.Context, who auth.Scope, name string, in managed.InfraUpdate) (managed.Verdict, error)
+	UpdateInfrastructure(ctx context.Context, who auth.Scope, name string, in managed.InfraUpdate) (store.ProvisioningRun, error)
+	Rebuild(ctx context.Context, who auth.Scope, name string) (store.ProvisioningRun, error)
+}
+
+func (l *lateLifecycle) set(life builtLifecycle) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.life = life
+}
+
+func (l *lateLifecycle) get() (builtLifecycle, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	if l.life == nil {
+		return nil, managed.ErrUnavailable
+	}
+
+	return l.life, nil
+}
+
+func (l *lateLifecycle) Describe(rec store.ManagedEnvironment) (managed.Status, bool) {
+	life, err := l.get()
+	if err != nil {
+		return managed.Status{}, false
+	}
+
+	return life.Describe(rec), true
+}
+
+func (l *lateLifecycle) SetWindow(ctx context.Context, who auth.Scope, name string, w store.MaintenanceWindow) error {
+	life, err := l.get()
+	if err != nil {
+		return err
+	}
+
+	return life.SetWindow(ctx, who, name, w)
+}
+
+func (l *lateLifecycle) Defer(ctx context.Context, who auth.Scope, name string, days int) error {
+	life, err := l.get()
+	if err != nil {
+		return err
+	}
+
+	return life.Defer(ctx, who, name, days)
+}
+
+func (l *lateLifecycle) UpgradeNow(ctx context.Context, who auth.Scope, name string) (store.ProvisioningRun, error) {
+	life, err := l.get()
+	if err != nil {
+		return store.ProvisioningRun{}, err
+	}
+
+	return life.UpgradeNow(ctx, who, name)
+}
+
+func (l *lateLifecycle) PreviewUpdate(ctx context.Context, who auth.Scope, name string, in managed.InfraUpdate) (managed.Verdict, error) {
+	life, err := l.get()
+	if err != nil {
+		return managed.Verdict{}, err
+	}
+
+	return life.PreviewUpdate(ctx, who, name, in)
+}
+
+func (l *lateLifecycle) UpdateInfrastructure(ctx context.Context, who auth.Scope, name string, in managed.InfraUpdate) (store.ProvisioningRun, error) {
+	life, err := l.get()
+	if err != nil {
+		return store.ProvisioningRun{}, err
+	}
+
+	return life.UpdateInfrastructure(ctx, who, name, in)
+}
+
+func (l *lateLifecycle) Rebuild(ctx context.Context, who auth.Scope, name string) (store.ProvisioningRun, error) {
+	life, err := l.get()
+	if err != nil {
+		return store.ProvisioningRun{}, err
+	}
+
+	return life.Rebuild(ctx, who, name)
+}
+
 // runBook is the engine that starts and retries runs together with the store
 // that reads them.
 type runBook struct {
@@ -251,18 +350,18 @@ func newManagedEnvironments(
 		Settings: settings,
 	}
 
-	late := &lateRuns{}
-	go runProvisioning(ctx, cfg, db, deps, late, logger)
+	late, lateLife := &lateRuns{}, &lateLifecycle{}
+	go runProvisioning(ctx, cfg, db, deps, late, lateLife, logger)
 
 	remover := managed.NewRemover(records, db.CloudConnections(), late, lateAbandoner{db: db}, forget)
 	environments := &managed.Environments{Creator: managed.NewCreator(records, cloud, late, creatorSettings), Remover: remover}
 
-	return environments, managed.NewManager(records, late, remover), nil
+	return environments, managed.NewManager(records, late, remover, lateLife), nil
 }
 
 // runProvisioning waits for the database, then works runs and sweeps until the
 // process stops. Every replica does both: the lease is the only coordination.
-func runProvisioning(ctx context.Context, cfg config.Config, db *store.Starter, deps managed.Deps, late *lateRuns, logger *slog.Logger) {
+func runProvisioning(ctx context.Context, cfg config.Config, db *store.Starter, deps managed.Deps, late *lateRuns, lateLife *lateLifecycle, logger *slog.Logger) {
 	var st *store.Store
 	for st = db.Store(); st == nil; st = db.Store() {
 		select {
@@ -294,6 +393,7 @@ func runProvisioning(ctx context.Context, cfg config.Config, db *store.Starter, 
 		logger.ErrorContext(ctx, "managed upgrades are off", slog.String("cause", log.RedactText(err.Error())))
 	} else {
 		life := managed.NewLifecycle(deps, st.ManagedEnvironments(), engine, paths, managed.LifecycleOptions{Logger: logger})
+		lateLife.set(life)
 		go life.Run(ctx, lifecycleUpgradeEvery, lifecycleCheckEvery)
 	}
 

@@ -115,6 +115,40 @@ func (s *Server) handleIssueCloudToken(w http.ResponseWriter, r *http.Request) {
 	}, nil)
 }
 
+// cloudTokenStatusResponse is where a connect command stands. The console polls
+// it by the id the mint answered with, and once connectionId appears it reads the
+// connection. It never holds the command or the token.
+type cloudTokenStatusResponse struct {
+	ID             string    `json:"id"`
+	State          string    `json:"state"`
+	ConnectionID   string    `json:"connectionId,omitempty"`
+	ExpiresAt      time.Time `json:"expiresAt"`
+	AllowedRegions []string  `json:"allowedRegions"`
+}
+
+// handleGetCloudToken tells where one of the Team's connect commands stands.
+func (s *Server) handleGetCloudToken(w http.ResponseWriter, r *http.Request) {
+	cloud, scope, ok := s.cloudCaller(w, r)
+	if !ok {
+		return
+	}
+	got, err := cloud.TokenStatus(r.Context(), scope, chi.URLParam(r, "id"))
+	if errors.Is(err, store.ErrCloudTokenInvalid) {
+		Respond(w, r, nil, NotFound("That connect command does not exist.").WithCause(err))
+
+		return
+	}
+	if err != nil {
+		Respond(w, r, nil, cloudError(err))
+
+		return
+	}
+
+	Respond(w, r, cloudTokenStatusResponse{
+		ID: got.ID, State: got.State, ConnectionID: got.ConnectionID, ExpiresAt: got.ExpiresAt, AllowedRegions: got.AllowedRegions,
+	}, nil)
+}
+
 // handleCancelCloudToken ends a connect command before it has been used or
 // while it is still running.
 func (s *Server) handleCancelCloudToken(w http.ResponseWriter, r *http.Request) {
@@ -240,11 +274,13 @@ func (s *Server) handleRemoveCloudConnection(w http.ResponseWriter, r *http.Requ
 
 		return
 	}
+	event := service.ActivityEvent{Action: service.ActionCloudConnectionRemove, Target: req.Confirm, Outcome: service.OutcomeSucceeded}
 	if err := cloud.Remove(r.Context(), scope, chi.URLParam(r, "id"), req.Confirm); err != nil {
-		Respond(w, r, nil, cloudError(err))
+		s.failManaged(w, r, event, cloudError(err))
 
 		return
 	}
+	s.recordManaged(r, event, nil)
 
 	RespondWithStatus(w, r, http.StatusNoContent, nil, nil)
 }

@@ -10,6 +10,11 @@ import _ "embed"
 // output, and a test holds the two together.
 const TemplateRevision = 1
 
+// NewEnvironmentKubernetesVersion is the Kubernetes version a new environment
+// starts on: the default of the template's KubernetesVersion parameter. An
+// environment on an older minor version has a Kubernetes upgrade available.
+const NewEnvironmentKubernetesVersion = "1.33"
+
 // OwnershipTag is the tag key on everything an environment owns in AWS. Its
 // value is the environment's ID.
 const OwnershipTag = "percona.com/pds"

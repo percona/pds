@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/percona/pds/adapter/internal/auth"
 	"github.com/percona/pds/adapter/internal/managed"
+	"github.com/percona/pds/adapter/internal/service"
 	"github.com/percona/pds/adapter/internal/store"
 )
 
@@ -59,6 +61,75 @@ type provisioningResponse struct {
 	Failure  *failureResponse `json:"failure,omitempty"`
 }
 
+type driftResponse struct {
+	Resource string `json:"resource"`
+	Detail   string `json:"detail"`
+}
+
+type maintenanceWindowResponse struct {
+	// Day is 0 for Sunday to 6 for Saturday, Hour 0 to 23 in TimeZone.
+	Day      int    `json:"day"`
+	Hour     int    `json:"hour"`
+	TimeZone string `json:"timeZone"`
+	// NextStart and NextEnd are the window that is open now, or the next one.
+	NextStart time.Time `json:"nextStart"`
+	NextEnd   time.Time `json:"nextEnd"`
+}
+
+// lifecycleResponse is what the control plane knows about a managed
+// environment's upgrades, drift and loss. It reads no AWS: the hourly check
+// wrote what it found.
+type lifecycleResponse struct {
+	ChartVersion        string `json:"chartVersion,omitempty"`
+	PendingChartVersion string `json:"pendingChartVersion,omitempty"`
+	// SkippedChartVersion is the version that failed here and was rolled back.
+	SkippedChartVersion string     `json:"skippedChartVersion,omitempty"`
+	Deferred            bool       `json:"deferred"`
+	DeferredUntil       *time.Time `json:"deferredUntil,omitempty"`
+
+	MaintenanceWindow maintenanceWindowResponse `json:"maintenanceWindow"`
+
+	TemplateRevision       int    `json:"templateRevision"`
+	LatestTemplateRevision int    `json:"latestTemplateRevision"`
+	TemplateOutOfDate      bool   `json:"templateOutOfDate"`
+	TemplateSummary        string `json:"templateSummary,omitempty"`
+
+	KubernetesVersion          string `json:"kubernetesVersion,omitempty"`
+	KubernetesUpgradeAvailable bool   `json:"kubernetesUpgradeAvailable"`
+
+	Drift          []driftResponse `json:"drift"`
+	DriftCheckedAt *time.Time      `json:"driftCheckedAt,omitempty"`
+
+	Lost       bool       `json:"lost"`
+	LostReason string     `json:"lostReason,omitempty"`
+	LostAt     *time.Time `json:"lostAt,omitempty"`
+}
+
+func lifecycleView(s managed.Status) lifecycleResponse {
+	out := lifecycleResponse{
+		ChartVersion: s.ChartVersion, PendingChartVersion: s.NextChart, SkippedChartVersion: s.SkippedVersion,
+		Deferred: s.Deferred, DeferredUntil: s.DeferredUntil,
+		MaintenanceWindow: maintenanceWindowResponse{
+			Day: int(s.Window.Day), Hour: s.Window.Hour, TimeZone: s.Window.Zone, NextStart: s.WindowStart.UTC(), NextEnd: s.WindowEnd.UTC(),
+		},
+		TemplateRevision: s.TemplateRevision, LatestTemplateRevision: s.LatestTemplateRevision, TemplateOutOfDate: s.TemplateOutOfDate(),
+		KubernetesVersion: s.KubernetesVersion, KubernetesUpgradeAvailable: s.KubernetesUpgradeAvailable,
+		Drift: make([]driftResponse, 0, len(s.Drift)), DriftCheckedAt: s.DriftCheckedAt,
+		Lost: s.Lost, LostAt: s.LostAt,
+	}
+	if out.TemplateOutOfDate {
+		out.TemplateSummary = "Template revision " + strconv.Itoa(s.TemplateRevision) + ", latest " + strconv.Itoa(s.LatestTemplateRevision)
+	}
+	for _, item := range s.Drift {
+		out.Drift = append(out.Drift, driftResponse{Resource: item.Resource, Detail: item.Detail})
+	}
+	if s.Lost {
+		out.LostReason = managed.LostReason
+	}
+
+	return out
+}
+
 type runStartedResponse struct {
 	Run          runResponse          `json:"run"`
 	Provisioning provisioningResponse `json:"provisioning"`
@@ -76,6 +147,39 @@ type managedCreatedResponse struct {
 
 type startRunRequest struct {
 	Kind string `json:"kind" validate:"required,oneof=upgrade_pds upgrade_kubernetes rebuild"`
+	// KubernetesVersion and ConfirmNodeGroupReplace only apply to
+	// upgrade_kubernetes. With no version it updates the stack's template.
+	KubernetesVersion       string `json:"kubernetesVersion"`
+	ConfirmNodeGroupReplace bool   `json:"confirmNodeGroupReplace"`
+}
+
+type deferRequest struct {
+	Days int `json:"days" validate:"required"`
+}
+
+type maintenanceWindowRequest struct {
+	Day      *int   `json:"day" validate:"required"`
+	Hour     *int   `json:"hour" validate:"required"`
+	TimeZone string `json:"timeZone" validate:"required"`
+}
+
+type updatePreviewRequest struct {
+	KubernetesVersion string `json:"kubernetesVersion"`
+}
+
+type changeResponse struct {
+	Resource    string `json:"resource"`
+	Type        string `json:"type"`
+	Action      string `json:"action"`
+	Replacement string `json:"replacement"`
+}
+
+// updatePreviewResponse is what an update of the stack would do. An update that
+// replaces the network or the Kubernetes cluster is never started.
+type updatePreviewResponse struct {
+	ReplacesNetwork   bool             `json:"replacesNetwork"`
+	ReplacesNodeGroup bool             `json:"replacesNodeGroup"`
+	Changes           []changeResponse `json:"changes"`
 }
 
 type deleteEnvironmentRequest struct {
@@ -127,7 +231,11 @@ func withManaged(row environmentResponse, env managed.Managed, connected bool) e
 	if row.Status == "" {
 		row.Status = "pending"
 	}
-	row.State = managed.StateOf(env.Provisioning, connected)
+	row.State = managed.StateOf(env.Provisioning, connected, env.Record.LostAt != nil)
+	if env.Lifecycle != nil {
+		view := lifecycleView(*env.Lifecycle)
+		row.Lifecycle = &view
+	}
 	if env.Provisioning.Run.ID != 0 {
 		view := provisioningView(env.Provisioning)
 		row.Provisioning = &view
@@ -178,10 +286,11 @@ func (s *Server) handleCreateManagedEnvironment(w http.ResponseWriter, r *http.R
 		ConnectionID: chi.URLParam(r, "id"), Name: strings.TrimSpace(req.Name), Region: strings.TrimSpace(req.Region),
 	})
 	if err != nil {
-		Respond(w, r, nil, managedError(err))
+		s.failManaged(w, r, managedEvent(service.ActionEnvironmentCreate, strings.TrimSpace(req.Name), ""), managedError(err))
 
 		return
 	}
+	s.recordManaged(r, managedEvent(service.ActionEnvironmentCreate, created.Environment.Name, ""), nil)
 	p, err := s.managed.Provisioning(r.Context(), scope.Team.ID, created.Environment.Name)
 	if err != nil {
 		Respond(w, r, nil, managedError(err))
@@ -208,14 +317,199 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimSpace(chi.URLParam(r, "name"))
-	run, err := s.managed.Start(r.Context(), scope, name, req.Kind)
+	run, err := s.managed.Start(r.Context(), scope, name, managed.StartRequest{
+		Kind: req.Kind, KubernetesVersion: strings.TrimSpace(req.KubernetesVersion), ConfirmNodeGroupReplace: req.ConfirmNodeGroupReplace,
+	})
+	event := runEvent(name, req)
+	if err != nil {
+		s.failManaged(w, r, event, managedErrorFor(err, invalidRun))
+
+		return
+	}
+	s.recordManaged(r, event, nil)
+
+	s.respondRunStarted(w, r, scope, name, run)
+}
+
+// runEvent is the activity entry of a run a person starts.
+func runEvent(name string, req startRunRequest) service.ActivityEvent {
+	switch req.Kind {
+	case managed.KindRebuild:
+		return managedEvent(service.ActionEnvironmentRebuild, name, "")
+	case managed.KindKubernetes:
+		if v := strings.TrimSpace(req.KubernetesVersion); v != "" {
+			return managedEvent(service.ActionEnvironmentUpgrade, name, "Upgrade Kubernetes to "+v)
+		}
+
+		return managedEvent(service.ActionEnvironmentUpgrade, name, "Update the environment's template")
+	}
+
+	return managedEvent(service.ActionEnvironmentUpgrade, name, "Upgrade PDS")
+}
+
+// managedEvent is the activity entry of a change to a managed environment. It
+// starts as accepted, which is what a run that has only been queued is.
+func managedEvent(action, environment, detail string) service.ActivityEvent {
+	return service.ActivityEvent{
+		Action: action, Environment: environment, Target: environment, Outcome: service.OutcomeAccepted, Detail: detail,
+	}
+}
+
+// recordManaged writes the entry of a change. A refused change is recorded as
+// failed with the sentence the person read, never the cause. A change to an
+// environment the Team does not have is not recorded: nothing happened.
+func (s *Server) recordManaged(r *http.Request, e service.ActivityEvent, refused error) {
+	if refused != nil {
+		var app *AppError
+		if errors.As(refused, &app) && app.Code == CodeNotFound {
+			return
+		}
+		e.Outcome, e.Error = service.OutcomeFailed, somethingWentWrong
+		if app != nil {
+			e.Error = app.Message
+		}
+	}
+	s.activity.Record(r.Context(), e)
+}
+
+// failManaged records a refused change and answers it.
+func (s *Server) failManaged(w http.ResponseWriter, r *http.Request, e service.ActivityEvent, refused error) {
+	s.recordManaged(r, e, refused)
+	Respond(w, r, nil, refused)
+}
+
+type remainsResponse struct {
+	AccountID string `json:"accountId,omitempty"`
+	Region    string `json:"region"`
+	StackName string `json:"stackName"`
+	EKSName   string `json:"eksName"`
+	Bucket    string `json:"bucket,omitempty"`
+}
+
+// handleGetRemains names what Remove from PDS only leaves in the AWS account, for
+// the dialog that asks the person to type the environment's name.
+func (s *Server) handleGetRemains(w http.ResponseWriter, r *http.Request) {
+	scope, ok := s.managerScope(w, r)
+	if !ok {
+		return
+	}
+	got, err := s.managed.Remains(r.Context(), scope, strings.TrimSpace(chi.URLParam(r, "name")))
 	if err != nil {
 		Respond(w, r, nil, managedError(err))
 
 		return
 	}
 
-	s.respondRunStarted(w, r, scope, name, run)
+	Respond(w, r, remainsResponse{
+		AccountID: got.AccountID, Region: got.Region, StackName: got.StackName, EKSName: got.ClusterName, Bucket: got.Bucket,
+	}, nil)
+}
+
+// handleDeferUpgrade puts the next chart version off.
+func (s *Server) handleDeferUpgrade(w http.ResponseWriter, r *http.Request) {
+	scope, ok := s.managerScope(w, r)
+	if !ok {
+		return
+	}
+	var req deferRequest
+	if err := s.decode(r, &req); err != nil {
+		Respond(w, r, nil, err)
+
+		return
+	}
+	name := strings.TrimSpace(chi.URLParam(r, "name"))
+	days := strconv.Itoa(req.Days) + " days"
+	if req.Days == 1 {
+		days = "1 day"
+	}
+	event := managedEvent(service.ActionEnvironmentDefer, name, "Deferred for "+days)
+	event.Outcome = service.OutcomeSucceeded
+	if err := s.managed.Defer(r.Context(), scope, name, req.Days); err != nil {
+		s.failManaged(w, r, event, managedErrorFor(err, invalidDeferral))
+
+		return
+	}
+	s.recordManaged(r, event, nil)
+
+	s.respondLifecycle(w, r, scope, name)
+}
+
+// handlePutMaintenanceWindow sets the weekly window the environment may be
+// upgraded in.
+func (s *Server) handlePutMaintenanceWindow(w http.ResponseWriter, r *http.Request) {
+	scope, ok := s.managerScope(w, r)
+	if !ok {
+		return
+	}
+	var req maintenanceWindowRequest
+	if err := s.decode(r, &req); err != nil {
+		Respond(w, r, nil, err)
+
+		return
+	}
+	name := strings.TrimSpace(chi.URLParam(r, "name"))
+	window := store.MaintenanceWindow{Day: time.Weekday(*req.Day), Hour: *req.Hour, Zone: strings.TrimSpace(req.TimeZone)}
+	event := managedEvent(service.ActionEnvironmentWindow, name, fmt.Sprintf("%ss at %02d:00 %s", window.Day, window.Hour, window.Zone))
+	event.Outcome = service.OutcomeSucceeded
+	if err := s.managed.SetWindow(r.Context(), scope, name, window); err != nil {
+		s.failManaged(w, r, event, managedErrorFor(err, invalidWindow))
+
+		return
+	}
+	s.recordManaged(r, event, nil)
+
+	s.respondLifecycle(w, r, scope, name)
+}
+
+// handlePreviewUpdate shows what an update of the stack would change. It makes a
+// change set in the customer's account and removes it again.
+func (s *Server) handlePreviewUpdate(w http.ResponseWriter, r *http.Request) {
+	scope, ok := s.managerScope(w, r)
+	if !ok {
+		return
+	}
+	var req updatePreviewRequest
+	if err := decodeOptionalBody(r, &req); err != nil {
+		Respond(w, r, nil, err)
+
+		return
+	}
+	verdict, err := s.managed.PreviewUpdate(r.Context(), scope, strings.TrimSpace(chi.URLParam(r, "name")), managed.InfraUpdate{
+		KubernetesVersion: strings.TrimSpace(req.KubernetesVersion),
+	})
+	if err != nil {
+		Respond(w, r, nil, managedErrorFor(err, invalidRun))
+
+		return
+	}
+	out := updatePreviewResponse{
+		ReplacesNetwork: verdict.ReplacesNetwork, ReplacesNodeGroup: verdict.ReplacesNodeGroup,
+		Changes: make([]changeResponse, 0, len(verdict.Plan.Changes)),
+	}
+	for _, c := range verdict.Plan.Changes {
+		out.Changes = append(out.Changes, changeResponse{Resource: c.Resource, Type: c.Type, Action: c.Action, Replacement: c.Replacement})
+	}
+
+	Respond(w, r, out, nil)
+}
+
+// respondLifecycle answers a change to the lifecycle with where it stands now.
+func (s *Server) respondLifecycle(w http.ResponseWriter, r *http.Request, scope auth.Scope, name string) {
+	envs, err := s.managed.Environments(r.Context(), scope.Team.ID)
+	if err != nil {
+		Respond(w, r, nil, managedError(err))
+
+		return
+	}
+	for _, env := range envs {
+		if env.Record.Name == name && env.Lifecycle != nil {
+			Respond(w, r, lifecycleView(*env.Lifecycle), nil)
+
+			return
+		}
+	}
+
+	Respond(w, r, nil, managedError(managed.ErrUnavailable))
 }
 
 // handleRetryRun re-runs the failed step of the environment's latest run.
@@ -231,11 +525,13 @@ func (s *Server) handleRetryRun(w http.ResponseWriter, r *http.Request) {
 
 		return
 	}
+	event := managedEvent(service.ActionEnvironmentRetry, name, "")
 	if err := s.managed.Retry(r.Context(), scope, name, uint(id)); err != nil {
-		Respond(w, r, nil, managedError(err))
+		s.failManaged(w, r, event, managedError(err))
 
 		return
 	}
+	s.recordManaged(r, event, nil)
 	run, err := s.managedLatest(r, scope, name)
 	if err != nil {
 		Respond(w, r, nil, managedError(err))
@@ -266,22 +562,26 @@ func (s *Server) deleteManagedEnvironment(w http.ResponseWriter, r *http.Request
 		return true
 	}
 
+	event := managedEvent(service.ActionEnvironmentDelete, name, "")
 	if req.Scope == "pds_only" {
+		event.Outcome, event.Detail = service.OutcomeSucceeded, "Removed from PDS only. Everything in AWS stays."
 		if err := s.managed.RemoveFromPDS(r.Context(), scope, name, req.Confirm); err != nil {
-			Respond(w, r, nil, managedError(err))
+			s.failManaged(w, r, event, managedError(err))
 
 			return true
 		}
+		s.recordManaged(r, event, nil)
 		RespondWithStatus(w, r, http.StatusNoContent, nil, nil)
 
 		return true
 	}
 	run, err := s.managed.Delete(r.Context(), scope, name, req.Confirm)
 	if err != nil {
-		Respond(w, r, nil, managedError(err))
+		s.failManaged(w, r, event, managedError(err))
 
 		return true
 	}
+	s.recordManaged(r, event, nil)
 	s.respondRunStarted(w, r, scope, name, run)
 
 	return true
@@ -342,9 +642,20 @@ func decodeOptionalBody(r *http.Request, out any) error {
 	return nil
 }
 
-// managedError maps what managed environments and their runs refuse onto the
+// What a request the managed routes cannot make sense of is told, by route.
+const (
+	invalidCreate   = "Check the environment name and the region, then try again."
+	invalidRun      = "Check the run kind and the Kubernetes version, then try again."
+	invalidDeferral = "Choose from 1 to 30 days."
+	invalidWindow   = "Choose a day, an hour from 0 to 23 and a time zone such as Europe/Berlin."
+)
+
+func managedError(err error) error { return managedErrorFor(err, invalidCreate) }
+
+// managedErrorFor maps what managed environments and their runs refuse onto the
 // API's errors. Every sentence says what to do next, and none carries AWS text.
-func managedError(err error) error {
+// invalid is the sentence for a request that makes no sense on this route.
+func managedErrorFor(err error, invalid string) error {
 	switch {
 	case err == nil:
 		return nil
@@ -353,7 +664,7 @@ func managedError(err error) error {
 	case errors.Is(err, store.ErrManagedEnvironmentExists):
 		return Conflict("An environment with that name already exists in your team. Choose another name.").WithCause(err)
 	case errors.Is(err, managed.ErrInvalid):
-		return Validation("Check the environment name and the region, then try again.").WithCause(err)
+		return Validation(invalid).WithCause(err)
 	case errors.Is(err, managed.ErrUnavailable):
 		return NotImplemented("This control plane cannot build or change managed environments. Contact Percona support.").WithCause(err)
 	case errors.Is(err, managed.ErrConnectionNotReady):
@@ -361,7 +672,7 @@ func managedError(err error) error {
 	case errors.Is(err, managed.ErrConfirm):
 		return Validation("The name you typed is not the name of this environment. Type it exactly, then try again.").WithCause(err)
 	case errors.Is(err, managed.ErrConnectionReachable):
-		return Conflict("PDS can still reach this AWS account. Delete the environment instead of removing it from PDS only.").WithCause(err)
+		return Conflict("PDS can still reach this AWS account and the environment's Kubernetes cluster. Delete the environment instead of removing it from PDS only.").WithCause(err)
 	case errors.Is(err, store.ErrRunActive):
 		return Conflict("This environment already has a run in progress. Wait for it to finish, or retry it if it failed.").WithCause(err)
 	case errors.Is(err, store.ErrNoFailedRun):
@@ -370,6 +681,20 @@ func managedError(err error) error {
 		return NotFound("That run does not exist.").WithCause(err)
 	case errors.Is(err, store.ErrCloudConnectionUnknown):
 		return cloudError(err)
+	case errors.Is(err, managed.ErrNothingToUpgrade):
+		return Conflict("This environment is up to date, so there is nothing to upgrade.").WithCause(err)
+	case errors.Is(err, managed.ErrAlreadyDeferred):
+		return Conflict("This version was already deferred once. It upgrades in the next maintenance window, or upgrade it now.").WithCause(err)
+	case errors.Is(err, managed.ErrNotReady):
+		return Conflict("This environment has not finished connecting. Wait for its first run to finish, then try again.").WithCause(err)
+	case errors.Is(err, managed.ErrLost):
+		return Conflict("This environment's infrastructure is missing. Rebuild it to bring it back.").WithCause(err)
+	case errors.Is(err, managed.ErrNotLost):
+		return Conflict("Only an environment whose infrastructure is missing can be rebuilt. Check its state, then try again.").WithCause(err)
+	case errors.Is(err, managed.ErrWouldReplace):
+		return Conflict("This update would replace the network or the Kubernetes cluster, so PDS will not run it. Contact Percona support.").WithCause(err)
+	case errors.Is(err, managed.ErrConfirmRequired):
+		return Conflict("This update replaces the node group and restarts every database. Confirm it to go on.").WithCause(err)
 	case errors.Is(err, store.ErrNotConnected):
 		return Downstream("The control plane is not available. Try again in a moment.", err)
 	}

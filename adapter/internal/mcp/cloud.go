@@ -27,6 +27,8 @@ const (
 	msgStartConnectionNote    = "Ask the user to open consoleUrl and follow the steps: they run one command in their AWS account. The command is not shown here. Then use get_cloud_connection to follow it."
 	msgStartConnectionNoLink  = "Ask the user to open the console, choose to connect an AWS account and run the command it shows. The command is not shown here. Then use get_cloud_connection to follow it."
 
+	msgVersionNeedsKubernetes = "A Kubernetes version only goes with kind kubernetes. Leave it out to upgrade PDS."
+
 	msgManagedCreateCheck = "Call get_environment to see whether the environment was created."
 	msgRetryCheck         = "Call get_environment to see whether the run started again."
 	msgUpgradeCheck       = "Call get_environment to see whether the run started."
@@ -154,12 +156,14 @@ type environmentRunInput struct {
 }
 
 type upgradeEnvironmentInput struct {
-	Environment string `json:"environment" jsonschema:"The name of a managed environment, from list_environments."`
-	Kind        string `json:"kind" jsonschema:"pds upgrades PDS on the environment. kubernetes upgrades the Kubernetes version and the nodes, one minor version at a time."`
+	Environment       string `json:"environment" jsonschema:"The name of a managed environment, from list_environments."`
+	Kind              string `json:"kind" jsonschema:"pds upgrades PDS on the environment. kubernetes upgrades the Kubernetes version and the nodes, one minor version at a time, or only updates the infrastructure template when kubernetesVersion is left out."`
+	KubernetesVersion string `json:"kubernetesVersion,omitempty" jsonschema:"With kind kubernetes: the minor version to move to, one above the current one, such as 1.34. Leave it out to update only the infrastructure template."`
 }
 
 type runBody struct {
-	Kind string `json:"kind"`
+	Kind              string `json:"kind"`
+	KubernetesVersion string `json:"kubernetesVersion,omitempty"`
 }
 
 // confirmedDeleteInput leaves confirm optional in the schema, so that a call
@@ -215,8 +219,10 @@ func cloudChanges() []tool {
 		define(spec{
 			name:  "upgrade_environment",
 			title: "Upgrade a managed environment",
-			description: "Start an upgrade of a managed environment now. kind pds upgrades PDS on it, and kubernetes upgrades the Kubernetes version and the nodes one minor version at a time. " +
-				"Refused while the environment has a run in progress. Use wait_for_environment to follow it.",
+			description: "Start an upgrade of a managed environment now. kind pds upgrades PDS on it. kind kubernetes upgrades the Kubernetes version and the nodes one minor version at a time, " +
+				"and with no kubernetesVersion it only updates the infrastructure template (get_environment shows templateSummary when it is old). " +
+				"Refused while the environment has a run in progress, when nothing newer applies, and when the update would replace the network or the Kubernetes cluster or the node group: " +
+				"the user decides those in the console. Use wait_for_environment to follow it.",
 			annotations: changing(false, false),
 			access:      auth.AccessChange,
 			tune: func(input, _ *jsonschema.Schema) {
@@ -318,20 +324,24 @@ func retryEnvironmentRun(ctx context.Context, c *call, in environmentRunInput) (
 }
 
 func upgradeEnvironment(ctx context.Context, c *call, in upgradeEnvironmentInput) (changed, error) {
-	return startRun(ctx, c, "upgrade_environment", in.Environment, "upgrade_"+in.Kind, msgUpgradeCheck)
+	if in.KubernetesVersion != "" && in.Kind != "kubernetes" {
+		return changed{}, refuse(msgVersionNeedsKubernetes)
+	}
+
+	return startRun(ctx, c, "upgrade_environment", in.Environment, runBody{Kind: "upgrade_" + in.Kind, KubernetesVersion: in.KubernetesVersion}, msgUpgradeCheck)
 }
 
 func rebuildEnvironment(ctx context.Context, c *call, in environmentRunInput) (changed, error) {
-	return startRun(ctx, c, "rebuild_environment", in.Environment, "rebuild", msgRebuildCheck)
+	return startRun(ctx, c, "rebuild_environment", in.Environment, runBody{Kind: "rebuild"}, msgRebuildCheck)
 }
 
-func startRun(ctx context.Context, c *call, operation, name, kind, check string) (changed, error) {
+func startRun(ctx context.Context, c *call, operation, name string, body runBody, check string) (changed, error) {
 	path, err := environmentPath(name)
 	if err != nil {
 		return changed{}, err
 	}
 	var started runStarted
-	if err := c.post(ctx, "/api/environments/"+path+"/runs", runBody{Kind: kind}, check, &started); err != nil {
+	if err := c.post(ctx, "/api/environments/"+path+"/runs", body, check, &started); err != nil {
 		return changed{}, hintedAs(err, msgEnvironmentNotFoundHint)
 	}
 

@@ -175,8 +175,21 @@ func (r *memoryRemover) Delete(ctx context.Context, scope auth.Scope, name strin
 	return r.runs.Start(ctx, scope.Team.ID, name, store.KindDelete)
 }
 
+func (r *memoryRemover) Remains(_ context.Context, scope auth.Scope, name string) (managed.Remains, error) {
+	rec, err := r.runs.Get(context.Background(), scope.Team.ID, name)
+	if err != nil {
+		return managed.Remains{}, err
+	}
+
+	return managed.Remains{
+		AccountID: r.cloudDB.Connections[rec.ConnectionID].AccountID, Region: rec.Region, StackName: "pds-env-" + rec.ID,
+		ClusterName: "pds-" + rec.ID, Bucket: "pds-123456789012-" + rec.ID,
+	}, nil
+}
+
 func (r *memoryRemover) RemoveFromPDS(_ context.Context, scope auth.Scope, name string) error {
-	if r.cloudDB.Connections[r.runs.rows[key(scope.Team.ID, name)].ConnectionID].State != store.CloudUnreachable {
+	rec := r.runs.rows[key(scope.Team.ID, name)]
+	if r.cloudDB.Connections[rec.ConnectionID].State != store.CloudUnreachable && rec.LostAt == nil {
 		return managed.ErrConnectionReachable
 	}
 	r.removed = append(r.removed, key(scope.Team.ID, name))
@@ -185,12 +198,14 @@ func (r *memoryRemover) RemoveFromPDS(_ context.Context, scope auth.Scope, name 
 }
 
 type managedHTTP struct {
-	srv     *api.Server
-	cloud   *service.CloudConnections
-	cloudDB *testutil.CloudStore
-	managed *memoryManaged
-	remover *memoryRemover
-	scope   auth.Scope
+	srv      *api.Server
+	cloud    *service.CloudConnections
+	cloudDB  *testutil.CloudStore
+	managed  *memoryManaged
+	remover  *memoryRemover
+	life     *memoryLifecycle
+	activity *service.Activity
+	scope    auth.Scope
 	// connection is a Ready connection of Team 7, with the id the tests use.
 	connection string
 }
@@ -221,6 +236,8 @@ func newManagedHTTP(t *testing.T) *managedHTTP {
 	databases := service.NewDatabase(engine.NewRegistry(), service.WithHub(hubSvc))
 
 	remover := &memoryRemover{runs: m, cloudDB: cloudDB}
+	life := newMemoryLifecycle(m)
+	activity := service.NewActivity(nil, service.ActivityOptions{})
 	creator := &managed.Environments{Creator: managed.NewCreator(m, cloud, m, managed.CreatorSettings{
 		OutgoingCIDRs: []string{"203.0.113.0/24"}, ChartVersion: "1.2.3", ImageRepository: "ghcr.io/example/pds",
 	})}
@@ -231,10 +248,10 @@ func newManagedHTTP(t *testing.T) *managedHTTP {
 		Config: testConfig(), Logger: log.New(io.Discard, log.FormatJSON, slog.LevelDebug),
 		Auth: signedIn{}, Identity: identity, Databases: databases,
 		CloudConnections: cloud, ManagedEnvironments: creator,
-		Managed: managed.NewManager(m, m, remover),
+		Managed: managed.NewManager(m, m, remover, life), Activity: activity,
 	})
 
-	return &managedHTTP{srv: srv, cloud: cloud, cloudDB: cloudDB, managed: m, remover: remover, scope: scope, connection: enrolled.ConnectionID}
+	return &managedHTTP{srv: srv, cloud: cloud, cloudDB: cloudDB, managed: m, remover: remover, life: life, activity: activity, scope: scope, connection: enrolled.ConnectionID}
 }
 
 func (h *managedHTTP) do(t *testing.T, team uint, method, target, body string) *httptest.ResponseRecorder {
@@ -332,6 +349,67 @@ func TestCancellingATokenStopsTheCommandAndAnotherTeamCannot(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, h.do(t, 8, http.MethodDelete, "/api/cloud-connection-tokens/"+id, "").Code)
 	assert.Equal(t, http.StatusNoContent, h.do(t, 0, http.MethodDelete, "/api/cloud-connection-tokens/"+id, "").Code)
 	assert.Equal(t, http.StatusNotFound, h.do(t, 0, http.MethodDelete, "/api/cloud-connection-tokens/"+id, "").Code, "already ended")
+}
+
+func (h *managedHTTP) mint(t *testing.T) (id, command string) {
+	t.Helper()
+
+	rec := h.do(t, 0, http.MethodPost, "/api/cloud-connection-tokens", `{"allowedRegions":["eu-west-1"]}`)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	got := jsonOf(t, rec)
+
+	return got["id"].(string), got["command"].(string)
+}
+
+func TestTheConsoleFollowsAConnectCommandByItsTokenIDUntilItNamesTheConnectionItMade(t *testing.T) {
+	h := newManagedHTTP(t)
+	id, command := h.mint(t)
+	token := command[strings.Index(command, "ccn_"):]
+	token = strings.Trim(token, "'")
+
+	waiting := h.do(t, 0, http.MethodGet, "/api/cloud-connection-tokens/"+id, "")
+	require.Equal(t, http.StatusOK, waiting.Code, waiting.Body.String())
+	assert.Equal(t, "waiting", jsonOf(t, waiting)["state"])
+	assert.NotContains(t, jsonOf(t, waiting), "connectionId")
+
+	enrolled, err := h.cloud.Enroll(t.Context(), token, service.CloudAccount{ID: "210987654321", Alias: "ops", Region: "eu-west-1"})
+	require.NoError(t, err)
+	connecting := jsonOf(t, h.do(t, 0, http.MethodGet, "/api/cloud-connection-tokens/"+id, ""))
+	assert.Equal(t, "connecting", connecting["state"])
+	assert.Equal(t, enrolled.ConnectionID, connecting["connectionId"])
+	assert.Equal(t, []any{"eu-west-1"}, connecting["allowedRegions"])
+	assert.NotEmpty(t, connecting["expiresAt"])
+
+	assert.Equal(t, http.StatusNoContent, h.do(t, 0, http.MethodDelete, "/api/cloud-connection-tokens/"+id, "").Code)
+	ended := jsonOf(t, h.do(t, 0, http.MethodGet, "/api/cloud-connection-tokens/"+id, ""))
+	assert.Equal(t, "ended", ended["state"])
+}
+
+func TestATokenReadNeverShowsTheTokenAndAnotherTeamCannotReadIt(t *testing.T) {
+	h := newManagedHTTP(t)
+	id, command := h.mint(t)
+	token := strings.Trim(command[strings.Index(command, "ccn_"):], "'")
+
+	own := h.do(t, 0, http.MethodGet, "/api/cloud-connection-tokens/"+id, "")
+	other := h.do(t, 8, http.MethodGet, "/api/cloud-connection-tokens/"+id, "")
+
+	assert.NotContains(t, own.Body.String(), token)
+	assert.NotContains(t, own.Body.String(), "ccn_")
+	assert.Equal(t, http.StatusNotFound, other.Code)
+	assert.Equal(t, http.StatusNotFound, h.do(t, 0, http.MethodGet, "/api/cloud-connection-tokens/0123456789abcdef", "").Code)
+	assert.Equal(t, http.StatusNotFound, h.do(t, 0, http.MethodGet, "/api/cloud-connection-tokens/short", "").Code)
+}
+
+func TestATokenThatRanOutReadsAsExpired(t *testing.T) {
+	h := newManagedHTTP(t)
+	id, _ := h.mint(t)
+	for hash, token := range h.cloudDB.Tokens {
+		if strings.HasPrefix(hash, id) {
+			token.ExpiresAt = time.Now().Add(-time.Minute)
+		}
+	}
+
+	assert.Equal(t, "expired", jsonOf(t, h.do(t, 0, http.MethodGet, "/api/cloud-connection-tokens/"+id, ""))["state"])
 }
 
 func TestAConnectionReadsItsStateRegionsAndEnvironmentsAndNeverItsSecret(t *testing.T) {
@@ -584,6 +662,37 @@ func TestRemoveFromPDSOnlyIsRefusedWhileTheAccountAnswersAndWorksOnceItDoesNot(t
 	assert.Equal(t, http.StatusNoContent, done.Code, done.Body.String())
 	assert.Equal(t, []string{"7/orders"}, h.remover.removed)
 	assert.Equal(t, http.StatusBadRequest, h.do(t, 0, http.MethodDelete, "/api/environments/orders", `{"confirm":"orders","scope":"everything"}`).Code)
+}
+
+func TestRemoveFromPDSOnlyWorksForALostEnvironmentWhoseAccountStillAnswers(t *testing.T) {
+	h := newManagedHTTP(t)
+	h.create(t, "orders")
+	lostAt := time.Now()
+	row := h.managed.rows[key(7, "orders")]
+	row.LostAt = &lostAt
+	h.managed.rows[key(7, "orders")] = row
+
+	done := h.do(t, 0, http.MethodDelete, "/api/environments/orders", `{"confirm":"orders","scope":"pds_only"}`)
+
+	assert.Equal(t, http.StatusNoContent, done.Code, done.Body.String())
+}
+
+func TestTheRemainsReadNamesWhatStaysInTheAccountAndNothingSecret(t *testing.T) {
+	h := newManagedHTTP(t)
+	h.create(t, "orders")
+	id := h.managed.rows[key(7, "orders")].ID
+
+	rec := h.do(t, 0, http.MethodGet, "/api/environments/orders/remains", "")
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, map[string]any{
+		"accountId": "123456789012", "region": "eu-west-1", "stackName": "pds-env-" + id,
+		"eksName": "pds-" + id, "bucket": "pds-123456789012-" + id,
+	}, jsonOf(t, rec))
+	assert.NotContains(t, strings.ToLower(rec.Body.String()), "externalid")
+	assert.NotContains(t, rec.Body.String(), "arn:aws")
+	assert.Equal(t, http.StatusNotFound, h.do(t, 8, http.MethodGet, "/api/environments/orders/remains", "").Code)
+	assert.Equal(t, http.StatusNotFound, h.do(t, 0, http.MethodGet, "/api/environments/spoke-a/remains", "").Code, "a connected environment has nothing in AWS")
 }
 
 func TestDeletingAConnectedEnvironmentStillRemovesItWithoutAName(t *testing.T) {

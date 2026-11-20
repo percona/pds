@@ -119,6 +119,7 @@ func TestLifecycleStateIsKeptPerEnvironment(t *testing.T) {
 	require.NoError(t, me.SetSkippedVersion(t.Context(), admin.TeamID, "orders", "0.2.0"))
 	drift := []store.DriftItem{{Resource: "PrivateRoute", Detail: "Changed outside PDS"}}
 	require.NoError(t, me.SetDrift(t.Context(), admin.TeamID, "orders", drift, now))
+	require.NoError(t, me.SetObserved(t.Context(), admin.TeamID, "orders", 2, "1.32"))
 
 	got, err := me.Get(t.Context(), admin.TeamID, "orders")
 	require.NoError(t, err)
@@ -129,11 +130,15 @@ func TestLifecycleStateIsKeptPerEnvironment(t *testing.T) {
 	assert.Equal(t, "0.2.0", got.SkippedVersion)
 	assert.Equal(t, drift, got.Drift)
 	assert.WithinDuration(t, now, *got.DriftCheckedAt, time.Second)
+	assert.Equal(t, 2, got.TemplateRevision)
+	assert.Equal(t, "1.32", got.KubernetesVersion)
 
 	other, err := me.Get(t.Context(), admin.TeamID, "billing")
 	require.NoError(t, err)
 	assert.Empty(t, other.ChartVersion)
 	assert.Empty(t, other.Drift)
+	assert.Zero(t, other.TemplateRevision)
+	assert.Empty(t, other.KubernetesVersion)
 }
 
 func TestMarkReadyClearsLostAndKeepsTheFirstReadyTime(t *testing.T) {

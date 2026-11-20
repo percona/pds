@@ -35,6 +35,8 @@ type environmentResponse struct {
 	ConnectionID string                `json:"connectionId,omitempty"`
 	Region       string                `json:"region,omitempty"`
 	Provisioning *provisioningResponse `json:"provisioning,omitempty"`
+	// Lifecycle is a managed environment's upgrades, drift and loss.
+	Lifecycle *lifecycleResponse `json:"lifecycle,omitempty"`
 }
 
 // environmentListResponse is what the environments page renders, and nothing more.

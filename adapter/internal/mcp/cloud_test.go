@@ -122,6 +122,90 @@ func TestAnUpgradeSendsItsKindAndAConflictPassesThrough(t *testing.T) {
 	assert.Equal(t, "This environment already has a run in progress. Wait for it to finish, or retry it if it failed.", structured(t, busy)["message"])
 }
 
+func lifecycleFixture() map[string]any {
+	return map[string]any{
+		"chartVersion": "0.1.0", "pendingChartVersion": "0.2.0", "deferred": true, "deferredUntil": "2026-12-01T00:00:00Z",
+		"maintenanceWindow": map[string]any{
+			"day": 5, "hour": 22, "timeZone": "Europe/Berlin", "nextStart": "2026-11-20T21:00:00Z", "nextEnd": "2026-11-20T23:00:00Z",
+		},
+		"templateRevision": 1, "latestTemplateRevision": 2, "templateOutOfDate": true, "templateSummary": "Template revision 1, latest 2",
+		"kubernetesVersion": "1.32", "kubernetesUpgradeAvailable": true,
+		"drift":          []any{map[string]any{"resource": "PrivateRoute (AWS::EC2::Route)", "detail": "Changed outside PDS"}},
+		"driftCheckedAt": "2026-11-20T09:00:00Z", "lost": false,
+	}
+}
+
+func TestAnEnvironmentReadCarriesItsUpgradesAndDriftForTheAgentToTellTheUser(t *testing.T) {
+	api := catalogAPI()
+	env := managedEnvironmentFixture()
+	env["state"], env["lifecycle"] = "ready", lifecycleFixture()
+	api.routes["/api/environments/orders"] = ok(env)
+
+	res := callTool(t, connect(t, api), "get_environment", map[string]any{"name": "orders"})
+
+	require.False(t, res.IsError, text(t, res))
+	life, _ := structured(t, res)["lifecycle"].(map[string]any)
+	require.NotNil(t, life)
+	assert.Equal(t, "0.2.0", life["pendingChartVersion"])
+	assert.Equal(t, "Template revision 1, latest 2", life["templateSummary"])
+	assert.Equal(t, true, life["kubernetesUpgradeAvailable"])
+	assert.Equal(t, []any{map[string]any{"resource": "PrivateRoute (AWS::EC2::Route)", "detail": "Changed outside PDS"}}, life["drift"])
+	assert.Equal(t, map[string]any{
+		"day": float64(5), "hour": float64(22), "timeZone": "Europe/Berlin", "nextStart": "2026-11-20T21:00:00Z", "nextEnd": "2026-11-20T23:00:00Z",
+	}, life["maintenanceWindow"])
+}
+
+func TestALostEnvironmentReadsAsLostWithItsReason(t *testing.T) {
+	api := catalogAPI()
+	env := managedEnvironmentFixture()
+	life := lifecycleFixture()
+	life["lost"], life["lostReason"], life["lostAt"] = true, "Infrastructure missing", "2026-11-19T03:00:00Z"
+	env["state"], env["lifecycle"] = "lost", life
+	api.routes["/api/environments"] = ok(map[string]any{"environments": []any{env}})
+
+	res := callTool(t, connect(t, api), "list_environments", nil)
+
+	require.False(t, res.IsError, text(t, res))
+	got, _ := structured(t, res)["environments"].([]any)
+	require.Len(t, got, 1)
+	row, _ := got[0].(map[string]any)
+	assert.Equal(t, "lost", row["state"])
+	assert.Equal(t, "Infrastructure missing", row["lifecycle"].(map[string]any)["lostReason"])
+}
+
+func TestWaitingOnALostEnvironmentStopsWithTheLostOutcome(t *testing.T) {
+	api := catalogAPI()
+	env := managedEnvironmentFixture()
+	env["state"], env["lifecycle"] = "lost", map[string]any{"lost": true, "lostReason": "Infrastructure missing", "drift": []any{}}
+	env["provisioning"] = provisioningFixture("ready", nil)
+	api.routes["/api/environments"] = ok(map[string]any{"environments": []any{env}})
+
+	res := callTool(t, connect(t, api), "wait_for_environment", map[string]any{"name": "orders", "timeoutSeconds": 1})
+
+	require.False(t, res.IsError, text(t, res))
+	assert.Equal(t, "lost", structured(t, res)["outcome"])
+}
+
+func TestAKubernetesUpgradeSendsTheVersionWhenAskedAndAgentsNeverConfirmANodeGroupReplace(t *testing.T) {
+	api := changeAPI()
+	session := connectAt(t, api, auth.AccessChange)
+
+	callTool(t, session, "upgrade_environment", map[string]any{"environment": "orders", "kind": "kubernetes", "kubernetesVersion": "1.34"})
+
+	assert.JSONEq(t, `{"kind":"upgrade_kubernetes","kubernetesVersion":"1.34"}`, api.sent()[0].Body)
+	assert.NotContains(t, api.sent()[0].Body, "confirmNodeGroupReplace")
+}
+
+func TestAPDSUpgradeRefusesAKubernetesVersion(t *testing.T) {
+	api := changeAPI()
+
+	res := callTool(t, connectAt(t, api, auth.AccessChange), "upgrade_environment", map[string]any{"environment": "orders", "kind": "pds", "kubernetesVersion": "1.34"})
+
+	require.True(t, res.IsError)
+	assert.Equal(t, "invalid_input", structured(t, res)["kind"])
+	assertNoRequest(t, api)
+}
+
 func TestDeletingAManagedEnvironmentAsksForTheNameAndNeverSendsAScope(t *testing.T) {
 	for era, version := range eras {
 		api := changeAPI()

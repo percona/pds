@@ -40,6 +40,9 @@ const (
 	StateDegraded = "degraded"
 	StateFailed   = "failed"
 	StateDeleting = "deleting"
+	// StateLost is an environment whose infrastructure is gone from AWS while it
+	// stopped reporting. The person rebuilds it or removes it from PDS.
+	StateLost = "lost"
 )
 
 // The one action a failed run offers.
@@ -71,6 +74,22 @@ type RunBook interface {
 type Removal interface {
 	Delete(ctx context.Context, scope auth.Scope, name string) (store.ProvisioningRun, error)
 	RemoveFromPDS(ctx context.Context, scope auth.Scope, name string) error
+	Remains(ctx context.Context, scope auth.Scope, name string) (Remains, error)
+}
+
+// Lifecycler is what happens to a managed environment after it is created: what
+// it reads of its upgrades, drift and loss, and the changes a person makes to
+// them. *Lifecycle is the implementation.
+type Lifecycler interface {
+	// Describe reads the lifecycle state a stored record says. It reports false
+	// where this control plane keeps no lifecycle.
+	Describe(rec store.ManagedEnvironment) (Status, bool)
+	SetWindow(ctx context.Context, who auth.Scope, name string, w store.MaintenanceWindow) error
+	Defer(ctx context.Context, who auth.Scope, name string, days int) error
+	UpgradeNow(ctx context.Context, who auth.Scope, name string) (store.ProvisioningRun, error)
+	PreviewUpdate(ctx context.Context, who auth.Scope, name string, in InfraUpdate) (Verdict, error)
+	UpdateInfrastructure(ctx context.Context, who auth.Scope, name string, in InfraUpdate) (store.ProvisioningRun, error)
+	Rebuild(ctx context.Context, who auth.Scope, name string) (store.ProvisioningRun, error)
 }
 
 // Manager is what a person does with a managed environment after it exists:
@@ -79,12 +98,14 @@ type Manager struct {
 	roster  Roster
 	book    RunBook
 	removal Removal
+	life    Lifecycler
 }
 
 // NewManager builds a Manager. removal may be nil, and deleting is then
-// unavailable.
-func NewManager(roster Roster, book RunBook, removal Removal) *Manager {
-	return &Manager{roster: roster, book: book, removal: removal}
+// unavailable. life may be nil, and upgrades, rebuilds and the maintenance
+// window are then unavailable.
+func NewManager(roster Roster, book RunBook, removal Removal, life Lifecycler) *Manager {
+	return &Manager{roster: roster, book: book, removal: removal, life: life}
 }
 
 // PhaseView is one of the stages of a create the console shows.
@@ -131,6 +152,8 @@ type Provisioning struct {
 type Managed struct {
 	Record       store.ManagedEnvironment
 	Provisioning Provisioning
+	// Lifecycle is set where this control plane keeps one.
+	Lifecycle *Status
 }
 
 // ProgressOf maps a run status onto the progress a person reads.
@@ -154,8 +177,9 @@ func ProgressOf(run store.ProvisioningRun) string {
 }
 
 // StateOf is the state of the environment as a whole. A run that builds it
-// decides while it is unfinished; after that the heartbeat does.
-func StateOf(p Provisioning, connected bool) string {
+// decides while it is unfinished; after that a missing infrastructure and then
+// the heartbeat do.
+func StateOf(p Provisioning, connected, lost bool) string {
 	building := p.Run.Kind == KindCreate || p.Run.Kind == KindRebuild
 	switch {
 	case p.Run.Kind == store.KindDelete && p.Progress != ProgressReady && p.Progress != ProgressCancelled:
@@ -164,6 +188,8 @@ func StateOf(p Provisioning, connected bool) string {
 		return StateFailed
 	case building && (p.Progress == ProgressInProgress || p.Progress == ProgressWaiting):
 		return StateCreating
+	case lost:
+		return StateLost
 	case connected:
 		return StateReady
 	}
@@ -292,7 +318,13 @@ func (m *Manager) Environments(ctx context.Context, team uint) ([]Managed, error
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, Managed{Record: record, Provisioning: p})
+		managedEnv := Managed{Record: record, Provisioning: p}
+		if m.life != nil {
+			if status, ok := m.life.Describe(record); ok {
+				managedEnv.Lifecycle = &status
+			}
+		}
+		out = append(out, managedEnv)
 	}
 
 	return out, nil
@@ -305,21 +337,81 @@ func (m *Manager) Has(ctx context.Context, team uint, name string) bool {
 	return err == nil
 }
 
-// Start queues a run on one of the Team's managed environments. A second run
-// while one is unfinished is store.ErrRunActive.
-func (m *Manager) Start(ctx context.Context, scope auth.Scope, name, kind string) (store.ProvisioningRun, error) {
-	if !slices.Contains([]string{KindUpgradePDS, KindKubernetes, KindRebuild}, kind) {
-		return store.ProvisioningRun{}, fmt.Errorf("%w: %q is not a run kind a person starts", ErrInvalid, kind)
+// StartRequest is a run a person asks for.
+type StartRequest struct {
+	Kind string
+	// KubernetesVersion is the minor version an upgrade_kubernetes run moves to.
+	// Empty updates only the stack's template revision.
+	KubernetesVersion string
+	// ConfirmNodeGroupReplace allows an upgrade_kubernetes run that replaces the
+	// node group, which restarts every database.
+	ConfirmNodeGroupReplace bool
+}
+
+// Start queues a run on one of the Team's managed environments through the
+// lifecycle, so its rules apply: nothing newer, a lost environment, a change that
+// would replace the network. A second run while one is unfinished is
+// store.ErrRunActive.
+func (m *Manager) Start(ctx context.Context, scope auth.Scope, name string, req StartRequest) (store.ProvisioningRun, error) {
+	if !slices.Contains([]string{KindUpgradePDS, KindKubernetes, KindRebuild}, req.Kind) {
+		return store.ProvisioningRun{}, fmt.Errorf("%w: %q is not a run kind a person starts", ErrInvalid, req.Kind)
+	}
+	if req.Kind != KindKubernetes && (req.KubernetesVersion != "" || req.ConfirmNodeGroupReplace) {
+		return store.ProvisioningRun{}, fmt.Errorf("%w: a Kubernetes version and a node group confirm belong to a %s run", ErrInvalid, KindKubernetes)
 	}
 	if _, err := m.roster.Get(ctx, scope.Team.ID, name); err != nil {
 		return store.ProvisioningRun{}, err
 	}
-	run, err := m.book.Start(ctx, scope.Team.ID, name, kind)
+	if m.life == nil {
+		return store.ProvisioningRun{}, fmt.Errorf("%w: upgrades are not offered", ErrUnavailable)
+	}
+
+	var run store.ProvisioningRun
+	var err error
+	switch req.Kind {
+	case KindUpgradePDS:
+		run, err = m.life.UpgradeNow(ctx, scope, name)
+	case KindKubernetes:
+		run, err = m.life.UpdateInfrastructure(ctx, scope, name, InfraUpdate{
+			KubernetesVersion: req.KubernetesVersion, ConfirmNodeGroupReplace: req.ConfirmNodeGroupReplace,
+		})
+	default:
+		run, err = m.life.Rebuild(ctx, scope, name)
+	}
 	if errors.Is(err, provision.ErrUnknownKind) {
 		return store.ProvisioningRun{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 
 	return run, err
+}
+
+// SetWindow records the weekly maintenance window of one of the Team's
+// environments.
+func (m *Manager) SetWindow(ctx context.Context, scope auth.Scope, name string, w store.MaintenanceWindow) error {
+	if m.life == nil {
+		return fmt.Errorf("%w: maintenance windows are not offered", ErrUnavailable)
+	}
+
+	return m.life.SetWindow(ctx, scope, name, w)
+}
+
+// Defer puts the environment's next chart version off for the given days.
+func (m *Manager) Defer(ctx context.Context, scope auth.Scope, name string, days int) error {
+	if m.life == nil {
+		return fmt.Errorf("%w: deferring is not offered", ErrUnavailable)
+	}
+
+	return m.life.Defer(ctx, scope, name, days)
+}
+
+// PreviewUpdate reads what an update of the environment's stack would change,
+// without changing anything.
+func (m *Manager) PreviewUpdate(ctx context.Context, scope auth.Scope, name string, in InfraUpdate) (Verdict, error) {
+	if m.life == nil {
+		return Verdict{}, fmt.Errorf("%w: updates are not offered", ErrUnavailable)
+	}
+
+	return m.life.PreviewUpdate(ctx, scope, name, in)
 }
 
 // Retry re-runs the failed step of the environment's latest run. Only the
@@ -368,6 +460,19 @@ func (m *Manager) RemoveFromPDS(ctx context.Context, scope auth.Scope, name, typ
 	}
 
 	return m.removal.RemoveFromPDS(ctx, scope, name)
+}
+
+// Remains names what stays in the customer's AWS account when the environment is
+// removed from PDS only.
+func (m *Manager) Remains(ctx context.Context, scope auth.Scope, name string) (Remains, error) {
+	if _, err := m.roster.Get(ctx, scope.Team.ID, name); err != nil {
+		return Remains{}, err
+	}
+	if m.removal == nil {
+		return Remains{}, fmt.Errorf("%w: removing from PDS only is not offered", ErrUnavailable)
+	}
+
+	return m.removal.Remains(ctx, scope, name)
 }
 
 func (m *Manager) confirmed(ctx context.Context, scope auth.Scope, name, typed string) (store.ManagedEnvironment, error) {
