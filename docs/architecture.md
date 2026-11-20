@@ -867,7 +867,12 @@ connected one. `internal/managed` holds the create run, and
   including a failed create; it preempts a run in progress. Steps run inside-out:
   `remove-databases` suspends the three Kustomizations, deletes every Instance
   and waits; `remove-services` deletes LoadBalancer Services and volume claims;
-  `close-access`; `delete-stack`; `sweep`; `delete-bucket`; `forget`. If the
+  `remove-backup-user` creates the ConfigMap `pds-backup-user` in the release's
+  namespace, which makes the agent delete the IAM user, its keys and policy and
+  answer on the same object (the control plane's role cannot, and the user lives
+  in the customer's account). It waits `Settings.BackupUserWait` (5 minutes),
+  and an agent that never answers does not hold the delete: the step records
+  which user stays in the account. `close-access`; `delete-stack`; `sweep`; `delete-bucket`; `forget`. If the
   Kubernetes API stays silent for `Settings.APIWait` the step records that in
   its note and the delete goes on to the cluster, so it never continues
   silently. Nothing is stored about what exists: every attempt calls
@@ -881,7 +886,8 @@ connected one. `internal/managed` holds the create run, and
   `Delete blocked.` and names the resources; Retry re-runs only that step. There
   is no force delete. `delete-bucket` empties every version and deletes the
   bucket only when it carries the environment's tag. The role the customer owns is
-  left, and so is the backup IAM user the agent made.
+  left, and so is the backup IAM user when the agent could not remove it, which a
+  Delete from PDS only or an unreachable cluster also leaves.
   `managed.Remover.RemoveFromPDS` is the one thing a person can do while the
   connection is Unreachable: it cancels the environment's runs, records a delete run
   as succeeded with a message that says AWS was not touched, removes the

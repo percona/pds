@@ -75,6 +75,7 @@ type fakeDrainer struct {
 	mu        sync.Mutex
 	databases []int
 	volumes   []int
+	backup    []int
 	err       error
 	calls     []string
 }
@@ -113,6 +114,17 @@ func (f *fakeDrainer) RemoveVolumeUsers(context.Context, managed.KubeAccess) (in
 	return f.next(&f.volumes), nil
 }
 
+func (f *fakeDrainer) RemoveBackupUser(context.Context, managed.KubeAccess) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "backup user")
+	if f.err != nil {
+		return 0, f.err
+	}
+
+	return f.next(&f.backup), nil
+}
+
 // deleteLab is a lab whose runs are deletes. Forgetting the environment removes
 // its record, as production does.
 type deleteLab struct {
@@ -139,6 +151,7 @@ func newDeleteLab(t *testing.T) *deleteLab {
 	}
 	d.deps.Settings.DeleteWait = 100 * time.Millisecond
 	d.deps.Settings.DrainWait = 100 * time.Millisecond
+	d.deps.Settings.BackupUserWait = 100 * time.Millisecond
 	d.deps.Settings.APIWait = 20 * time.Millisecond
 	// The stack is there until the delete asks for it to go.
 	d.cloud.stacks = []aws.StackState{{Exists: true, Status: "CREATE_COMPLETE"}, {Exists: false}}
@@ -191,7 +204,7 @@ func TestDeleteRemovesWhatIsInsideBeforeWhatHoldsIt(t *testing.T) {
 	got := d.finish(e, run)
 
 	require.Equal(t, store.RunSucceeded, got.Status, got.Message)
-	assert.Equal(t, []string{"databases", "volume users"}, d.drainer.calls)
+	assert.Equal(t, []string{"databases", "volume users", "backup user"}, d.drainer.calls)
 	assert.Equal(t, 1, d.cloud.count("delete-stack"))
 	assert.Equal(t, 0, d.cloud.count("preflight"), "a delete never checks quotas")
 	assert.Equal(t, []string{"owned " + d.envID, "release vol-1"}, d.sweeper.events[:2])
@@ -233,7 +246,8 @@ func TestDeleteRecordsAnEnvironmentItCannotReachAndGoesOnToDeleteTheEKS(t *testi
 func TestDeleteOfAnEnvironmentWhoseEKSWasNeverBuiltSkipsTheInside(t *testing.T) {
 	d := newDeleteLab(t)
 	d.cloud.stacks = []aws.StackState{{Exists: false}}
-	d.cloud.failAt["open-access"] = []error{apiErr("ResourceNotFoundException", "No cluster found"), apiErr("ResourceNotFoundException", "No cluster found")}
+	missing := apiErr("ResourceNotFoundException", "No cluster found")
+	d.cloud.failAt["open-access"] = []error{missing, missing, missing}
 	e := d.engine()
 	run := d.start(e)
 
@@ -340,11 +354,39 @@ func TestDeleteFinishesWhenARerunFindsTheRecordAlreadyForgotten(t *testing.T) {
 
 func TestDeleteStepNamesAreInTheOrderTheyRunAndEachHasAPhase(t *testing.T) {
 	assert.Equal(t, []string{
-		"assume-role", "remove-databases", "remove-services", "close-access", "delete-stack", "sweep", "delete-bucket", "forget",
+		"assume-role", "remove-databases", "remove-services", "remove-backup-user", "close-access", "delete-stack", "sweep", "delete-bucket", "forget",
 	}, managed.DeleteStepNames)
 	for _, name := range managed.DeleteStepNames {
 		assert.NotEmpty(t, managed.DeletePhase(name), name)
 	}
 	assert.Empty(t, managed.DeletePhase("not-a-step"))
 	assert.True(t, strings.Contains(fmt.Sprint(managed.DeletePhase("delete-stack")), "Kubernetes cluster"))
+}
+
+func TestDeleteWaitsForTheAgentToRemoveItsBackupUserBeforeTheEKSClusterGoes(t *testing.T) {
+	d := newDeleteLab(t)
+	d.drainer.backup = []int{1, 1, 0}
+	e := d.engine()
+	run := d.start(e)
+
+	got := d.finish(e, run)
+
+	require.Equal(t, store.RunSucceeded, got.Status, got.Message)
+	assert.Equal(t, []string{"databases", "volume users", "backup user", "backup user", "backup user"}, d.drainer.calls)
+	assert.Equal(t, 1, d.cloud.count("delete-stack"))
+}
+
+func TestDeleteGoesOnAndSaysSoWhenTheAgentNeverRemovesItsBackupUser(t *testing.T) {
+	d := newDeleteLab(t)
+	d.drainer.backup = []int{1}
+	e := d.engine()
+	run := d.start(e)
+
+	got := d.finish(e, run)
+
+	require.Equal(t, store.RunSucceeded, got.Status, "an agent that is gone must not hold the delete forever: "+got.Message)
+	detail := d.steps(run.ID)["remove-backup-user"].Detail
+	assert.Contains(t, detail, "pds-"+d.envID+"-backup", "the note names the user that stays")
+	assert.Contains(t, detail, "AWS account")
+	assert.Equal(t, 1, d.cloud.count("delete-stack"))
 }

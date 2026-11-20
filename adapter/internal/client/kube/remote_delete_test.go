@@ -1,6 +1,7 @@
 package kube
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 var (
@@ -109,4 +111,35 @@ func TestDeleteLoadBalancerServicesLeavesOtherServices(t *testing.T) {
 	assert.True(t, apierrors.IsNotFound(err))
 	_, err = r.clientset.CoreV1().Services("dbs").Get(t.Context(), "orders", metav1.GetOptions{})
 	assert.NoError(t, err)
+}
+
+func TestEnsureConfigMapCreatesItOnceAndReturnsWhatItHolds(t *testing.T) {
+	r := deleteLab()
+
+	first, err := r.EnsureConfigMap(t.Context(), "everest-system", "pds-backup-user", map[string]string{"request": "remove"})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"request": "remove"}, first)
+
+	// The agent answers on the same object, and asking again must not undo that.
+	held, err := r.clientset.CoreV1().ConfigMaps("everest-system").Get(t.Context(), "pds-backup-user", metav1.GetOptions{})
+	require.NoError(t, err)
+	held.Data["removed"] = "true"
+	_, err = r.clientset.CoreV1().ConfigMaps("everest-system").Update(t.Context(), held, metav1.UpdateOptions{})
+	require.NoError(t, err)
+
+	again, err := r.EnsureConfigMap(t.Context(), "everest-system", "pds-backup-user", map[string]string{"request": "remove"})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"request": "remove", "removed": "true"}, again)
+}
+
+func TestEnsureConfigMapSaysNothingOfTheAPIErrorBeyondItsCause(t *testing.T) {
+	r := deleteLab()
+	r.clientset.(*k8sfake.Clientset).PrependReactor("get", "configmaps", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "configmaps"}, "pds-backup-user", errors.New("token abc123 may not"))
+	})
+
+	_, err := r.EnsureConfigMap(t.Context(), "everest-system", "pds-backup-user", nil)
+
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "abc123")
 }

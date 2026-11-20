@@ -168,6 +168,10 @@ type Settings struct {
 	DeleteWait time.Duration
 	DrainWait  time.Duration
 	APIWait    time.Duration
+	// BackupUserWait is how long a delete waits for the environment's agent to
+	// remove its IAM user. It is short because an agent that never started has
+	// nothing to answer with.
+	BackupUserWait time.Duration
 }
 
 func (s Settings) withDefaults() Settings {
@@ -191,6 +195,9 @@ func (s Settings) withDefaults() Settings {
 	}
 	if s.APIWait <= 0 {
 		s.APIWait = 3 * time.Minute
+	}
+	if s.BackupUserWait <= 0 {
+		s.BackupUserWait = 5 * time.Minute
 	}
 
 	return s
