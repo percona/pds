@@ -70,6 +70,7 @@ adapter:
     inventoryConfigMap: platform-inventory
     workConfigMap: platform-work
     managedChartVersion: 0.1.0-rc.1
+    releaseRef: flux-system/pds
     managedOutgoingCIDRs:
       - 203.0.113.7/32
       - 198.51.100.0/24

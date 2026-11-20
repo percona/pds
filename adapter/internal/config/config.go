@@ -66,6 +66,11 @@ type Config struct {
 	// ManagedChartVersion is the published pds chart a managed environment
 	// installs. Empty refuses managed environments.
 	ManagedChartVersion string
+	// AgentReleaseNamespace and AgentReleaseName name the Flux HelmRelease an
+	// agent reports on its heartbeat. Empty means the environment has none, as a
+	// connected environment does.
+	AgentReleaseNamespace string
+	AgentReleaseName      string
 	// ProvisionLeaseTTL is how long a provisioning run's lease lasts unrenewed.
 	ProvisionLeaseTTL time.Duration
 	// ProvisionMaxAttempts caps the automatic attempts of one step.
@@ -1132,6 +1137,14 @@ func loadProvisioning(cfg *Config, lookup func(key, fallback string) string) err
 		cfg.ManagedChartVersion = version
 	}
 
+	if ref := strings.TrimSpace(lookup("AGENT_RELEASE_REF", "")); ref != "" {
+		namespace, name, ok := strings.Cut(ref, "/")
+		if !ok || !dnsLabel.MatchString(namespace) || !dnsLabel.MatchString(name) {
+			return fmt.Errorf("AGENT_RELEASE_REF: %q is not a namespace and a name such as flux-system/pds", ref)
+		}
+		cfg.AgentReleaseNamespace, cfg.AgentReleaseName = namespace, name
+	}
+
 	attempts, err := strconv.Atoi(lookup("HUB_PROVISION_MAX_ATTEMPTS", "5"))
 	if err != nil || attempts < 1 {
 		return errors.New("HUB_PROVISION_MAX_ATTEMPTS must be a whole number of at least 1")
@@ -1140,6 +1153,8 @@ func loadProvisioning(cfg *Config, lookup func(key, fallback string) string) err
 
 	return nil
 }
+
+var dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 var chartVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`)
 

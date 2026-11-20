@@ -684,6 +684,10 @@ in the Secret.
 {{- end }}
 - name: HUB_AGENT_IMAGE
   value: {{ $agentImage | quote }}
+{{- with .Values.adapter.hub.releaseRef }}
+- name: AGENT_RELEASE_REF
+  value: {{ . | quote }}
+{{- end }}
 {{- with .Values.adapter.hub.managedChartVersion }}
 - name: HUB_MANAGED_CHART_VERSION
   value: {{ . | quote }}

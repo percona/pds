@@ -217,6 +217,12 @@ adapter:
     # Kubernetes API is open to while the control plane works in it. Empty
     # refuses to create a managed environment.
     managedOutgoingCIDRs: []
+    # -- Agent role: the Flux HelmRelease whose state this agent reports on its
+    # heartbeat, as namespace/name such as flux-system/pds. A managed
+    # environment sets it, because the control plane keeps its pds release in
+    # Git. Empty reports none, as a connected environment does. Setting it
+    # also lets the agent read that one HelmRelease.
+    releaseRef: ""
     # -- Agent role: the hub origin this spoke dials.
     url: ""
     # -- Agent role: the name the hub lists this environment under.

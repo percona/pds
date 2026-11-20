@@ -37,6 +37,7 @@ spec:
       hub:
         agentTokenExistingSecret: pds-hub-agent-token
         environmentName: orders
+        releaseRef: flux-system/pds
         url: https://hub.example
       image:
         repository: ghcr.io/percona/pds-adapter

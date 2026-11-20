@@ -6,7 +6,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
+	clientfake "k8s.io/client-go/kubernetes/fake"
 
+	"github.com/percona/pds/adapter/internal/client/kube"
 	"github.com/percona/pds/adapter/internal/config"
 	"github.com/percona/pds/adapter/internal/managed"
 	"github.com/percona/pds/adapter/internal/store"
@@ -109,4 +115,35 @@ func TestWorkerOwnerNamesTheReplica(t *testing.T) {
 
 	assert.NotEqual(t, a, b, "two replicas on one host must hold different leases")
 	assert.NotEmpty(t, a)
+}
+
+func fluxReleaseClient(objects ...runtime.Object) *kube.Client {
+	dynamic := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{helmReleases: "HelmReleaseList"}, objects...)
+
+	return kube.New(clientfake.NewClientset()).WithDynamic(dynamic)
+}
+
+func TestTheAgentReadsTheHelmReleaseItIsToldToReport(t *testing.T) {
+	release := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "helm.toolkit.fluxcd.io/v2", "kind": "HelmRelease",
+		"metadata": map[string]any{"name": "pds", "namespace": "flux-system", "generation": int64(1)},
+		"status": map[string]any{
+			"observedGeneration": int64(1), "lastAttemptedRevision": "0.2.0",
+			"history":    []any{map[string]any{"chartVersion": "0.2.0", "status": "deployed"}},
+			"conditions": []any{map[string]any{"type": "Ready", "status": "True"}},
+		},
+	}}
+
+	got, err := fluxReleaseReader(fluxReleaseClient(release), "flux-system", "pds")(t.Context())
+
+	require.NoError(t, err)
+	assert.Equal(t, "0.2.0", got["status"].(map[string]any)["lastAttemptedRevision"])
+}
+
+func TestAnEnvironmentWithNoHelmReleaseHasNothingToReport(t *testing.T) {
+	got, err := fluxReleaseReader(fluxReleaseClient(), "flux-system", "pds")(t.Context())
+
+	require.NoError(t, err)
+	assert.Nil(t, got)
 }

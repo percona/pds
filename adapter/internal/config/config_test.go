@@ -76,6 +76,7 @@ func clearEnv(t *testing.T) {
 		"HUB_CLOUD_PRINCIPAL_ARN",
 		"HUB_MANAGED_OUTGOING_CIDRS",
 		"HUB_MANAGED_CHART_VERSION",
+		"AGENT_RELEASE_REF",
 		"HUB_PROVISION_LEASE_TTL",
 		"HUB_PROVISION_MAX_ATTEMPTS",
 		"HUB_PROVISION_WINDOW_MAX_AGE",
@@ -1665,4 +1666,36 @@ func TestLoadRefusesTheSameTagForEnvironmentsAndAddresses(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "SUPPORT_TAILNET_SERVICE_TAG")
+}
+
+func TestLoadReadsTheReleaseAnAgentReports(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("HUB_GIT_DIR", "/tmp/hub-git")
+	t.Setenv("HUB_OPERATOR_TOKEN", "op-secret")
+	t.Setenv("HUB_PUBLIC_URL", "https://hub.example")
+
+	got, err := config.Load()
+	require.NoError(t, err)
+	assert.Empty(t, got.AgentReleaseNamespace, "a connected environment reports no release")
+	assert.Empty(t, got.AgentReleaseName)
+
+	t.Setenv("AGENT_RELEASE_REF", " flux-system/pds ")
+	got, err = config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, "flux-system", got.AgentReleaseNamespace)
+	assert.Equal(t, "pds", got.AgentReleaseName)
+}
+
+func TestLoadRefusesAReleaseReferenceThatIsNotNamespaceAndName(t *testing.T) {
+	for _, bad := range []string{"pds", "flux-system/", "/pds", "a/b/c", "Flux System/pds"} {
+		clearEnv(t)
+		t.Setenv("HUB_GIT_DIR", "/tmp/hub-git")
+		t.Setenv("HUB_OPERATOR_TOKEN", "op-secret")
+		t.Setenv("HUB_PUBLIC_URL", "https://hub.example")
+		t.Setenv("AGENT_RELEASE_REF", bad)
+
+		_, err := config.Load()
+		require.Error(t, err, bad)
+		assert.Contains(t, err.Error(), "AGENT_RELEASE_REF")
+	}
 }

@@ -804,7 +804,11 @@ connected one. `internal/managed` holds the create run, and
   `support.managedUpgrade.from` lists for the version the environment runs
   (`internal/managed/compatibility.yaml` is a copy of the pin a test keeps
   equal). The run commits the version to Git and waits for the agent's heartbeat
-  to report the release (`Heartbeat.Release`); no AWS role is involved. The
+  to report the release (`Heartbeat.Release`); no AWS role is involved. The agent
+  reads the HelmRelease named by `AGENT_RELEASE_REF` (the rendered release sets
+  `flux-system/pds`, and the chart grants `get` on that one name) and reports the
+  newest Helm revision marked deployed, the version the last upgrade tried, and
+  ready, upgrading or rolled back. A read that fails sends nothing. The
   release rolls back after one attempt, the run fails with "Upgrade failed,
   rolled back to <version>", Git is put back, and the version is skipped until a
   User upgrades early or a newer version is listed. A User may defer a version

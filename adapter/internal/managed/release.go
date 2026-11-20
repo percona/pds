@@ -80,6 +80,9 @@ func RenderRelease(in ReleaseInput) ([]byte, error) {
 			"hub": map[string]any{
 				"url": in.HubURL, "environmentName": in.EnvironmentName,
 				"agentTokenExistingSecret": AgentTokenSecret,
+				// The agent reports this HelmRelease's state on its heartbeat, which
+				// is how an upgrade learns whether Flux applied or rolled it back.
+				"releaseRef": "flux-system/" + ReleaseName,
 			},
 			// The hub annotates each Instance with the preset a create resolves
 			// against, so the environment has to have them.

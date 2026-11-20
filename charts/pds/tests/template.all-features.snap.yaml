@@ -381,6 +381,32 @@ rules:
     verbs: ["get", "list"]
 ---
 # Source: pds/templates/adapter-rbac.yaml
+# The agent reports the state of the one HelmRelease that holds this release,
+# and reads nothing else of Flux. resourceNames limits get to that name in
+# whichever namespace it lives in.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: platform-adapter-release
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: adapter
+  annotations:
+    percona.com/owner: platform-team
+rules:
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources: ["helmreleases"]
+    resourceNames:
+      - "pds"
+    verbs: ["get"]
+---
+# Source: pds/templates/adapter-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -400,6 +426,31 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: platform-adapter-metrics
+subjects:
+  - kind: ServiceAccount
+    name: platform-adapter
+    namespace: default
+---
+# Source: pds/templates/adapter-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: platform-adapter-release
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: adapter
+  annotations:
+    percona.com/owner: platform-team
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: platform-adapter-release
 subjects:
   - kind: ServiceAccount
     name: platform-adapter
@@ -1179,6 +1230,8 @@ spec:
               value: "https://hub.example"
             - name: HUB_AGENT_IMAGE
               value: "ghcr.io/percona/percona-services-adapter:0.1.0-rc.1"
+            - name: AGENT_RELEASE_REF
+              value: "flux-system/pds"
             - name: HUB_MANAGED_CHART_VERSION
               value: "0.1.0-rc.1"
             - name: HUB_MANAGED_OUTGOING_CIDRS
