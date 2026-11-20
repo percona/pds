@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/percona/pds/adapter/internal/auth"
 	"github.com/percona/pds/adapter/internal/managed"
+	"github.com/percona/pds/adapter/internal/service"
 	"github.com/percona/pds/adapter/internal/store"
 )
 
@@ -284,10 +286,11 @@ func (s *Server) handleCreateManagedEnvironment(w http.ResponseWriter, r *http.R
 		ConnectionID: chi.URLParam(r, "id"), Name: strings.TrimSpace(req.Name), Region: strings.TrimSpace(req.Region),
 	})
 	if err != nil {
-		Respond(w, r, nil, managedError(err))
+		s.failManaged(w, r, managedEvent(service.ActionEnvironmentCreate, strings.TrimSpace(req.Name), ""), managedError(err))
 
 		return
 	}
+	s.recordManaged(r, managedEvent(service.ActionEnvironmentCreate, created.Environment.Name, ""), nil)
 	p, err := s.managed.Provisioning(r.Context(), scope.Team.ID, created.Environment.Name)
 	if err != nil {
 		Respond(w, r, nil, managedError(err))
@@ -317,13 +320,62 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	run, err := s.managed.Start(r.Context(), scope, name, managed.StartRequest{
 		Kind: req.Kind, KubernetesVersion: strings.TrimSpace(req.KubernetesVersion), ConfirmNodeGroupReplace: req.ConfirmNodeGroupReplace,
 	})
+	event := runEvent(name, req)
 	if err != nil {
-		Respond(w, r, nil, managedErrorFor(err, invalidRun))
+		s.failManaged(w, r, event, managedErrorFor(err, invalidRun))
 
 		return
 	}
+	s.recordManaged(r, event, nil)
 
 	s.respondRunStarted(w, r, scope, name, run)
+}
+
+// runEvent is the activity entry of a run a person starts.
+func runEvent(name string, req startRunRequest) service.ActivityEvent {
+	switch req.Kind {
+	case managed.KindRebuild:
+		return managedEvent(service.ActionEnvironmentRebuild, name, "")
+	case managed.KindKubernetes:
+		if v := strings.TrimSpace(req.KubernetesVersion); v != "" {
+			return managedEvent(service.ActionEnvironmentUpgrade, name, "Upgrade Kubernetes to "+v)
+		}
+
+		return managedEvent(service.ActionEnvironmentUpgrade, name, "Update the environment's template")
+	}
+
+	return managedEvent(service.ActionEnvironmentUpgrade, name, "Upgrade PDS")
+}
+
+// managedEvent is the activity entry of a change to a managed environment. It
+// starts as accepted, which is what a run that has only been queued is.
+func managedEvent(action, environment, detail string) service.ActivityEvent {
+	return service.ActivityEvent{
+		Action: action, Environment: environment, Target: environment, Outcome: service.OutcomeAccepted, Detail: detail,
+	}
+}
+
+// recordManaged writes the entry of a change. A refused change is recorded as
+// failed with the sentence the person read, never the cause. A change to an
+// environment the Team does not have is not recorded: nothing happened.
+func (s *Server) recordManaged(r *http.Request, e service.ActivityEvent, refused error) {
+	if refused != nil {
+		var app *AppError
+		if errors.As(refused, &app) && app.Code == CodeNotFound {
+			return
+		}
+		e.Outcome, e.Error = service.OutcomeFailed, somethingWentWrong
+		if app != nil {
+			e.Error = app.Message
+		}
+	}
+	s.activity.Record(r.Context(), e)
+}
+
+// failManaged records a refused change and answers it.
+func (s *Server) failManaged(w http.ResponseWriter, r *http.Request, e service.ActivityEvent, refused error) {
+	s.recordManaged(r, e, refused)
+	Respond(w, r, nil, refused)
 }
 
 type remainsResponse struct {
@@ -366,11 +418,18 @@ func (s *Server) handleDeferUpgrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimSpace(chi.URLParam(r, "name"))
+	days := strconv.Itoa(req.Days) + " days"
+	if req.Days == 1 {
+		days = "1 day"
+	}
+	event := managedEvent(service.ActionEnvironmentDefer, name, "Deferred for "+days)
+	event.Outcome = service.OutcomeSucceeded
 	if err := s.managed.Defer(r.Context(), scope, name, req.Days); err != nil {
-		Respond(w, r, nil, managedErrorFor(err, invalidDeferral))
+		s.failManaged(w, r, event, managedErrorFor(err, invalidDeferral))
 
 		return
 	}
+	s.recordManaged(r, event, nil)
 
 	s.respondLifecycle(w, r, scope, name)
 }
@@ -390,11 +449,14 @@ func (s *Server) handlePutMaintenanceWindow(w http.ResponseWriter, r *http.Reque
 	}
 	name := strings.TrimSpace(chi.URLParam(r, "name"))
 	window := store.MaintenanceWindow{Day: time.Weekday(*req.Day), Hour: *req.Hour, Zone: strings.TrimSpace(req.TimeZone)}
+	event := managedEvent(service.ActionEnvironmentWindow, name, fmt.Sprintf("%ss at %02d:00 %s", window.Day, window.Hour, window.Zone))
+	event.Outcome = service.OutcomeSucceeded
 	if err := s.managed.SetWindow(r.Context(), scope, name, window); err != nil {
-		Respond(w, r, nil, managedErrorFor(err, invalidWindow))
+		s.failManaged(w, r, event, managedErrorFor(err, invalidWindow))
 
 		return
 	}
+	s.recordManaged(r, event, nil)
 
 	s.respondLifecycle(w, r, scope, name)
 }
@@ -463,11 +525,13 @@ func (s *Server) handleRetryRun(w http.ResponseWriter, r *http.Request) {
 
 		return
 	}
+	event := managedEvent(service.ActionEnvironmentRetry, name, "")
 	if err := s.managed.Retry(r.Context(), scope, name, uint(id)); err != nil {
-		Respond(w, r, nil, managedError(err))
+		s.failManaged(w, r, event, managedError(err))
 
 		return
 	}
+	s.recordManaged(r, event, nil)
 	run, err := s.managedLatest(r, scope, name)
 	if err != nil {
 		Respond(w, r, nil, managedError(err))
@@ -498,22 +562,26 @@ func (s *Server) deleteManagedEnvironment(w http.ResponseWriter, r *http.Request
 		return true
 	}
 
+	event := managedEvent(service.ActionEnvironmentDelete, name, "")
 	if req.Scope == "pds_only" {
+		event.Outcome, event.Detail = service.OutcomeSucceeded, "Removed from PDS only. Everything in AWS stays."
 		if err := s.managed.RemoveFromPDS(r.Context(), scope, name, req.Confirm); err != nil {
-			Respond(w, r, nil, managedError(err))
+			s.failManaged(w, r, event, managedError(err))
 
 			return true
 		}
+		s.recordManaged(r, event, nil)
 		RespondWithStatus(w, r, http.StatusNoContent, nil, nil)
 
 		return true
 	}
 	run, err := s.managed.Delete(r.Context(), scope, name, req.Confirm)
 	if err != nil {
-		Respond(w, r, nil, managedError(err))
+		s.failManaged(w, r, event, managedError(err))
 
 		return true
 	}
+	s.recordManaged(r, event, nil)
 	s.respondRunStarted(w, r, scope, name, run)
 
 	return true

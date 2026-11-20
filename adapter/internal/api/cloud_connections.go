@@ -274,11 +274,13 @@ func (s *Server) handleRemoveCloudConnection(w http.ResponseWriter, r *http.Requ
 
 		return
 	}
+	event := service.ActivityEvent{Action: service.ActionCloudConnectionRemove, Target: req.Confirm, Outcome: service.OutcomeSucceeded}
 	if err := cloud.Remove(r.Context(), scope, chi.URLParam(r, "id"), req.Confirm); err != nil {
-		Respond(w, r, nil, cloudError(err))
+		s.failManaged(w, r, event, cloudError(err))
 
 		return
 	}
+	s.recordManaged(r, event, nil)
 
 	RespondWithStatus(w, r, http.StatusNoContent, nil, nil)
 }
