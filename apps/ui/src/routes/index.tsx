@@ -10,6 +10,7 @@ import { AlertsPage } from "@/pages/alerts";
 import { AwsCleanupPage } from "@/pages/aws-cleanup";
 import { ChatPageRoute } from "@/pages/chat";
 import { EnvironmentsPage } from "@/pages/environments";
+import { ConnectAwsAccountPage } from "@/pages/connect-aws-account";
 import { ConnectEnvironmentPage } from "@/pages/connect-environment";
 import { CreateDatabasePage } from "@/pages/create-database";
 import { DatabaseDetailPage } from "@/pages/database-detail";
@@ -76,6 +77,14 @@ export function AppRoutes() {
           element={
             <Surface name="clusters">
               <ConnectEnvironmentPage />
+            </Surface>
+          }
+        />
+        <Route
+          path="environments/aws-accounts/new"
+          element={
+            <Surface name="clusters">
+              <ConnectAwsAccountPage />
             </Surface>
           }
         />

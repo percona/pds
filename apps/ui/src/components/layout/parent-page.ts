@@ -65,6 +65,11 @@ const rules: Rule[] = [
     parent: () => environmentsList,
   },
   {
+    pattern: "/environments/aws-accounts/new",
+    surface: "clusters",
+    parent: () => environmentsList,
+  },
+  {
     pattern: "/environments/:name/new",
     surface: "databases",
     parent: ({ name }) => environmentDatabases(name),
