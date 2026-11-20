@@ -30,6 +30,10 @@ PostgreSQL (Percona Operator for PostgreSQL, behind PgBouncer).
   schedule, **restore** into a new database, **delete** with a typed
   confirmation.
 - **Monitor** metrics through PMM.
+- **Create an environment** in your AWS account: PDS builds the network and
+  an EKS cluster and connects it as an environment (see
+  [Managed environments](#managed-environments-on-aws)), or **Connect** one you
+  run yourself.
 - **Get help**: open and follow Percona support cases (ServiceNow), and chat
   with an assistant using your own Claude or Cursor key.
 
@@ -68,7 +72,8 @@ connected environment, and the hub never dials them.
 Creating a database commits an Instance file. Flux on the connected environment
 applies it. The agent dials the hub every 15 seconds with what it sees and
 takes back work that is not desired state, such as a backup. The hub never
-connects into a customer Kubernetes cluster.
+connects into a Kubernetes cluster you connected. It reaches the Kubernetes API of
+a managed environment only while it creates or deletes it.
 
 [docs/architecture.md](docs/architecture.md) covers the routes, credentials,
 state and design decisions in depth.
@@ -248,7 +253,7 @@ Sign in on that page goes to the console at `/app/`.
 
 A self-hosted hub is a customer install. It is the UI and the adapter, from
 the chart or on one host with Docker Compose. Environments join with the command
-the console's Create an environment page prints. See
+the console's Connect command prints. See
 [Hub on one host](docs/deployment.md#hub-on-one-host).
 
 ```bash
@@ -277,9 +282,38 @@ The packages are private for now, so log in to `ghcr.io` first.
 [docs/deployment.md](docs/deployment.md#hub-on-kubernetes) has the Secret and
 the GitHub org.
 
-Create an environment from the hub UI (Environments, then Create an environment), or mint
-the command with `POST /api/connect/tokens`. The command itself is in
-[Create an environment](docs/deployment.md#create-an-environment).
+Connect an environment you run from the hub UI (Environments, Create an environment,
+then Run a command yourself instead), or mint the command with
+`POST /api/connect/tokens`. The command itself is in
+[Connect an environment](docs/deployment.md#connect-an-environment).
+
+### Managed environments on AWS
+
+A managed environment is an environment the control plane builds for you in
+your own AWS account. Connect leaves the Kubernetes cluster to you; a managed
+environment has the control plane make it: a dedicated VPC, an EKS cluster with
+a node group, a backup bucket, and the same agent a connected environment
+runs. Both appear on the Environments page.
+
+1. **Connect an AWS account.** Under Environments, in Create an environment,
+   choose Connect an AWS account. The console prints one command. Run it in AWS
+   CloudShell, or in any shell where `aws` is signed in as someone who can create
+   IAM roles. It creates one CloudFormation stack, and the account is Ready once
+   the control plane's check passes. Running the command again is always safe and
+   is how an account moves to a newer template.
+2. **Create the environment.** Pick the AWS account, a Region and a name. The
+   page shows four phases and Retry on a failed step. Delete asks for the typed
+   name, and shows Delete blocked with what remains if AWS still holds
+   resources.
+3. **Create a database** on it as on any environment.
+
+The control plane needs settings before it accepts a create:
+`HUB_CLOUD_PRINCIPAL_ARN`, `HUB_MANAGED_OUTGOING_CIDRS` and
+`HUB_MANAGED_CHART_VERSION`, listed in
+[Managed environments](docs/deployment.md#managed-environments). How it works,
+what it creates and the routes are in
+[docs/architecture.md](docs/architecture.md#managed-environments). The hub's Git
+write credentials act as cluster-admin on every managed environment it serves.
 
 ## Install the plugin
 
@@ -361,6 +395,10 @@ sign in again unless the Organization's limits now refuse what it asks for.
   [docs/compatibility.md](docs/compatibility.md).
 - Images are linux/amd64 only, and so is the PMM server.
 - A hub runs one adapter replica.
+- Managed environments are AWS only. Support access windows, Git credentials
+  per environment, and mirrors or air-gapped control planes that cannot reach
+  the published chart registry are not built for them; see
+  [docs/architecture.md](docs/architecture.md#managed-environments).
 
 ## Contributing
 
