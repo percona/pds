@@ -1,4 +1,7 @@
 export {
+  createManagedEnvironment,
+  deleteManagedEnvironment,
+  retryRun,
   disconnectEnvironment,
   fetchEnvironments,
   fetchEnvironmentSnapshot,
@@ -30,6 +33,9 @@ export type {
   Environment,
   EnvironmentSnapshot,
   EnvironmentStatus,
+  EnvironmentState,
+  Provisioning,
+  ManagedCreated,
   ConnectGuide,
   JoinToken,
   Monitoring,
