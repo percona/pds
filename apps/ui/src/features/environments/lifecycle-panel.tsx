@@ -29,6 +29,19 @@ function knownZones(): string[] {
   }
 }
 
+/** A moment as the maintenance window's own clock shows it, so the window reads the same everywhere. */
+function inZone(iso: string, timeZone: string): string | null {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone,
+    }).format(new Date(iso));
+  } catch {
+    return formatTimestamp(iso);
+  }
+}
+
 type LifecyclePanelProps = {
   environment: string;
   lifecycle: Lifecycle;
@@ -56,7 +69,12 @@ export function LifecyclePanel({ environment, lifecycle }: LifecyclePanelProps) 
                   {lifecycle.templateSummary ??
                     `Template revision ${lifecycle.templateRevision}, latest ${lifecycle.latestTemplateRevision}`}
                 </p>
-                <Button type="button" size="sm" onClick={() => setUpdating("template")}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setUpdating("template")}
+                >
                   Review update
                 </Button>
               </>
@@ -278,8 +296,8 @@ function MaintenanceWindowEditor({
     },
   });
 
-  const next = formatTimestamp(window.nextStart);
-  const end = formatTimestamp(window.nextEnd);
+  const next = inZone(window.nextStart, window.timeZone);
+  const end = inZone(window.nextEnd, window.timeZone);
 
   return (
     <section className="space-y-2" aria-label="Maintenance window">
