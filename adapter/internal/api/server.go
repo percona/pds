@@ -315,6 +315,7 @@ func NewServer(deps Deps) *Server {
 
 					environment.With(s.requireCaller).Delete("/environments/{name}", s.handleDisconnectEnvironment)
 					environment.Get("/environments/{name}", s.handleGetEnvironment)
+					environment.Get("/environments/{name}/remains", s.handleGetRemains)
 					environment.With(s.requireCaller).Post("/environments/{name}/runs", s.handleStartRun)
 					environment.With(s.requireCaller).Post("/environments/{name}/runs/{runId}/retry", s.handleRetryRun)
 					environment.With(s.requireCaller).Post("/environments/{name}/upgrades/defer", s.handleDeferUpgrade)

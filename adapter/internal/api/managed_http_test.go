@@ -175,8 +175,21 @@ func (r *memoryRemover) Delete(ctx context.Context, scope auth.Scope, name strin
 	return r.runs.Start(ctx, scope.Team.ID, name, store.KindDelete)
 }
 
+func (r *memoryRemover) Remains(_ context.Context, scope auth.Scope, name string) (managed.Remains, error) {
+	rec, err := r.runs.Get(context.Background(), scope.Team.ID, name)
+	if err != nil {
+		return managed.Remains{}, err
+	}
+
+	return managed.Remains{
+		AccountID: r.cloudDB.Connections[rec.ConnectionID].AccountID, Region: rec.Region, StackName: "pds-env-" + rec.ID,
+		ClusterName: "pds-" + rec.ID, Bucket: "pds-123456789012-" + rec.ID,
+	}, nil
+}
+
 func (r *memoryRemover) RemoveFromPDS(_ context.Context, scope auth.Scope, name string) error {
-	if r.cloudDB.Connections[r.runs.rows[key(scope.Team.ID, name)].ConnectionID].State != store.CloudUnreachable {
+	rec := r.runs.rows[key(scope.Team.ID, name)]
+	if r.cloudDB.Connections[rec.ConnectionID].State != store.CloudUnreachable && rec.LostAt == nil {
 		return managed.ErrConnectionReachable
 	}
 	r.removed = append(r.removed, key(scope.Team.ID, name))
@@ -586,6 +599,37 @@ func TestRemoveFromPDSOnlyIsRefusedWhileTheAccountAnswersAndWorksOnceItDoesNot(t
 	assert.Equal(t, http.StatusNoContent, done.Code, done.Body.String())
 	assert.Equal(t, []string{"7/orders"}, h.remover.removed)
 	assert.Equal(t, http.StatusBadRequest, h.do(t, 0, http.MethodDelete, "/api/environments/orders", `{"confirm":"orders","scope":"everything"}`).Code)
+}
+
+func TestRemoveFromPDSOnlyWorksForALostEnvironmentWhoseAccountStillAnswers(t *testing.T) {
+	h := newManagedHTTP(t)
+	h.create(t, "orders")
+	lostAt := time.Now()
+	row := h.managed.rows[key(7, "orders")]
+	row.LostAt = &lostAt
+	h.managed.rows[key(7, "orders")] = row
+
+	done := h.do(t, 0, http.MethodDelete, "/api/environments/orders", `{"confirm":"orders","scope":"pds_only"}`)
+
+	assert.Equal(t, http.StatusNoContent, done.Code, done.Body.String())
+}
+
+func TestTheRemainsReadNamesWhatStaysInTheAccountAndNothingSecret(t *testing.T) {
+	h := newManagedHTTP(t)
+	h.create(t, "orders")
+	id := h.managed.rows[key(7, "orders")].ID
+
+	rec := h.do(t, 0, http.MethodGet, "/api/environments/orders/remains", "")
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, map[string]any{
+		"accountId": "123456789012", "region": "eu-west-1", "stackName": "pds-env-" + id,
+		"eksClusterName": "pds-" + id, "bucket": "pds-123456789012-" + id,
+	}, jsonOf(t, rec))
+	assert.NotContains(t, strings.ToLower(rec.Body.String()), "externalid")
+	assert.NotContains(t, rec.Body.String(), "arn:aws")
+	assert.Equal(t, http.StatusNotFound, h.do(t, 8, http.MethodGet, "/api/environments/orders/remains", "").Code)
+	assert.Equal(t, http.StatusNotFound, h.do(t, 0, http.MethodGet, "/api/environments/spoke-a/remains", "").Code, "a connected environment has nothing in AWS")
 }
 
 func TestDeletingAConnectedEnvironmentStillRemovesItWithoutAName(t *testing.T) {

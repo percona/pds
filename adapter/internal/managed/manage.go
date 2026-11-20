@@ -74,6 +74,7 @@ type RunBook interface {
 type Removal interface {
 	Delete(ctx context.Context, scope auth.Scope, name string) (store.ProvisioningRun, error)
 	RemoveFromPDS(ctx context.Context, scope auth.Scope, name string) error
+	Remains(ctx context.Context, scope auth.Scope, name string) (Remains, error)
 }
 
 // Lifecycler is what happens to a managed environment after it is created: what
@@ -459,6 +460,19 @@ func (m *Manager) RemoveFromPDS(ctx context.Context, scope auth.Scope, name, typ
 	}
 
 	return m.removal.RemoveFromPDS(ctx, scope, name)
+}
+
+// Remains names what stays in the customer's AWS account when the environment is
+// removed from PDS only.
+func (m *Manager) Remains(ctx context.Context, scope auth.Scope, name string) (Remains, error) {
+	if _, err := m.roster.Get(ctx, scope.Team.ID, name); err != nil {
+		return Remains{}, err
+	}
+	if m.removal == nil {
+		return Remains{}, fmt.Errorf("%w: removing from PDS only is not offered", ErrUnavailable)
+	}
+
+	return m.removal.Remains(ctx, scope, name)
 }
 
 func (m *Manager) confirmed(ctx context.Context, scope auth.Scope, name, typed string) (store.ManagedEnvironment, error) {

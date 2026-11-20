@@ -326,6 +326,33 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	s.respondRunStarted(w, r, scope, name, run)
 }
 
+type remainsResponse struct {
+	AccountID      string `json:"accountId,omitempty"`
+	Region         string `json:"region"`
+	StackName      string `json:"stackName"`
+	EKSClusterName string `json:"eksClusterName"`
+	Bucket         string `json:"bucket,omitempty"`
+}
+
+// handleGetRemains names what Remove from PDS only leaves in the AWS account, for
+// the dialog that asks the person to type the environment's name.
+func (s *Server) handleGetRemains(w http.ResponseWriter, r *http.Request) {
+	scope, ok := s.managerScope(w, r)
+	if !ok {
+		return
+	}
+	got, err := s.managed.Remains(r.Context(), scope, strings.TrimSpace(chi.URLParam(r, "name")))
+	if err != nil {
+		Respond(w, r, nil, managedError(err))
+
+		return
+	}
+
+	Respond(w, r, remainsResponse{
+		AccountID: got.AccountID, Region: got.Region, StackName: got.StackName, EKSClusterName: got.ClusterName, Bucket: got.Bucket,
+	}, nil)
+}
+
 // handleDeferUpgrade puts the next chart version off.
 func (s *Server) handleDeferUpgrade(w http.ResponseWriter, r *http.Request) {
 	scope, ok := s.managerScope(w, r)
@@ -577,7 +604,7 @@ func managedErrorFor(err error, invalid string) error {
 	case errors.Is(err, managed.ErrConfirm):
 		return Validation("The name you typed is not the name of this environment. Type it exactly, then try again.").WithCause(err)
 	case errors.Is(err, managed.ErrConnectionReachable):
-		return Conflict("PDS can still reach this AWS account. Delete the environment instead of removing it from PDS only.").WithCause(err)
+		return Conflict("PDS can still reach this AWS account and the environment's Kubernetes cluster. Delete the environment instead of removing it from PDS only.").WithCause(err)
 	case errors.Is(err, store.ErrRunActive):
 		return Conflict("This environment already has a run in progress. Wait for it to finish, or retry it if it failed.").WithCause(err)
 	case errors.Is(err, store.ErrNoFailedRun):

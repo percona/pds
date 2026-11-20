@@ -10,8 +10,9 @@ import (
 	"github.com/percona/pds/adapter/internal/store"
 )
 
-// ErrConnectionReachable means the cloud connection works, so the environment is
-// deleted in AWS and not only removed from PDS.
+// ErrConnectionReachable means the cloud connection works and the environment's
+// infrastructure is there, so the environment is deleted in AWS and not only
+// removed from PDS.
 var ErrConnectionReachable = errors.New("the cloud connection works, so delete the environment instead")
 
 // removedFromPDS is the message of the run that records a removal from PDS alone.
@@ -66,10 +67,11 @@ func (r *Remover) Delete(ctx context.Context, scope auth.Scope, name string) (st
 	return r.runs.Start(ctx, scope.Team.ID, name, KindDelete)
 }
 
-// RemoveFromPDS forgets the environment without touching AWS, for the one case
-// that cannot do more: the cloud connection is Unreachable, so the control plane
-// cannot assume the role. The caller shows Remains first and never claims AWS was
-// cleaned up.
+// RemoveFromPDS forgets the environment without touching AWS, for the cases that
+// cannot do more: the cloud connection is Unreachable, so the control plane
+// cannot assume the role, or the environment is Lost, so its infrastructure is
+// already gone. The caller shows Remains first and never claims AWS was cleaned
+// up.
 func (r *Remover) RemoveFromPDS(ctx context.Context, scope auth.Scope, name string) error {
 	rec, err := r.records.Get(ctx, scope.Team.ID, name)
 	if err != nil {
@@ -79,7 +81,7 @@ func (r *Remover) RemoveFromPDS(ctx context.Context, scope auth.Scope, name stri
 	if err != nil && !errors.Is(err, store.ErrCloudConnectionUnknown) {
 		return fmt.Errorf("read the cloud connection: %w", err)
 	}
-	if err == nil && conn.State != store.CloudUnreachable {
+	if err == nil && conn.State != store.CloudUnreachable && rec.LostAt == nil {
 		return ErrConnectionReachable
 	}
 

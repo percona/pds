@@ -87,6 +87,10 @@ func (f *fakeRemover) Delete(_ context.Context, _ auth.Scope, name string) (stor
 	return store.ProvisioningRun{ID: 98, Environment: name, Kind: store.KindDelete, Status: store.RunQueued}, f.err
 }
 
+func (f *fakeRemover) Remains(_ context.Context, _ auth.Scope, name string) (managed.Remains, error) {
+	return managed.Remains{StackName: "pds-env-" + name}, f.err
+}
+
 func (f *fakeRemover) RemoveFromPDS(_ context.Context, _ auth.Scope, name string) error {
 	if f.err == nil {
 		f.removed = append(f.removed, name)
@@ -255,11 +259,11 @@ func TestTheStateOfAManagedEnvironmentFollowsItsRunsThenItsHeartbeat(t *testing.
 
 // fakeLife answers every lifecycle call with the run or the error it is given.
 type fakeLife struct {
-	calls []string
-	err   error
+	calls  []string
+	err    error
 	update managed.InfraUpdate
 	window store.MaintenanceWindow
-	days  int
+	days   int
 }
 
 func (f *fakeLife) Describe(rec store.ManagedEnvironment) (managed.Status, bool) {
@@ -441,6 +445,19 @@ func TestRemoveFromPDSOnlyNeedsTheTypedNameAndPassesTheReachabilityRefusalThroug
 	remover.err = nil
 	require.NoError(t, m.RemoveFromPDS(t.Context(), managerScope, "orders", "orders"))
 	assert.Equal(t, []string{"orders"}, remover.removed)
+}
+
+func TestWhatStaysInAWSIsReadThroughTheRemovalOfTheTeamsEnvironment(t *testing.T) {
+	m := newManager(&fakeBook{}, &fakeRemover{})
+
+	got, err := m.Remains(t.Context(), managerScope, "orders")
+	require.NoError(t, err)
+	assert.Equal(t, "pds-env-orders", got.StackName)
+
+	_, err = m.Remains(t.Context(), managerScope, "other")
+	require.ErrorIs(t, err, store.ErrManagedEnvironmentUnknown)
+	_, err = newManager(&fakeBook{}, nil).Remains(t.Context(), managerScope, "orders")
+	require.ErrorIs(t, err, managed.ErrUnavailable)
 }
 
 func TestDeletingIsUnavailableWithoutARemoval(t *testing.T) {
