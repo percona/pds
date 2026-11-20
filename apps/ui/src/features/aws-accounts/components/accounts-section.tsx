@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CircleAlert } from "lucide-react";
+import { CircleAlert, Cloud } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { toast } from "sonner";
@@ -15,7 +15,6 @@ import {
 } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Notice } from "@/components/ui/notice";
 import { Skeleton } from "@/components/ui/skeleton";
 import { isNameConfirmed, StatusPill, type StatusKind } from "@/features/databases";
 import { removeAwsAccount } from "../api";
@@ -71,16 +70,18 @@ export function AwsAccountsSection() {
         ) : null}
       </div>
       {rows.length === 0 ? (
-        <Notice
-          icon={null}
-          title="No AWS accounts yet"
-          detail="Connect an AWS account and PDS can create environments in it for you."
-          action={
-            <Button asChild>
-              <Link to={connectAccountPath}>Connect an AWS account</Link>
-            </Button>
-          }
-        />
+        <Card className="flex flex-col items-center gap-3 px-6 py-12 text-center">
+          <Cloud className="size-5 text-muted-foreground" strokeWidth={1.5} aria-hidden="true" />
+          <div className="space-y-1">
+            <p className="text-sm font-medium">No AWS accounts yet</p>
+            <p className="max-w-md text-sm text-muted-foreground">
+              Connect an AWS account and PDS can create environments in it for you.
+            </p>
+          </div>
+          <Button asChild>
+            <Link to={connectAccountPath}>Connect an AWS account</Link>
+          </Button>
+        </Card>
       ) : (
         <Card className="overflow-hidden">
           <ul className="divide-y divide-border">
