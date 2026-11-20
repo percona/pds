@@ -54,8 +54,8 @@ describe("AWS account calls", () => {
     expect(issued.command).toBe("curl x");
     const [path, init] = fetchMock.mock.calls[0];
     expect(path).toBe("/api/cloud-connection-tokens");
-    expect(init.method).toBe("POST");
-    expect(JSON.parse(String(init.body))).toEqual({ allowedRegions: ["eu-west-1"] });
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({ allowedRegions: ["eu-west-1"] });
   });
 
   it("leaves the regions out when none are limited", async () => {
@@ -65,7 +65,7 @@ describe("AWS account calls", () => {
     await issueAwsConnectCommand([]);
 
     const [, init] = fetchMock.mock.calls[0];
-    expect(JSON.parse(String(init.body))).toEqual({});
+    expect(JSON.parse(String(init?.body))).toEqual({});
   });
 
   it("cancels a connect command", async () => {
@@ -76,7 +76,7 @@ describe("AWS account calls", () => {
 
     const [path, init] = fetchMock.mock.calls[0];
     expect(path).toBe("/api/cloud-connection-tokens/tok");
-    expect(init.method).toBe("DELETE");
+    expect(init?.method).toBe("DELETE");
   });
 
   it("removes an account with the name that was typed", async () => {
@@ -87,6 +87,6 @@ describe("AWS account calls", () => {
 
     const [path, init] = fetchMock.mock.calls[0];
     expect(path).toBe("/api/cloud-connections/cc_1");
-    expect(JSON.parse(String(init.body))).toEqual({ confirm: "payments" });
+    expect(JSON.parse(String(init?.body))).toEqual({ confirm: "payments" });
   });
 });
