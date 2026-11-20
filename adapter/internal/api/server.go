@@ -308,6 +308,7 @@ func NewServer(deps Deps) *Server {
 				environments.With(s.requireCaller).Delete("/cloud-connections/{id}", s.handleRemoveCloudConnection)
 				environments.With(s.requireCaller).Post("/cloud-connections/{id}/environments", s.handleCreateManagedEnvironment)
 				environments.With(s.requireCaller).Post("/cloud-connection-tokens", s.handleIssueCloudToken)
+				environments.Get("/cloud-connection-tokens/{id}", s.handleGetCloudToken)
 				environments.With(s.requireCaller).Delete("/cloud-connection-tokens/{id}", s.handleCancelCloudToken)
 
 				environments.Group(func(environment chi.Router) {

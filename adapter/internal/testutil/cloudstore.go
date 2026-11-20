@@ -59,6 +59,19 @@ func (f *CloudStore) RevokeTokenByID(_ context.Context, teamID uint, id string, 
 	return store.CloudToken{}, store.ErrCloudTokenInvalid
 }
 
+// TokenByID reads one of the Team's tokens by its public id.
+func (f *CloudStore) TokenByID(_ context.Context, teamID uint, id string) (store.CloudToken, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for hash, token := range f.Tokens {
+		if token.TeamID == teamID && len(id) == 16 && strings.HasPrefix(hash, id) {
+			return *token, nil
+		}
+	}
+
+	return store.CloudToken{}, store.ErrCloudTokenInvalid
+}
+
 // TokenTeam returns a live token.
 func (f *CloudStore) TokenTeam(_ context.Context, hash string, now time.Time) (store.CloudToken, error) {
 	f.mu.Lock()

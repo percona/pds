@@ -349,6 +349,67 @@ func TestCancellingATokenStopsTheCommandAndAnotherTeamCannot(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, h.do(t, 0, http.MethodDelete, "/api/cloud-connection-tokens/"+id, "").Code, "already ended")
 }
 
+func (h *managedHTTP) mint(t *testing.T) (id, command string) {
+	t.Helper()
+
+	rec := h.do(t, 0, http.MethodPost, "/api/cloud-connection-tokens", `{"allowedRegions":["eu-west-1"]}`)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	got := jsonOf(t, rec)
+
+	return got["id"].(string), got["command"].(string)
+}
+
+func TestTheConsoleFollowsAConnectCommandByItsTokenIDUntilItNamesTheConnectionItMade(t *testing.T) {
+	h := newManagedHTTP(t)
+	id, command := h.mint(t)
+	token := command[strings.Index(command, "ccn_"):]
+	token = strings.Trim(token, "'")
+
+	waiting := h.do(t, 0, http.MethodGet, "/api/cloud-connection-tokens/"+id, "")
+	require.Equal(t, http.StatusOK, waiting.Code, waiting.Body.String())
+	assert.Equal(t, "waiting", jsonOf(t, waiting)["state"])
+	assert.NotContains(t, jsonOf(t, waiting), "connectionId")
+
+	enrolled, err := h.cloud.Enroll(t.Context(), token, service.CloudAccount{ID: "210987654321", Alias: "ops", Region: "eu-west-1"})
+	require.NoError(t, err)
+	connecting := jsonOf(t, h.do(t, 0, http.MethodGet, "/api/cloud-connection-tokens/"+id, ""))
+	assert.Equal(t, "connecting", connecting["state"])
+	assert.Equal(t, enrolled.ConnectionID, connecting["connectionId"])
+	assert.Equal(t, []any{"eu-west-1"}, connecting["allowedRegions"])
+	assert.NotEmpty(t, connecting["expiresAt"])
+
+	assert.Equal(t, http.StatusNoContent, h.do(t, 0, http.MethodDelete, "/api/cloud-connection-tokens/"+id, "").Code)
+	ended := jsonOf(t, h.do(t, 0, http.MethodGet, "/api/cloud-connection-tokens/"+id, ""))
+	assert.Equal(t, "ended", ended["state"])
+}
+
+func TestATokenReadNeverShowsTheTokenAndAnotherTeamCannotReadIt(t *testing.T) {
+	h := newManagedHTTP(t)
+	id, command := h.mint(t)
+	token := strings.Trim(command[strings.Index(command, "ccn_"):], "'")
+
+	own := h.do(t, 0, http.MethodGet, "/api/cloud-connection-tokens/"+id, "")
+	other := h.do(t, 8, http.MethodGet, "/api/cloud-connection-tokens/"+id, "")
+
+	assert.NotContains(t, own.Body.String(), token)
+	assert.NotContains(t, own.Body.String(), "ccn_")
+	assert.Equal(t, http.StatusNotFound, other.Code)
+	assert.Equal(t, http.StatusNotFound, h.do(t, 0, http.MethodGet, "/api/cloud-connection-tokens/0123456789abcdef", "").Code)
+	assert.Equal(t, http.StatusNotFound, h.do(t, 0, http.MethodGet, "/api/cloud-connection-tokens/short", "").Code)
+}
+
+func TestATokenThatRanOutReadsAsExpired(t *testing.T) {
+	h := newManagedHTTP(t)
+	id, _ := h.mint(t)
+	for hash, token := range h.cloudDB.Tokens {
+		if strings.HasPrefix(hash, id) {
+			token.ExpiresAt = time.Now().Add(-time.Minute)
+		}
+	}
+
+	assert.Equal(t, "expired", jsonOf(t, h.do(t, 0, http.MethodGet, "/api/cloud-connection-tokens/"+id, ""))["state"])
+}
+
 func TestAConnectionReadsItsStateRegionsAndEnvironmentsAndNeverItsSecret(t *testing.T) {
 	h := newManagedHTTP(t)
 	h.create(t, "orders")
