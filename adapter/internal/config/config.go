@@ -11,8 +11,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -53,9 +55,34 @@ type Config struct {
 	// is its issuer. Empty means HubPublicURL. It differs where the address spokes use is not
 	// one a person's browser or agent can use as an issuer, as in the kind lab.
 	HubOAuthIssuer string
-	HubGitURL      string
-	HubGitHubOrg   string
-	HubGitHubToken string
+	// CloudPrincipalARN is the role or user the control plane assumes customer roles
+	// from, and the one their trust policies name. Empty turns cloud connections off.
+	CloudPrincipalARN string
+	// ManagedOutgoingCIDRs are the addresses this deployment's AWS calls to a
+	// managed environment's Kubernetes API come from. Only they may reach the
+	// endpoint while an Access window is open. Empty refuses managed
+	// environments, and 0.0.0.0/0 is accepted when the operator chooses it.
+	ManagedOutgoingCIDRs []string
+	// ManagedChartVersion is the published pds chart a managed environment
+	// installs. Empty refuses managed environments.
+	ManagedChartVersion string
+	// AgentReleaseNamespace and AgentReleaseName name the Flux HelmRelease an
+	// agent reports on its heartbeat. Empty means the environment has none, as a
+	// connected environment does.
+	AgentReleaseNamespace string
+	AgentReleaseName      string
+	// AgentBackup is the IAM user a managed environment's agent makes for its
+	// backups. An empty User means the environment keeps its key some other way.
+	AgentBackup AgentBackup
+	// ProvisionLeaseTTL is how long a provisioning run's lease lasts unrenewed.
+	ProvisionLeaseTTL time.Duration
+	// ProvisionMaxAttempts caps the automatic attempts of one step.
+	ProvisionMaxAttempts int
+	// ProvisionWindowMaxAge is how long an Access window may stay open.
+	ProvisionWindowMaxAge time.Duration
+	HubGitURL             string
+	HubGitHubOrg          string
+	HubGitHubToken        string
 	// The GitHub App credentials replace HubGitHubToken. The private key is
 	// PEM text, read from a value or a file.
 	HubGitHubAppID             string
@@ -451,6 +478,7 @@ func Load() (Config, error) {
 		HubURL:                     strings.TrimSpace(lookup("HUB_URL", "")),
 		HubPublicURL:               strings.TrimSpace(lookup("HUB_PUBLIC_URL", "")),
 		HubOAuthIssuer:             strings.TrimSpace(lookup("HUB_OAUTH_ISSUER", "")),
+		CloudPrincipalARN:          strings.TrimSpace(lookup("HUB_CLOUD_PRINCIPAL_ARN", "")),
 		HubGitURL:                  strings.TrimSpace(lookup("HUB_GIT_URL", "")),
 		HubGitHubOrg:               strings.TrimSpace(lookup("HUB_GITHUB_ORG", "")),
 		HubGitHubToken:             lookup("HUB_GITHUB_TOKEN", ""),
@@ -493,6 +521,10 @@ func Load() (Config, error) {
 		if err := validateHubURL(check.name, check.value, check.allowPath); err != nil {
 			return Config{}, err
 		}
+	}
+
+	if cfg.CloudPrincipalARN != "" && !cloudPrincipalARN.MatchString(cfg.CloudPrincipalARN) {
+		return Config{}, errors.New("HUB_CLOUD_PRINCIPAL_ARN must be the ARN of an IAM role or user, never an account root")
 	}
 
 	// An absent variable is an adapter with no database. A variable that is
@@ -589,6 +621,10 @@ func Load() (Config, error) {
 			return Config{}, err
 		}
 		cfg.HubOperatorToken = token
+	}
+
+	if err := loadProvisioning(&cfg, lookup); err != nil {
+		return Config{}, err
 	}
 
 	// A join token is printed in a command an operator pastes around, so it
@@ -1068,3 +1104,132 @@ func validateDatabaseURL(raw string) error {
 
 	return nil
 }
+
+// AgentBackup names the IAM user an agent makes for its environment's backups
+// and the Secret it writes the key to.
+type AgentBackup struct {
+	User        string
+	Path        string
+	BoundaryARN string
+	Bucket      string
+	// Secret is the Secret in the pod's namespace that holds the key.
+	Secret string
+	// Tag is the value of the percona.com/pds tag on the user.
+	Tag    string
+	Region string
+}
+
+var (
+	iamName     = regexp.MustCompile(`^[A-Za-z0-9+=,.@_-]{1,64}$`)
+	iamPath     = regexp.MustCompile(`^/([A-Za-z0-9+=,.@_-]+/)+$`)
+	boundaryARN = regexp.MustCompile(`^arn:aws:iam::[0-9]{12}:policy/([A-Za-z0-9+=,.@_-]+/)*[A-Za-z0-9+=,.@_-]+$`)
+	bucketName  = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{2,62}$`)
+	tagValue    = regexp.MustCompile(`^[A-Za-z0-9]{1,64}$`)
+)
+
+// loadAgentBackup reads the backup key settings. The release sets them all
+// together, so one that is set without the rest, or that cannot be used, is
+// refused: the agent would otherwise never make a key and say nothing.
+func loadAgentBackup(cfg *Config, lookup func(key, fallback string) string) error {
+	user := strings.TrimSpace(lookup("AGENT_BACKUP_USER", ""))
+	if user == "" {
+		return nil
+	}
+	backup := AgentBackup{
+		User:        user,
+		Path:        strings.TrimSpace(lookup("AGENT_BACKUP_USER_PATH", "")),
+		BoundaryARN: strings.TrimSpace(lookup("AGENT_BACKUP_BOUNDARY_ARN", "")),
+		Bucket:      strings.TrimSpace(lookup("AGENT_BACKUP_BUCKET", "")),
+		Secret:      strings.TrimSpace(lookup("AGENT_BACKUP_SECRET", "")),
+		Tag:         strings.TrimSpace(lookup("AGENT_BACKUP_TAG", "")),
+		Region:      strings.TrimSpace(lookup("AWS_REGION", "")),
+	}
+	for _, check := range []struct {
+		name  string
+		value string
+		ok    *regexp.Regexp
+	}{
+		{"AGENT_BACKUP_USER", backup.User, iamName},
+		{"AGENT_BACKUP_USER_PATH", backup.Path, iamPath},
+		{"AGENT_BACKUP_BOUNDARY_ARN", backup.BoundaryARN, boundaryARN},
+		{"AGENT_BACKUP_BUCKET", backup.Bucket, bucketName},
+		{"AGENT_BACKUP_SECRET", backup.Secret, dnsLabel},
+		{"AGENT_BACKUP_TAG", backup.Tag, tagValue},
+		{"AWS_REGION", backup.Region, regionName},
+	} {
+		if !check.ok.MatchString(check.value) {
+			return fmt.Errorf("%s: %q is not usable for the backup key", check.name, check.value)
+		}
+	}
+	cfg.AgentBackup = backup
+
+	return nil
+}
+
+var regionName = regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-[0-9]$`)
+
+// loadProvisioning reads the settings of provisioning runs and the Access
+// window. Each value that is set must be usable: a typo would otherwise turn
+// into a run that never gets a lease or a window that never closes.
+func loadProvisioning(cfg *Config, lookup func(key, fallback string) string) error {
+	for _, raw := range splitList(lookup("HUB_MANAGED_OUTGOING_CIDRS", "")) {
+		if _, err := netip.ParsePrefix(raw); err != nil {
+			return fmt.Errorf("HUB_MANAGED_OUTGOING_CIDRS: %q is not a CIDR such as 203.0.113.7/32", raw)
+		}
+		cfg.ManagedOutgoingCIDRs = append(cfg.ManagedOutgoingCIDRs, raw)
+	}
+
+	for _, d := range []struct {
+		name     string
+		fallback string
+		into     *time.Duration
+	}{
+		{"HUB_PROVISION_LEASE_TTL", "1m", &cfg.ProvisionLeaseTTL},
+		{"HUB_PROVISION_WINDOW_MAX_AGE", "30m", &cfg.ProvisionWindowMaxAge},
+	} {
+		value, err := time.ParseDuration(lookup(d.name, d.fallback))
+		if err != nil {
+			return fmt.Errorf("%s: %w", d.name, err)
+		}
+		if value <= 0 {
+			return fmt.Errorf("%s must be positive, got %s", d.name, value)
+		}
+		*d.into = value
+	}
+
+	// The version is written into a HelmRelease, so only a release number passes.
+	if version := strings.TrimSpace(lookup("HUB_MANAGED_CHART_VERSION", "")); version != "" {
+		if !chartVersion.MatchString(version) {
+			return fmt.Errorf("HUB_MANAGED_CHART_VERSION: %q is not a release such as 0.1.0", version)
+		}
+		cfg.ManagedChartVersion = version
+	}
+
+	if ref := strings.TrimSpace(lookup("AGENT_RELEASE_REF", "")); ref != "" {
+		namespace, name, ok := strings.Cut(ref, "/")
+		if !ok || !dnsLabel.MatchString(namespace) || !dnsLabel.MatchString(name) {
+			return fmt.Errorf("AGENT_RELEASE_REF: %q is not a namespace and a name such as flux-system/pds", ref)
+		}
+		cfg.AgentReleaseNamespace, cfg.AgentReleaseName = namespace, name
+	}
+
+	if err := loadAgentBackup(cfg, lookup); err != nil {
+		return err
+	}
+
+	attempts, err := strconv.Atoi(lookup("HUB_PROVISION_MAX_ATTEMPTS", "5"))
+	if err != nil || attempts < 1 {
+		return errors.New("HUB_PROVISION_MAX_ATTEMPTS must be a whole number of at least 1")
+	}
+	cfg.ProvisionMaxAttempts = attempts
+
+	return nil
+}
+
+var dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+
+var chartVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`)
+
+// cloudPrincipalARN is a role or user ARN. An account root is refused: a trust
+// policy that names one lets anyone in that account assume the role.
+var cloudPrincipalARN = regexp.MustCompile(`^arn:aws:iam::[0-9]{12}:(role|user)/[A-Za-z0-9+=,.@_/-]+$`)

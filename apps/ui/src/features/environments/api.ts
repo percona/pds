@@ -4,8 +4,15 @@ import type {
   EnvironmentSnapshot,
   ConnectGuide,
   JoinToken,
+  Lifecycle,
+  MaintenanceWindow,
+  ManagedCreated,
   Monitoring,
   MonitoringSettings,
+  Remains,
+  RunStarted,
+  StartRunInput,
+  UpdatePreview,
 } from "./types";
 
 /** Reads the connected environments. A failed read is an error. */
@@ -94,4 +101,104 @@ export function putMonitoring(
     body: settings,
     signal,
   });
+}
+
+/**
+ * Asks PDS to build an environment in one of the Team's AWS accounts. The answer
+ * comes before anything exists in AWS: the environment is already creating and
+ * its run is queued.
+ */
+export function createManagedEnvironment(
+  connectionId: string,
+  input: { name: string; region: string },
+  team?: string,
+  signal?: AbortSignal,
+): Promise<ManagedCreated> {
+  return requestJson<ManagedCreated>(
+    `/api/cloud-connections/${encodeURIComponent(connectionId)}/environments`,
+    { method: "POST", body: input, team, signal },
+  );
+}
+
+/** Re-runs the step of a run that failed. Nothing before it runs again. */
+export function retryRun(name: string, runId: number, signal?: AbortSignal): Promise<RunStarted> {
+  return requestJson<RunStarted>(
+    `/api/environments/${encodeURIComponent(name)}/runs/${runId}/retry`,
+    { method: "POST", signal },
+  );
+}
+
+/**
+ * Deletes a managed environment and what PDS built for it in AWS, after its
+ * typed name. With `pdsOnly` it forgets the environment in PDS and leaves
+ * everything in the AWS account, which is for an account PDS can no longer reach.
+ */
+export async function deleteManagedEnvironment(
+  name: string,
+  confirm: string,
+  options: { pdsOnly?: boolean; signal?: AbortSignal } = {},
+): Promise<void> {
+  await requestJson<RunStarted | undefined>(`/api/environments/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+    body: options.pdsOnly ? { confirm, scope: "pds_only" } : { confirm },
+    signal: options.signal,
+  });
+}
+
+/** Starts an upgrade, or a rebuild of infrastructure that went missing. */
+export function startRun(
+  name: string,
+  input: StartRunInput,
+  signal?: AbortSignal,
+): Promise<RunStarted> {
+  return requestJson<RunStarted>(`/api/environments/${encodeURIComponent(name)}/runs`, {
+    method: "POST",
+    body: input,
+    signal,
+  });
+}
+
+/** Holds back the PDS upgrade for a number of days. An environment can be deferred once. */
+export function deferUpgrade(name: string, days: number, signal?: AbortSignal): Promise<Lifecycle> {
+  return requestJson<Lifecycle>(`/api/environments/${encodeURIComponent(name)}/upgrades/defer`, {
+    method: "POST",
+    body: { days },
+    signal,
+  });
+}
+
+export function putMaintenanceWindow(
+  name: string,
+  window: Pick<MaintenanceWindow, "day" | "hour" | "timeZone">,
+  signal?: AbortSignal,
+): Promise<Lifecycle> {
+  return requestJson<Lifecycle>(
+    `/api/environments/${encodeURIComponent(name)}/maintenance-window`,
+    {
+      method: "PUT",
+      body: window,
+      signal,
+    },
+  );
+}
+
+/** What an update would change in AWS, before anything is started. */
+export function previewUpdate(
+  name: string,
+  kubernetesVersion?: string,
+  signal?: AbortSignal,
+): Promise<UpdatePreview> {
+  return requestJson<UpdatePreview>(
+    `/api/environments/${encodeURIComponent(name)}/updates/preview`,
+    {
+      method: "POST",
+      body: kubernetesVersion ? { kubernetesVersion } : {},
+      signal,
+    },
+  );
+}
+
+/** What Remove from PDS only would leave in the AWS account. */
+export function fetchRemains(name: string, signal?: AbortSignal): Promise<Remains> {
+  return requestJson<Remains>(`/api/environments/${encodeURIComponent(name)}/remains`, { signal });
 }

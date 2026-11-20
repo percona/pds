@@ -85,7 +85,11 @@ func (s *Service) SetPMMSettings(ctx context.Context, environment string, in PMM
 	// mark is read under the lock a beat takes to record it, so a beat that
 	// lands while this call waits is not overwritten by a stale answer.
 	_, withRules := s.inv.PMMReport(environment)
-	files, err := pmmFiles(environment, in, s.pmmVersion, withRules)
+	ownershipID, err := s.ownershipID(ctx, environment)
+	if err != nil {
+		return fmt.Errorf("read the environment's ownership tag: %w", err)
+	}
+	files, err := pmmFiles(environment, in, s.pmmVersion, ownershipID, withRules)
 	if err != nil {
 		return err
 	}

@@ -11,6 +11,99 @@ type environment struct {
 	Namespace string `json:"namespace,omitempty"`
 	Status    string `json:"status"`
 	LastSeen  string `json:"lastSeen,omitempty" jsonschema:"When the environment last reported in."`
+	Origin    string `json:"origin" jsonschema:"connected when the user connected the Kubernetes cluster, managed when PDS built it."`
+	State     string `json:"state" jsonschema:"creating, ready, degraded, failed, deleting or lost. lost means the Kubernetes cluster is gone from the AWS account: the user rebuilds it or removes it from PDS."`
+	// ConnectionID, Region, Provisioning and Lifecycle are set on a managed environment.
+	ConnectionID string        `json:"connectionId,omitempty" jsonschema:"The AWS account a managed environment runs in."`
+	Region       string        `json:"region,omitempty"`
+	Provisioning *provisioning `json:"provisioning,omitempty" jsonschema:"How the latest run stands: its phases and, when it failed, what to do."`
+	Lifecycle    *lifecycle    `json:"lifecycle,omitempty" jsonschema:"Upgrades, changes made outside PDS and loss of a managed environment."`
+}
+
+type maintenanceWindow struct {
+	Day       int    `json:"day" jsonschema:"0 for Sunday to 6 for Saturday."`
+	Hour      int    `json:"hour" jsonschema:"0 to 23, in timeZone."`
+	TimeZone  string `json:"timeZone"`
+	NextStart string `json:"nextStart" jsonschema:"The window that is open now, or the next one."`
+	NextEnd   string `json:"nextEnd"`
+}
+
+type driftItem struct {
+	Resource string `json:"resource" jsonschema:"The resource in the AWS account that was changed."`
+	Detail   string `json:"detail" jsonschema:"Changed outside PDS or Deleted outside PDS."`
+}
+
+// lifecycle is what the control plane knows of a managed environment's upgrades,
+// drift and loss, as the hourly check last read it.
+type lifecycle struct {
+	ChartVersion               string            `json:"chartVersion,omitempty" jsonschema:"The PDS version on the environment."`
+	PendingChartVersion        string            `json:"pendingChartVersion,omitempty" jsonschema:"A newer PDS version that upgrades in the maintenance window, or now with upgrade_environment."`
+	SkippedChartVersion        string            `json:"skippedChartVersion,omitempty" jsonschema:"A version that failed here and was rolled back. It is not tried again until the user retries."`
+	Deferred                   bool              `json:"deferred" jsonschema:"The user put pendingChartVersion off until deferredUntil."`
+	DeferredUntil              string            `json:"deferredUntil,omitempty"`
+	MaintenanceWindow          maintenanceWindow `json:"maintenanceWindow"`
+	TemplateRevision           int               `json:"templateRevision"`
+	LatestTemplateRevision     int               `json:"latestTemplateRevision"`
+	TemplateOutOfDate          bool              `json:"templateOutOfDate" jsonschema:"The infrastructure template is older than the one this PDS ships. upgrade_environment with kind kubernetes and no kubernetesVersion updates it."`
+	TemplateSummary            string            `json:"templateSummary,omitempty" jsonschema:"Tell the user in these words, for example Template revision 1, latest 2."`
+	KubernetesVersion          string            `json:"kubernetesVersion,omitempty"`
+	KubernetesUpgradeAvailable bool              `json:"kubernetesUpgradeAvailable"`
+	Drift                      []driftItem       `json:"drift" jsonschema:"What was changed outside PDS, by resource. PDS only reports it and never overwrites it."`
+	DriftCheckedAt             string            `json:"driftCheckedAt,omitempty"`
+	Lost                       bool              `json:"lost"`
+	LostReason                 string            `json:"lostReason,omitempty" jsonschema:"Infrastructure missing."`
+	LostAt                     string            `json:"lostAt,omitempty"`
+}
+
+// tidy makes the lists a tool answers with arrays, never null.
+func (e *environment) tidy() {
+	if e.Provisioning != nil {
+		e.Provisioning.Phases = orEmpty(e.Provisioning.Phases)
+	}
+	if e.Lifecycle != nil {
+		e.Lifecycle.Drift = orEmpty(e.Lifecycle.Drift)
+	}
+}
+
+type refusal struct {
+	Reason  string `json:"reason" jsonschema:"quota, permission or region_not_enabled."`
+	Service string `json:"service,omitempty"`
+	Item    string `json:"item,omitempty" jsonschema:"The quota or the action AWS refused."`
+	Region  string `json:"region,omitempty"`
+}
+
+type runFailure struct {
+	Sentence string   `json:"sentence" jsonschema:"What happened and what the user does next. Tell the user in these words."`
+	Action   string   `json:"action" jsonschema:"retry: call retry_environment_run once the user has fixed what the sentence says."`
+	Refusal  *refusal `json:"refusal,omitempty" jsonschema:"Set when AWS refused a step and the user fixes it in their own AWS account."`
+}
+
+type phase struct {
+	Name   string `json:"name"`
+	Status string `json:"status" jsonschema:"pending, running, waiting, succeeded or failed."`
+}
+
+type runView struct {
+	ID         uint   `json:"id"`
+	Kind       string `json:"kind" jsonschema:"create, upgrade_pds, upgrade_kubernetes, rebuild or delete."`
+	Status     string `json:"status"`
+	StartedAt  string `json:"startedAt,omitempty"`
+	FinishedAt string `json:"finishedAt,omitempty"`
+}
+
+// provisioning is how the latest run of a managed environment stands.
+type provisioning struct {
+	Run      runView     `json:"run"`
+	Progress string      `json:"progress" jsonschema:"in_progress, waiting, failed, blocked or ready. waiting is a run paused until the AWS account answers again. blocked is a delete that left something behind."`
+	Message  string      `json:"message,omitempty"`
+	Phases   []phase     `json:"phases" jsonschema:"The four phases of a create, in order."`
+	Failure  *runFailure `json:"failure,omitempty"`
+}
+
+// runStarted is what the API answers when it accepts a run.
+type runStarted struct {
+	Run          runView      `json:"run"`
+	Provisioning provisioning `json:"provisioning"`
 }
 
 type environments struct {
@@ -25,11 +118,48 @@ func environmentReads() []tool {
 		define(spec{
 			name:  "list_environments",
 			title: "List environments",
-			description: "List the environments connected to this control plane, with their status and when each was last seen. " +
+			description: "List the environments of this control plane, with their status and when each was last seen. " +
+				"origin says whether the user connected the Kubernetes cluster or PDS built the environment, and state says how it is. " +
+				"A managed environment also carries provisioning: the four phases of its latest run and, when a run failed, what to do, " +
+				"and lifecycle: a newer PDS version, the maintenance window, changes made outside PDS and whether its infrastructure is lost. " +
 				"Use an environment name when creating a database.",
 			annotations: readOnly(),
 		}, listEnvironments),
+
+		define(spec{
+			name:  "get_environment",
+			title: "Get an environment",
+			description: "Get one environment with its status, origin and state. " +
+				"A managed environment carries provisioning: its latest run, the four phases (Creating network and Kubernetes cluster, Connecting to the environment, Installing PDS, Finishing) and, when a run failed, " +
+				"failure with the sentence to tell the user and the one action. When AWS refused a step, failure.refusal says which quota or permission and where. " +
+				"lifecycle names a pending PDS version, its deferral, the maintenance window, templateSummary when the infrastructure template is old, kubernetesUpgradeAvailable, " +
+				"drift by resource (changed outside PDS: report it, PDS never overwrites it) and lostReason when the Kubernetes cluster is gone. " +
+				"When state is lost, ask the user whether to rebuild it with rebuild_environment. Removing it from PDS only is for the user in the console.",
+			annotations: readOnly(),
+		}, getEnvironment),
 	}
+}
+
+type environmentInput struct {
+	Name string `json:"name" jsonschema:"The environment name, copied exactly from list_environments."`
+}
+
+func getEnvironment(ctx context.Context, c *call, in environmentInput) (environment, error) {
+	path, err := environmentPath(in.Name)
+	if err != nil {
+		return environment{}, err
+	}
+	var out environment
+	if err := c.get(ctx, "/api/environments/"+path, nil, &out); err != nil {
+		return environment{}, hintedAs(err, msgEnvironmentNotFoundHint)
+	}
+	out.tidy()
+
+	return out, nil
+}
+
+func waitForEnvironmentCall(name string) *nextCall {
+	return &nextCall{Tool: "wait_for_environment", Arguments: map[string]any{"name": name}}
 }
 
 func listEnvironments(ctx context.Context, c *call, _ noInput) (environments, error) {
@@ -38,6 +168,9 @@ func listEnvironments(ctx context.Context, c *call, _ noInput) (environments, er
 		return environments{}, err
 	}
 	out.Environments = orEmpty(out.Environments)
+	for i := range out.Environments {
+		out.Environments[i].tidy()
+	}
 
 	return out, nil
 }

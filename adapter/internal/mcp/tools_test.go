@@ -17,9 +17,9 @@ import (
 )
 
 var readTools = []string{
-	"get_activity", "get_database", "get_database_alerts", "get_database_history", "get_database_usage",
-	"get_environment_history", "get_metrics", "get_support_ticket", "list_activity", "list_alerts",
-	"list_backups", "list_databases", "list_environments", "list_support_tickets",
+	"get_activity", "get_cloud_connection", "get_database", "get_database_alerts", "get_database_history", "get_database_usage",
+	"get_environment", "get_environment_history", "get_metrics", "get_support_ticket", "list_activity", "list_alerts",
+	"list_backups", "list_cloud_connections", "list_databases", "list_environments", "list_support_tickets",
 	"wait_for_backup", "wait_for_database", "wait_for_environment",
 }
 
@@ -37,6 +37,9 @@ func catalogAPI() *fakeAPI {
 		"/api/alerts":                       ok(alertsFixture()),
 		"/api/environments/spoke-a/history": ok(environmentHistoryFixture()),
 		"/api/environments":                 ok(environmentsFixture()),
+		"/api/environments/orders":          ok(managedEnvironmentFixture()),
+		"/api/cloud-connections":            ok(map[string]any{"cloudConnections": []any{cloudConnectionFixture()}}),
+		"/api/cloud-connections/" + cloudID: ok(cloudConnectionFixture()),
 		"/api/support/tickets":              ok(ticketListFixture()),
 		"/api/support/tickets/" + ticket:    ok(ticketFixture()),
 	})
@@ -96,7 +99,11 @@ func TestToolInputsAreTheCatalogsInputs(t *testing.T) {
 		"get_support_ticket":   {[]string{"number"}, []string{"number"}},
 		"wait_for_database":    {[]string{"expect", "id", "timeoutSeconds", "until"}, []string{"id", "until"}},
 		"wait_for_backup":      {[]string{"backupId", "id", "timeoutSeconds"}, []string{"id", "backupId"}},
-		"wait_for_environment": {[]string{"name", "timeoutSeconds"}, []string{"name"}},
+		"wait_for_environment": {[]string{"name", "timeoutSeconds", "until"}, []string{"name"}},
+
+		"list_cloud_connections": {nil, nil},
+		"get_cloud_connection":   {[]string{"id"}, []string{"id"}},
+		"get_environment":        {[]string{"name"}, []string{"name"}},
 
 		"get_database_history":    {[]string{"cursor", "id", "kind", "limit", "since", "until"}, []string{"id"}},
 		"get_database_usage":      {[]string{"id", "limit", "since", "until"}, []string{"id"}},
@@ -118,6 +125,14 @@ func TestToolInputsAreTheCatalogsInputs(t *testing.T) {
 		"create_support_ticket":   {[]string{"databaseId", "description", "subject"}, []string{"subject", "description"}},
 		"reply_to_support_ticket": {[]string{"body", "number"}, []string{"number", "body"}},
 		"create_environment":      {[]string{"name"}, []string{"name"}},
+
+		"start_cloud_connection":     {nil, nil},
+		"create_managed_environment": {[]string{"connectionId", "name", "region"}, []string{"connectionId", "name", "region"}},
+		"retry_environment_run":      {[]string{"environment"}, []string{"environment"}},
+		"upgrade_environment":        {[]string{"environment", "kind", "kubernetesVersion"}, []string{"environment", "kind"}},
+		"delete_managed_environment": {[]string{"confirm", "environment"}, []string{"environment"}},
+		"rebuild_environment":        {[]string{"environment"}, []string{"environment"}},
+		"remove_cloud_connection":    {[]string{"confirm", "id"}, []string{"id"}},
 	}
 
 	for _, tool := range listedTools(t, connectAt(t, catalogAPI(), auth.AccessChangeDelete)) {
@@ -243,7 +258,15 @@ func TestEachReadResultMatchesTheCatalogShape(t *testing.T) {
 			"databaseId":"spoke-a/pds.orders-dev","window":"1h","start":"2026-09-08T11:00:00Z","end":"2026-09-08T12:00:00Z","stepSeconds":60,"pending":false,
 			"metrics":[{"kind":"cpu","unit":"cores","pending":false,"current":0.4,"min":0.1,"max":0.9,"average":0.5,"trend":"steady","points":[{"t":"2026-09-08T11:00:00Z","v":0.4}]}]}`},
 		{"list_activity", nil, `{"entries":[{"id":"7","at":"2026-09-08T12:00:00Z","actor":"ann","requestId":"mcp-0a1b2c3d","action":"database.create","databaseId":"spoke-a/pds.orders-dev","target":"orders-dev","outcome":"succeeded","detail":"mysql, dev","resourceKind":"database","resourceName":"orders-dev","client":"mcp","agent":"Claude Code"}],"cursor":"7","truncated":false}`},
-		{"list_environments", nil, `{"environments":[{"name":"spoke-a","namespace":"pds","status":"connected","lastSeen":"2026-09-08T12:00:00Z"}]}`},
+		{"list_environments", nil, `{"environments":[{"name":"spoke-a","namespace":"pds","status":"connected","lastSeen":"2026-09-08T12:00:00Z","origin":"connected","state":"ready"}]}`},
+		{"get_environment", map[string]any{"name": "orders"}, `{"name":"orders","status":"pending","origin":"managed","state":"failed","connectionId":"0123456789ab","region":"eu-west-1",
+			"provisioning":{"run":{"id":5,"kind":"create","status":"running","startedAt":"2026-09-08T12:00:00Z"},"progress":"failed","phases":[
+			{"name":"Creating network and Kubernetes cluster","status":"failed"},{"name":"Connecting to the environment","status":"pending"},
+			{"name":"Installing PDS","status":"pending"},{"name":"Finishing","status":"pending"}],
+			"failure":{"sentence":"AWS account 123456789012 has reached the quota for Elastic IP addresses per Region in eu-west-1. Raise the quota in AWS, then retry.","action":"retry",
+			"refusal":{"reason":"quota","service":"Amazon EC2","item":"Elastic IP addresses per Region","region":"eu-west-1"}}}}`},
+		{"list_cloud_connections", nil, `{"cloudConnections":[{"id":"0123456789ab","accountId":"123456789012","alias":"acme","state":"ready","allowedRegions":["eu-west-1"],"environments":[]}]}`},
+		{"get_cloud_connection", map[string]any{"id": cloudID}, `{"id":"0123456789ab","accountId":"123456789012","alias":"acme","state":"ready","allowedRegions":["eu-west-1"],"environments":[]}`},
 		{"list_support_tickets", nil, `{"tickets":[{"number":"CS0061234","state":"Open","priority":"3","subject":"Orders is slow","openedAt":"2026-09-08T12:00:00Z","updatedAt":"2026-09-08T12:30:00Z"}],"portalUrl":"https://support.example/portal"}`},
 		{"get_database_history", map[string]any{"id": orders}, `{"entries":[
 			{"id":"00000000000000000009","at":"2026-09-08T13:05:00Z","kind":"backup","outcome":"succeeded","objectId":"orders-dev-1","sizeBytes":1048576,"durationMs":300000},

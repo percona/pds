@@ -2898,6 +2898,27 @@ platform_installed() {
   helm_release_deployed "${PLATFORM_RELEASE:-}"
 }
 
+# refuse_managed_environment stops a join or an update on a Kubernetes cluster
+# whose pds release a HelmRelease owns, which is how a managed environment
+# keeps it. The control plane commits that release to Git and applies it, so a
+# release made from here would fight it. Nothing is changed when it refuses.
+refuse_managed_environment() {
+  local owner
+  owner="$(kubectl get helmreleases.helm.toolkit.fluxcd.io --all-namespaces -o json 2>/dev/null |
+    python3 -c '
+import json, sys
+want = sys.argv[1]
+for item in (json.load(sys.stdin) or {}).get("items") or []:
+    meta = item.get("metadata") or {}
+    if ((item.get("spec") or {}).get("releaseName") or meta.get("name")) == want:
+        print(meta.get("name", ""))
+        break' "$PLATFORM_RELEASE" 2>/dev/null || true)"
+  [[ -n "$owner" ]] || return 0
+  echo "this Kubernetes cluster is a managed environment: the control plane keeps the ${PLATFORM_RELEASE} release up to date, so it cannot be joined or updated from here." >&2
+  echo "Use the console to upgrade or delete it. Nothing was changed." >&2
+  exit 1
+}
+
 # resolve_platform_release finds the release this cluster already runs.
 #
 # A spoke installed before the product was renamed to PDS has it under the old
@@ -3983,6 +4004,7 @@ update_preflight() {
   if [[ -z "$IMAGE" ]]; then
     update_refuse "the control plane did not provide an agent image. Contact Percona support."
   fi
+  refuse_managed_environment
   update_find_release
   # A release that failed an earlier update can be upgraded again. One that is
   # still pending cannot, and Helm says so only after the token is spent.
@@ -4246,6 +4268,7 @@ phase "waiting for a Ready worker node"
 wait_for_ready_nodes
 
 resolve_image
+refuse_managed_environment
 resolve_platform_release
 if [[ "$LOCAL" != 1 ]]; then
   phase "preparing backup storage"

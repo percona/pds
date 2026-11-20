@@ -40,6 +40,7 @@ var pendingCalls = map[string]bool{
 	"pending":       true,
 	"pendingLogs":   true,
 	"pendingAlerts": true,
+	"refuse":        true,
 }
 
 var pendingFuncs = map[string]bool{

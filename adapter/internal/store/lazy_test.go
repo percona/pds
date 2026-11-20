@@ -190,3 +190,24 @@ func TestLazyForOnANilLazyStaysNil(t *testing.T) {
 
 	assert.Nil(t, base.For(2))
 }
+
+func TestLazyNamesTheIDOfAManagedEnvironmentAndNoOtherKind(t *testing.T) {
+	url := liveURL(t)
+	team := nextTeam(t, openLive(t))
+	starter := store.Start(t.Context(), store.Options{URL: url})
+	t.Cleanup(func() { _ = starter.Close() })
+	lazy := store.NewLazy(starter, team, nil)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	_, err := lazy.Wait(ctx)
+	require.NoError(t, err)
+	_, err = starter.ManagedEnvironments().Create(ctx, managedInput(team, "k3j9x2m4p1q7", "orders"), time.Now())
+	require.NoError(t, err)
+
+	id, err := lazy.ManagedEnvironmentID(ctx, "orders")
+	require.NoError(t, err)
+	assert.Equal(t, "k3j9x2m4p1q7", id)
+
+	_, err = lazy.ManagedEnvironmentID(ctx, "connected-one")
+	assert.ErrorIs(t, err, store.ErrManagedEnvironmentUnknown)
+}

@@ -89,7 +89,7 @@ test("connect says where it builds and what it costs before printing the command
 }) => {
   await stubEnvironments(page);
 
-  await page.goto("environments/new");
+  await page.goto("environments/new?mode=command");
 
   await page.getByLabel("Environment name").fill("spoke-new");
   // The hub mints its own operator token, so there is nothing here to paste.
@@ -125,7 +125,7 @@ test("the delete guide gives one command that asks for the region and deletes by
 test("an invalid environment name says why", async ({ page }) => {
   await stubEnvironments(page);
 
-  await page.goto("environments/new");
+  await page.goto("environments/new?mode=command");
 
   await page.getByLabel("Environment name").fill("Spoke New");
   await page.getByLabel("Environment name").blur();
@@ -165,7 +165,7 @@ for (const theme of ["light", "dark"] as const) {
     await expect(page.locator("html")).toHaveClass(theme === "dark" ? /dark/ : /^(?!.*dark).*$/);
     await page.screenshot({ path: `test-results/environments-${theme}.png`, fullPage: true });
 
-    await page.goto("environments/new");
+    await page.goto("environments/new?mode=command");
     await expect(
       page.getByRole("heading", { level: 1, name: "Create an environment" }),
     ).toBeVisible();

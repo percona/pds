@@ -16,6 +16,7 @@ to run it; [deployment](deployment.md) has the install procedures.
 | PMM                       | Connected environment, optional                       | Metrics (VictoriaMetrics behind PMM). A pmm-client sidecar on each database does the scraping. The agent reads PMM. The hub charts the readings the agent posts and does not call PMM itself.           |
 | Flux                      | Connected environments only                           | Applies the Instance manifests the hub commits to Git.                                                                                                                                                  |
 | GitHub                    | Hub only                                              | One private repository per connected environment holds its desired state.                                                                                                                               |
+| AWS                       | Customer accounts, optional                           | A cloud connection lets the hub assume a role in a customer's account and build a managed environment there. See [Cloud connections](#cloud-connections).                                              |
 | ServiceNow                | Percona SaaS, optional                                | Support cases through the Percona Connector API.                                                                                                                                                        |
 | AI providers              | External, optional                                    | Chat, with a key the customer pastes in the UI.                                                                                                                                                         |
 
@@ -27,7 +28,7 @@ An unknown value stops the process. Do not set the variable through
 
 | Role         | Serves                                 | Calls                                                                             | Database                                                                            |
 | ------------ | -------------------------------------- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| HTTP (empty) | The `/api` surface and `/api/internal` | Git, ServiceNow, AI providers                                                     | Required. Login lives there, so the process refuses to start without `DATABASE_URL` |
+| HTTP (empty) | The `/api` surface and `/api/internal` | Git, ServiceNow, AI providers, AWS and the Kubernetes API of a managed environment                                                     | Required. Login lives there, so the process refuses to start without `DATABASE_URL` |
 | `agent`      | `/healthz`, `/readyz`                  | The hub heartbeat, and the local OpenEverest and PMM for the work the hub returns | None                                                                                |
 
 ## Topologies
@@ -42,11 +43,11 @@ releases use namespace `everest-system`, and the hub's PostgreSQL operator
 and the connected environment's database platform install the same cluster-wide
 CRDs. A hub has no OpenEverest. A connected environment has no UI.
 
-| Shape                 | Installed by                             | Runs                                                                                    | Does not run                  |
-| --------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------- |
-| Hub                   | Chart defaults                           | UI, adapter, adapter database                                                           | OpenEverest, PMM, MinIO, Flux |
-| Connected environment | The Connect command, `values-spoke.yaml` | OpenEverest, providers, PMM, adapter as `agent`, Flux                                   | UI, adapter database          |
-| Hub on one host       | `deploy/compose`                         | UI and adapter in Docker Compose, PostgreSQL outside                                     | Kubernetes access of any kind |
+| Shape                 | Installed by                             | Runs                                                  | Does not run                  |
+| --------------------- | ---------------------------------------- | ----------------------------------------------------- | ----------------------------- |
+| Hub                   | Chart defaults                           | UI, adapter, adapter database                         | OpenEverest, PMM, MinIO, Flux |
+| Connected environment | The Connect command, or a managed environment's create run, with `values-spoke.yaml` | OpenEverest, providers, PMM, adapter as `agent`, Flux | UI, adapter database          |
+| Hub on one host       | `deploy/compose`                         | UI and adapter in Docker Compose, PostgreSQL outside  | Kubernetes access, except to the managed environments it builds |
 
 Namespaces do not follow the shape:
 
@@ -84,12 +85,13 @@ cookie is host only, so the UI and `/api` must share one origin.
 `adapter/internal/api/server.go` is the route table. The groups, by what a
 request has to carry:
 
-| Credential                             | Routes                                                                                                                                                                                                                                                                   |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| None                                   | `/healthz`, `/readyz`, the `/api/auth` routes (login, logout, session, invite, and the identity provider), the Connect script `/api/internal/connect/bootstrap.sh` and `pds.tgz`, and the authorization server for agents: `/.well-known/oauth-authorization-server`, `/oauth/token`, `/oauth/register` and `/oauth/revoke`. `GET /oauth/authorize` needs a session cookie and sends a person without one to sign in |
-| Join token                             | `GET /api/internal/connect/enrollment`                                                                                                                                                                                                                                   |
-| Join or agent token                    | `POST /api/internal/environments/{name}/join`, `POST /api/internal/environments/{name}/heartbeat`                                                                                                                                                                        |
-| Session cookie, or the operator bearer | Everything else under `/api`: features, environments and Connect, alerts, connections, assistant, chat, activity, support, and databases with their credential, scale, backups, schedule, restore, metrics, history, usage and alerts                                    |
+| Credential                             | Routes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| None                                   | `/healthz`, `/readyz`, the `/api/auth` routes (login, logout, session, invite, and the identity provider), the Connect script `/api/internal/connect/bootstrap.sh` and `pds.tgz`, the cloud connection template and script `/api/internal/cloud-connection/template.yaml` and `connect.sh`, and the authorization server for agents: `/.well-known/oauth-authorization-server`, `/oauth/token`, `/oauth/register` and `/oauth/revoke`. `GET /oauth/authorize` needs a session cookie and sends a person without one to sign in |
+| Join token                             | `GET /api/internal/connect/enrollment`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Connect token                          | `POST /api/internal/cloud-connection/enroll`, `/events` and `/verify`                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Join or agent token                    | `POST /api/internal/environments/{name}/join`, `POST /api/internal/environments/{name}/heartbeat`                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Session cookie, or the operator bearer | Everything else under `/api`: features, environments and Connect, alerts, connections, assistant, chat, activity, support, and databases with their credential, scale, backups, schedule, restore, metrics, history, usage and alerts                                                                                                                                                                                                                                                                                          |
 
 `Authorization: Bearer $HUB_OPERATOR_TOKEN` stands in for a session wherever
 that token is set, which is always on a hub: it is minted at start when none is
@@ -207,13 +209,13 @@ document fetch), `internal/service/oauth.go` (the flow), `internal/store/oauth.g
 `internal/api/oauth.go` (the HTTP). The issuer is `HUB_OAUTH_ISSUER`, or `HUB_PUBLIC_URL` when that is not set, and must be an origin; the request's Host is
 never used. Everything the flow builds from the issuer (both metadata documents, the `WWW-Authenticate` pointer, the `/mcp` Origin check) reads the one value. Without a usable issuer, or with the `mcp` flag off, the endpoints answer 404.
 
-| Endpoint                                      | What it does                                                                                                                                                                                       |
-| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /.well-known/oauth-authorization-server` | The RFC 8414 metadata: S256 only, public clients (`none`), `client_id_metadata_document_supported`, `authorization_response_iss_parameter_supported`, and the scopes                              |
+| Endpoint                                      | What it does                                                                                                                                                                                                                   |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /.well-known/oauth-authorization-server` | The RFC 8414 metadata: S256 only, public clients (`none`), `client_id_metadata_document_supported`, `authorization_response_iss_parameter_supported`, and the scopes                                                           |
 | `POST /oauth/register`                        | Dynamic Client Registration for public clients: 1 to 10 redirect URIs, https or http on a loopback address. 10 an hour per address and 300 an hour in all. A registration that never produced a session is dropped after a day |
-| `GET /oauth/authorize`                        | Checks the request and parks it for consent                                                                                                                                                        |
-| `POST /oauth/token`                           | `authorization_code` and `refresh_token`, form encoded, 60 a minute per address with the revocation endpoint                                                                                         |
-| `POST /oauth/revoke`                          | RFC 7009: any token of a session ends the whole session. An unknown token is a 200                                                                                                                  |
+| `GET /oauth/authorize`                        | Checks the request and parks it for consent                                                                                                                                                                                    |
+| `POST /oauth/token`                           | `authorization_code` and `refresh_token`, form encoded, 60 a minute per address with the revocation endpoint                                                                                                                   |
+| `POST /oauth/revoke`                          | RFC 7009: any token of a session ends the whole session. An unknown token is a 200                                                                                                                                             |
 
 Authorize without a console session answers 302 to `/app/login?next=<this request>`, after
 checking only the shape of the parameters, and fetches nothing. With a session it identifies the
@@ -225,11 +227,11 @@ the address to send the browser to.
 
 The page calls three routes, mounted under `/api` outside the session guard and answering 404 while the `mcp` flag is off:
 
-| Route                           | What it does                                                                                                                                                  |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Route                             | What it does                                                                                                                                                                                                                                                                   |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `POST /api/agent-consent/lookup`  | Describes the parked request: the client's name, host, kind and redirect host, whether the redirect is a loopback address, and for each Organization the person belongs to its Teams (a User's own, or all for an admin), the highest tier offered and which boxes are offered |
-| `POST /api/agent-consent/approve` | Takes `request`, `organizationId`, `teamId`, `access`, `passwords` and `sqlWrites`, checks them and answers `{redirectUrl}` with the code |
-| `POST /api/agent-consent/deny`    | Answers `{redirectUrl}` with `error=access_denied`, `state` and `iss`                                                                                         |
+| `POST /api/agent-consent/approve` | Takes `request`, `organizationId`, `teamId`, `access`, `passwords` and `sqlWrites`, checks them and answers `{redirectUrl}` with the code                                                                                                                                      |
+| `POST /api/agent-consent/deny`    | Answers `{redirectUrl}` with `error=access_denied`, `state` and `iss`                                                                                                                                                                                                          |
 
 They read the console session cookie only: the operator token and in process callers are not a person at a browser, so they get 401.
 Each is a POST with a JSON body, refused when the browser marks it as coming from another site (`Sec-Fetch-Site` other than
@@ -242,10 +244,10 @@ The AI agents page lists and revokes the agents signed in, through two more cons
 beside the consent calls, answering 404 while the `mcp` flag is off, and reading the console session
 cookie only (the operator token, an agent's own token and in process callers get 401):
 
-| Route                           | What it does                                                                                                                                                                                                                      |
-| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/agent-sessions`       | `{sessions}`: the live agent sessions of the caller, or of every member of their Organization for an admin. Each has `id`, `name`, `host`, `kind`, `member`, `mine`, `team`, `access`, `passwords`, `sqlWrites`, `createdAt`, `lastUsedAt` and `expiresAt`. It never carries a token, a hash, a client id or the resource |
-| `DELETE /api/agent-sessions/{id}` | Ends the session and all its tokens (`DeleteAgentSession`), so the agent's next `/mcp` call is 401, and records `agent.revoke` in Activity for the caller. Answers 204. A session of another member, of another Organization, one already revoked and an id that never existed all answer 404 |
+| Route                             | What it does                                                                                                                                                                                                                                                                                                              |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/agent-sessions`         | `{sessions}`: the live agent sessions of the caller, or of every member of their Organization for an admin. Each has `id`, `name`, `host`, `kind`, `member`, `mine`, `team`, `access`, `passwords`, `sqlWrites`, `createdAt`, `lastUsedAt` and `expiresAt`. It never carries a token, a hash, a client id or the resource |
+| `DELETE /api/agent-sessions/{id}` | Ends the session and all its tokens (`DeleteAgentSession`), so the agent's next `/mcp` call is 401, and records `agent.revoke` in Activity for the caller. Answers 204. A session of another member, of another Organization, one already revoked and an id that never existed all answer 404                             |
 
 The DELETE is refused when the browser marks it as coming from another site (`Sec-Fetch-Site` other than
 `same-origin`). A session that is expired or idle past `SESSION_IDLE_TIMEOUT` is not listed. `POST /oauth/revoke` is the
@@ -281,6 +283,7 @@ with. A User lists their own Team's activity, and an admin lists every Team's.
 
 Each surface sits behind a feature flag from `adapter.features`. A surface that
 is off answers 501, and `GET /api/features` tells the UI which ones to hide.
+
 ### `/mcp`: the registry served to signed in agents
 
 `internal/api/mcp.go` serves the registry over streamable HTTP with the Go MCP SDK, on the same
@@ -454,8 +457,7 @@ approval.
 - **The answer.** `POST /api/chat/approvals/{id}` takes `{decision, name}`,
   where `decision` is `approve` or `reject`, and answers 204. `Chat.Decide`
   reaches only the person the model was asking: another person, an id that is
-  not open, one already answered or expired, and a stream that has closed are all
-  404. What runs is the arguments the call was made with and the card showed,
+  not open, one already answered or expired, and a stream that has closed are all 404. What runs is the arguments the call was made with and the card showed,
   never anything from the answer. A delete is approved only with the database's
   name typed exactly, a wrong name is a 400 and leaves the approval open, and
   the typed name is what the call sends as `confirm`, so the model's own
@@ -529,7 +531,9 @@ POST            /v1/clusters/main/namespaces/{ns}/backups
 ## Hub and connected environments
 
 A connected environment dials the hub. The hub never dials it, so an environment behind
-NAT or a firewall joins with outbound HTTPS only.
+NAT or a firewall joins with outbound HTTPS only. A managed environment is the one
+exception: the control plane reaches its Kubernetes API while it creates or deletes
+it (see [Managed environments](#managed-environments)), and it then runs this same loop.
 
 1. **Join.** The hub mints a single use join token and prints a command. The
    command downloads `bootstrap.sh` from the hub, which enrolls with the token
@@ -670,6 +674,273 @@ between reads. Filtering to an environment with no current reading says so
 rather than reporting no match, and a `?environment=` naming an environment the
 report does not hold is ignored. The page is read only: it has no silence or
 acknowledge control.
+
+### Cloud connections
+
+A cloud connection is a Team's standing permission to act in one AWS account.
+The customer grants it once with `connect.sh`, and the control plane then
+assumes a role there for each step. It keeps no credential: no key, token or
+kubeconfig is stored, only what makes the next assume possible.
+
+- **Template.** `internal/api/cloud_connection_template.yaml` is embedded and
+  served as is, the same text to everybody, and `cfn-lint` checks it in CI. Under
+  the path `/pds/<connection id>/` it creates the role the control plane assumes,
+  the CloudFormation service role, the EKS cluster role, the node role, the
+  EBS CSI Pod Identity role and the agent's Pod Identity role (with the
+  permissions boundary of the backup user it makes), with ARNs that follow from the connection id. The
+  stack reports `TemplateVersion`, and the control plane requires at least
+  `service.CloudTemplateVersion`: a lower one is Out of date. This version is the
+  bootstrap template's own, apart from the revision in
+  [compatibility.md](compatibility.md).
+- **Trust.** The role trusts the role or user in `HUB_CLOUD_PRINCIPAL_ARN`, never
+  an account root, and only with the connection's `sts:ExternalId` and an
+  `sts:SourceIdentity` that matches `pds-user-*` or `pds-job-*`, so the customer's
+  CloudTrail says whether a person or a job acted. AWS wants six literal
+  characters before a wildcard and no colon in the value, hence the form. Without
+  that setting enroll, events and verify answer 501.
+- **Permissions.** The control plane role passes the service role to
+  CloudFormation, drives `pds-*` stacks only through it and never changes its own
+  stack, and reads. `DeleteStack`, `ExecuteChangeSet` and `DeleteChangeSet` carry
+  no role, so only the calls that start a stack require the service role by name.
+  The writes that build an environment live on the service role, split over three
+  managed policies to stay under the 6144 character limit of one: tag-scoped on
+  `percona.com/pds`, tagging allowed only at creation (`ec2:CreateTags` with
+  `ec2:CreateAction`), service-linked roles named by `iam:AWSServiceName`, and
+  every regional write limited to the connection's regions. A fourth managed
+  policy sits on the control plane role, because the sweep and the backup bucket
+  are the control plane's own calls: it deletes volumes, snapshots, network
+  interfaces, security groups, load balancers and target groups only when they
+  carry `percona.com/pds`, or the `elbv2.k8s.aws/cluster` or `aws:eks:cluster-name`
+  tag of a `pds-*` cluster, and manages S3 by a `pds-*` bucket name and
+  `s3:ResourceAccount`, objects and versions included. The tag
+  `kubernetes.io/cluster/<name>` names its cluster in the key, which an IAM
+  condition cannot match, so a resource that carries only that tag is reported
+  as blocking the delete and left. Access entries are named by their `pds-*`
+  cluster, since they are made without tags. A test lists every AWS call the
+  `internal/client/aws` package declares and fails when the control plane role
+  is not granted its action. Rerunning the connect command updates the stack, which
+  is how a connection reaches a newer template version: one below
+  `service.CloudTemplateVersion` stays Out of date until the command is rerun.
+- **Connect script.** It reads the account and enrolls with a connect token,
+  creates or updates the stack with `aws cloudformation deploy`, turns on
+  termination protection, and asks the control plane to check. A step is reported
+  when it starts and ends, and a running step sends a heartbeat every 30 seconds
+  that only moves the connection's last signal. What the script reports is a hint:
+  only the control plane's check makes a connection Ready.
+- **Token.** `ccn_` and a random value, stored as its SHA-256, valid one hour and
+  reusable until it expires or its connection first reaches Ready. It serves one
+  Team and, once it has enrolled an account, that connection only. The regions are
+  chosen when it is made, and `--regions` may only narrow them.
+- **Same account, same connection.** Enrollment matches on (Team, account id), so
+  a rerun gets the same connection id, secret and stack name, and another Team
+  with the same account gets its own connection.
+- **Check.** It assumes the role, confirms the account with `GetCallerIdentity`,
+  needs `DescribeStacks` to say `CREATE_COMPLETE`, `UPDATE_COMPLETE` or
+  `UPDATE_ROLLBACK_COMPLETE` with a template version at or above the minimum, and
+  `iam:GetRole` on the four other roles. It never simulates policies, since
+  simulation misses service control policies. A connection that has never been
+  Ready stays Pending while it fails the check, and one that was Ready becomes
+  Unreachable. It runs from the script, on Verify and every hour.
+
+### Managed environments
+
+A managed environment is an environment the control plane builds in a customer's
+AWS account through a cloud connection, and then runs the same agent as a
+connected one. `internal/managed` holds the create run, and
+`internal/client/aws` the calls it makes, each through a role assumed afresh.
+
+- **Request.** `managed.Creator` refuses before anything exists in AWS: no
+  declared outgoing addresses (`HUB_MANAGED_OUTGOING_CIDRS`), no published chart
+  or agent image, a name that is not an environment name, a region the
+  connection does not allow, or a connection whose check fails. Then it records
+  the environment (`hub_managed_environments`: its id, connection and region)
+  and queues the create run. The id is the value of the `percona.com/pds` tag
+  on everything the environment owns, and part of its stack name
+  `pds-env-<id>` and its Kubernetes cluster name `pds-<id>`.
+- **Stack.** `internal/managed/templates/network_cluster.yaml` is embedded and
+  run only through the connection's service role: a dedicated VPC, an EKS
+  cluster with `authenticationMode` API, no creator admin rights and a private
+  endpoint, a node group, and the Pod Identity agent, CoreDNS and EBS CSI
+  add-ons, and a Pod Identity association that gives the release's agent its role.
+  Every resource carries `percona.com/pds`, and the EBS CSI driver tags
+  its volumes. The stack records `managed.TemplateRevision` as a tag and an
+  output, and a test holds it equal to `managedTemplate.revision` in
+  `charts/pds/compatibility.yaml`.
+- **Steps.** `assume-role`, `create-stack`, `wait-stack`, `create-bucket`,
+  `open-access`, `install-flux`, `write-release`, `join`, `close-access` and
+  `wait-heartbeat`, shown under four phases: Creating network and Kubernetes cluster, Connecting
+  to the environment, Installing PDS, and Finishing. A failed stack is reported
+  once and left in place. The next attempt deletes it and makes it again,
+  because CloudFormation cannot resume a failed create. An environment that
+  never reports fails in Finishing, and Retry only waits again. `assume-role`
+  also runs a best-effort preflight: a Region the account has not enabled, or a
+  Service Quotas limit below what one environment takes (the VPC, internet
+  gateway, NAT gateway and Elastic IP quotas, and 12 vCPUs for the default node
+  group), fails the step before anything exists. A read that fails, or a role
+  that cannot be assumed, never blocks the run, and a limit is compared with what
+  one environment needs and not with what the account already uses.
+- **Worker.** Every replica claims create runs under a lease and sweeps once a
+  minute: it closes the Access window of a run that is no longer live, resumes
+  runs paused on a connection that works again, and prunes old runs.
+  `HUB_PROVISION_LEASE_TTL`, `HUB_PROVISION_MAX_ATTEMPTS` and
+  `HUB_PROVISION_WINDOW_MAX_AGE` tune them. A request that arrives before the
+  database has connected is refused as not connected.
+- **Access window.** The public endpoint is open only to the declared outgoing
+  addresses, with the control plane's access entry, while a step needs the
+  Kubernetes API. A step that needs it opens the window again, since a run that
+  waited for a lease holds none. The window is recorded before it opens, so the
+  sweeper closes it when the worker dies, and `close-access` closes it after
+  reading the real endpoint. Without declared addresses a create is refused.
+- **Release.** The agent runs as one `pds` HelmRelease committed under
+  `clusters/<environment>/platform/pds`, from the published chart, applied by a
+  ServiceAccount made when Flux is installed. `managed.RenderRelease` builds it
+  from `charts/pds/values-spoke.yaml` (`internal/managed/values-spoke.yaml` is a
+  copy a test keeps equal) plus the hub address, the environment name, the agent
+  image and the name of the Secret that holds the agent's token, which never
+  reaches Git. `go test ./internal/managed -run Release -update` rewrites the
+  golden after an intended change. The hub's Git write credentials act as
+  cluster-admin on every managed environment it serves. The join script refuses
+  an environment whose `pds` release a HelmRelease owns.
+- **Flux and the join.** `install-flux` applies the Flux manifest of
+  `managed.FluxVersion` only when its SHA-256 matches `managed.PinnedFluxDigests`
+  (the digest the join script pins too, held equal by a test), waits for the
+  source, kustomize and Helm controllers, and creates the accounts that apply
+  what Git holds: `pds-helm` with cluster-admin for the release, and narrower
+  ones for each Kustomization. `join` drops every credential an earlier attempt
+  minted and mints one agent credential, so a rerun leaves one live token, then
+  writes it into the Secret the release names, writes the read-only clone key,
+  and points Flux at the environment's repository with three Kustomizations:
+  `instances` (`clusters/<environment>/instances`, into the databases'
+  namespace), `platform` (monitoring, from `platform/pmm`) and `pds` (the
+  release, from `platform/pds`). The control plane reaches the Kubernetes API
+  with a one-minute EKS token over the Access window and keeps no kubeconfig.
+  A rerun of `join` after the agent is running changes the token in the Secret,
+  which a running agent reads only when its Pod restarts.
+- **Upgrades, drift and loss.** `managed.Lifecycle` looks after an environment
+  once it has reported. Each environment has a weekly maintenance window of two
+  hours (default Sunday 02:00 UTC, set with a day, an hour and a time zone). In
+  it the control plane starts an `upgrade_pds` run for the newest version
+  `support.managedUpgrade.from` lists for the version the environment runs
+  (`internal/managed/compatibility.yaml` is a copy of the pin a test keeps
+  equal). The run commits the version to Git and waits for the agent's heartbeat
+  to report the release (`Heartbeat.Release`); no AWS role is involved. The agent
+  reads the HelmRelease named by `AGENT_RELEASE_REF` (the rendered release sets
+  `flux-system/pds`, and the chart grants `get` on that one name) and reports the
+  newest Helm revision marked deployed, the version the last upgrade tried, and
+  ready, upgrading or rolled back. A read that fails sends nothing. The
+  release rolls back after one attempt, the run fails with "Upgrade failed,
+  rolled back to <version>", Git is put back, and the version is skipped until a
+  User upgrades early or a newer version is listed. A User may defer a version
+  once, for 1 to 30 days. `upgrade_kubernetes` updates the stack through a change
+  set to the template this release embeds, moving the cluster and its node group
+  one minor version when asked. Starting it reads the change set first and
+  refuses one that would replace the VPC or the EKS cluster, or the node group
+  without a confirm; the run checks again before executing. The hourly check
+  runs CloudFormation drift detection and reads the cluster and node groups
+  with the SDK, since drift detection skips them, and records what changed
+  outside PDS without changing it. A stale heartbeat plus a cluster EKS reports
+  missing marks the environment Lost; only a User's `rebuild` run builds it
+  again, from the stacks and at the chart version it ran.
+- **Backups.** `create-bucket` makes `pds-<account>-<environment id>` in the
+  environment's Region, blocks public access and tags it with
+  `percona.com/pds`. It is outside the stack because a stack cannot delete a
+  bucket that holds objects. The release registers the bucket as the BackupStorage
+  `s3`, reading its access key from the Secret `pds-s3`. The agent makes that
+  key, in the environment: it runs as the connection's agent role (EKS Pod
+  Identity, through the stack's `AgentPodIdentity` for the release's
+  ServiceAccount) and creates the IAM user `pds-<environment id>-backup` under
+  `/pds/<connection id>/`, with the connection's `backup-boundary` as its
+  permissions boundary, an inline policy for its own bucket and the ownership
+  tag, then an access key, and writes the key straight to `pds-s3` (the
+  chart's `adapter.backupKey`, read as `AGENT_BACKUP_*`; `agent.BackupKey`
+  reconciles it on every beat). The key never reaches the control plane, Git, a
+  stack output or a log, and the role the control plane assumes has no IAM user
+  permissions. The agent role may only touch the user named after the cluster its
+  session is tagged with, and the boundary caps the user at buckets named
+  `pds-<account>-*`. A key that is in the Secret is left alone, because IAM
+  cannot show a secret again; one lost to a failed write is made again. The
+  S3 BackupStorage job retries until the Secret exists.
+- **Refusals.** AWS errors become a step that fails with a typed reason (quota,
+  permission, region not enabled) and one sentence that names the AWS account
+  and the Kubernetes cluster and shows no raw AWS text. Throttling and role
+  propagation retry by themselves, a failed `AssumeRole` pauses the run, and
+  anything else gets a generic sentence that points to Percona support.
+- **Delete.** `managed.DeleteKind` is a provisioning run allowed from any state,
+  including a failed create; it preempts a run in progress. Steps run inside-out:
+  `remove-databases` suspends the three Kustomizations, deletes every Instance
+  and waits; `remove-services` deletes LoadBalancer Services and volume claims;
+  `remove-backup-user` creates the ConfigMap `pds-backup-user` in the release's
+  namespace, which makes the agent delete the IAM user, its keys and policy and
+  answer on the same object (the control plane's role cannot, and the user lives
+  in the customer's account). It waits `Settings.BackupUserWait` (5 minutes),
+  and an agent that never answers does not hold the delete: the step records
+  which user stays in the account. `close-access`; `delete-stack`; `sweep`; `delete-bucket`; `forget`. If the
+  Kubernetes API stays silent for `Settings.APIWait` the step records that in
+  its note and the delete goes on to the cluster, so it never continues
+  silently. Nothing is stored about what exists: every attempt calls
+  `aws.Infra.Owned`, which searches the Resource Groups Tagging API for the
+  `percona.com/pds` tag and for the tags a cluster's controllers leave
+  (`kubernetes.io/cluster/<name>`, `elbv2.k8s.aws/cluster`,
+  `aws:eks:cluster-name`). `Release` deletes load balancers, target groups,
+  network interfaces, volumes, snapshots and security groups, and never any other
+  kind. A stack that ends `DELETE_FAILED` sweeps and is deleted again. After
+  `Settings.DeleteWait` (30 minutes) a step fails with a sentence that starts
+  `Delete blocked.` and names the resources; Retry re-runs only that step. There
+  is no force delete. `delete-bucket` empties every version and deletes the
+  bucket only when it carries the environment's tag. The role the customer owns is
+  left, and so is the backup IAM user when the agent could not remove it, which a
+  Delete from PDS only or an unreachable cluster also leaves.
+  `managed.Remover.RemoveFromPDS` is the one thing a person can do while the
+  connection is Unreachable or the environment is Lost: it cancels the environment's runs, records a delete run
+  as succeeded with a message that says AWS was not touched, removes the
+  environment from its Team's hub and forgets its record. `Remains` names what stays.
+  Volumes are tagged by the EBS CSI addon (`extraVolumeTags` in the stack) and by
+  the `taggedStorageClass` the rendered release turns on. Load balancers are tagged
+  by the `service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags`
+  annotation (`percona.com/pds=<environment id>`) that the hub writes on the
+  Service of every database it exposes and on monitoring's, reading the id from
+  the environment's record (`hub.Options.OwnershipID`). A create that cannot read
+  it is refused rather than written untagged. Connected environments carry none.
+- **Limits.** These are not built:
+  - Support access. The roles a window binds are installed by the join script,
+    which a managed environment does not run, so a window on a managed
+    environment gives an engineer nothing defined.
+  - Git credentials per environment. One set of write credentials serves every
+    environment, and because the release applies as cluster-admin they act as
+    cluster-admin on every managed environment the control plane serves.
+  - Mirrors and air-gapped control planes. A managed environment pulls the chart
+    from `oci://ghcr.io/percona/charts`, the agent image from `HUB_AGENT_IMAGE` and the Flux
+    manifest from GitHub, so a control plane that cannot reach them cannot create one.
+
+### Cloud connection and managed environment routes
+
+All of them are in the session group above and sit behind the `clusters` surface. A write needs a
+signed-in member (any User of the Team, or an Organization admin acting in a Team), the same right
+as minting a join token. Another Team's id answers 404.
+
+| Route                                                                                     | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/cloud-connections`, `GET /api/cloud-connections/{id}`                           | The Team's AWS accounts: state (`pending`, `ready`, `unreachable`, `out_of_date`), allowed regions, the managed environments that run through each and, on one account, the steps the connect command reported. Never the ExternalId or a role                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `POST /api/cloud-connection-tokens {allowedRegions?}`                                     | Mints a one hour connect token and answers once with its public id, expiry and the connect command. Nothing reads the command back                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `GET /api/cloud-connection-tokens/{id}`                                                   | Where one of the Team's connect commands stands: `state` `waiting` (nobody ran it), `connecting` (it named its account, and `connectionId` appears), `ended` (cancelled or its connection is Ready) or `expired`, with the expiry and the allowed regions. The console polls it by the id the mint answered with, then reads the connection. It never returns the token or the command, and another Team's id answers 404                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `DELETE /api/cloud-connection-tokens/{id}`                                                | Cancels the command, and drops the connection it started if that was never Ready                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `POST /api/cloud-connections {accountId, allowedRegions?}`                                | The path with no script: a Pending connection for a typed account, answering the ExternalId and stack name once. Console only                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `DELETE /api/cloud-connections/{id} {confirm}`                                            | Forgets an AWS account in PDS after its typed name (the alias, or the account number). Refused while managed environments run through it. Nothing is deleted in the account                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `POST /api/cloud-connections/{id}/environments {name, region}`                            | `managed.Creator.Create`. Answers 202 with the environment already `creating` and its run                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `GET /api/environments`, `GET /api/environments/{name}`                                   | An ordinary environment, with `origin` (`connected` or `managed`), `state` (`creating`, `ready`, `degraded`, `failed`, `deleting`, `lost`) and, for a managed one, `provisioning`: the latest run, its four phases, and for a failed run `failure` with the safe sentence, one action and the typed refusal, and `lifecycle`: `chartVersion`, `pendingChartVersion`, `skippedChartVersion`, `deferred` and `deferredUntil`, `maintenanceWindow` (`day` 0 for Sunday, `hour`, `timeZone`, `nextStart`, `nextEnd`), `templateRevision`, `latestTemplateRevision`, `templateOutOfDate` and `templateSummary`, `kubernetesVersion` and `kubernetesUpgradeAvailable` (older than the version a new environment starts on), `drift` (resource and detail), and `lost` with `lostReason` "Infrastructure missing". It reads no AWS: the hourly check wrote the revision, the version, the drift and the loss |
+| `POST /api/environments/{name}/runs {kind, kubernetesVersion?, confirmNodeGroupReplace?}` | `upgrade_pds`, `upgrade_kubernetes` or `rebuild`, started through `managed.Lifecycle`. Without `kubernetesVersion`, `upgrade_kubernetes` updates only the stack's template. A run already unfinished, nothing newer, a lost or unready environment, an update that would replace the network or the Kubernetes cluster, and a node group replacement without the confirm each answer 409 with one sentence. Run, retry, delete and the routes below that change an environment leave an activity entry                                                                                                                                                                                                                                                                                                                                                                                                |
+| `POST /api/environments/{name}/upgrades/defer {days}`                                     | Puts the pending chart version off for 1 to 30 days, once per version. Answers the `lifecycle` object                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `PUT /api/environments/{name}/maintenance-window {day, hour, timeZone}`                   | Sets the weekly window (two hours) the control plane commits a chart upgrade in. Answers the `lifecycle` object                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `POST /api/environments/{name}/updates/preview {kubernetesVersion?}`                      | Makes the change set an update would run and removes it: `replacesNetwork`, `replacesNodeGroup` and the `changes`. It changes nothing in the account                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `GET /api/environments/{name}/remains`                                                    | What Remove from PDS only leaves in AWS: `accountId`, `region`, `stackName`, `eksName`, `bucket`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `POST /api/environments/{name}/runs/{runId}/retry`                                        | Re-runs the failed step of the latest run. An older run id is 404                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `DELETE /api/environments/{name} {confirm, scope?}`                                       | On a managed environment: the typed name starts a delete run (202). `scope: "pds_only"` forgets it in PDS only, refused unless the AWS account is Unreachable or the environment is Lost. An environment the user connected still disconnects with no body                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+
+A run's failure is one object on every surface. When AWS refused a step it carries `refusal`
+(`reason` of `quota`, `permission` or `region_not_enabled`, the service, the quota or action, and the
+region); `provision.StepError` holds it, the step record keeps it, and the sentence names the AWS
+account and the Kubernetes cluster and never AWS's own text. A kind the control plane has no steps for
+answers 501.
 
 ### Support access windows
 
@@ -925,7 +1196,7 @@ alerting provisioning directory through `extraVolumes` and `extraVolumeMounts`,
 and writes the chart's own `pmm-config` volume back because setting
 `extraVolumes` replaces the chart's list. A digest of the rules sits on the pod
 as an annotation, so a changed rule rolls PMM. The `hub-platform` Role on the
-connected environment grants ConfigMaps for this. Only the join script can install
+connected environment grants ConfigMaps for this. Only a join (the join script, or a managed environment's `join` step) can install
 that Role: the hub holds no kubeconfig, and the platform Kustomization runs as
 `hub-platform`, which cannot edit Roles. The agent tells the hub it ran a
 join of this release with the `alertRules` mark on its heartbeat. The hub
@@ -951,8 +1222,10 @@ database that Kustomization owned.
 
 - **Desired state lives in Git, actions do not.** Replaying a backup or a
   restore from Git would repeat it. Only what should converge is committed.
-- **No inbound path into a customer cluster.** The hub holds no kubeconfig and
-  no route to a customer network.
+- **No standing inbound path into a customer cluster.** The hub holds no
+  kubeconfig and no route to a customer network. A managed environment's
+  Kubernetes API is open to the declared addresses only while a step needs it, and
+  the control plane signs in with a one-minute token.
 - **Plain Flux controllers.** Flux is Apache-2.0 like this repository. The
   Flux Operator is AGPL-3.0, so it is not shipped into customer clusters.
 - **Fleet tools that were considered and rejected:**
@@ -973,7 +1246,7 @@ database that Kustomization owned.
 | PMM          | The agent calls `GET /prometheus/api/v1/query_range` and posts the newest reading on its heartbeat. The hub charts those samples and does not call PMM. | A Grafana service account token in Secret `<release>-pmm` on the connected environment, minted by the chart's hook. PMM 3 refuses anonymous queries. When `PMM_URL` is unset the agent logs that metrics will answer pending.                                                                                                                                                                                                                                                                                                                                                                                                 |
 | ServiceNow   | `/api/pellc/percona_connector/*` and the attachment API, plus the Table API to list and reply to cases                                                  | `x-sn-apikey` header and a `client_token` body field. Without both, support answers 501 and the UI hides it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | GitHub       | `api.github.com`: create a repository, commit through the Contents API, add a deploy key                                                                | Hub only. A GitHub App installation: the adapter signs a JWT with the App key (`HUB_GITHUB_APP_ID`, `HUB_GITHUB_APP_INSTALLATION_ID`, `HUB_GITHUB_APP_PRIVATE_KEY` or `HUB_GITHUB_APP_PRIVATE_KEY_FILE`), exchanges it for an installation token that lasts an hour, and renews it before it expires or after a 401. `HUB_GITHUB_TOKEN` is the fallback for the lab and local Compose, and setting both is a start error. Enrolled environments never receive either: their image pull Secret comes from `HUB_REGISTRY_TOKEN`, a separate credential, because an installation token would expire under a running environment. |
-| AI providers | Anthropic and Cursor                                                                                                                                    | The key an Organization pastes in the chat panel, sealed in the adapter database. There is no operator key in the chart or the environment.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| AI providers | Anthropic and Cursor                                                                                                                                    | The key an Organization pastes in the chat panel, sealed in the adapter database. There is no operator key in the chart or the environment.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 ### Chat requests to Anthropic
 
@@ -1036,16 +1309,16 @@ registry and sends the results back as the next run. The tool list in the agent'
 `POST /api/chat` with `Accept: text/event-stream` answers a turn as events. A client that does not ask for a stream
 gets the whole reply as one JSON object, whichever provider answers.
 
-| Event          | Data                                    | Meaning                                                                                      |
-| -------------- | --------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `conversation` | `{conversationId}`                      | The message is saved and the conversation exists. Sent first.                                |
-| `progress`     | `{label}`                               | A step of the turn, such as `Thinking` or `Reading status`.                                  |
-| `text`         | `{delta}`                               | The next piece of the answer's text. The pieces, in order, add up to the reply's text.       |
-| `reply`        | `{conversationId, text, actions}`       | The end of the turn: the whole saved text and the buttons. It replaces whatever `text` showed. |
-| `error`        | `{code, message}`                       | The turn failed after the stream opened. The pieces shown so far are not saved.              |
-| `pending`      | `{}`                                    | A retried first message that is still being answered: wait on its conversation.              |
-| `approval`     | `{id, tool, title, database, destructive, lines, expiresAt}` | A change the model asked for. The turn waits until it is answered, rejected or expired. |
-| `approval_end` | `{id, outcome}`                         | How an approval ended: `approved`, `rejected`, `expired` or `cancelled`.                     |
+| Event          | Data                                                         | Meaning                                                                                        |
+| -------------- | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `conversation` | `{conversationId}`                                           | The message is saved and the conversation exists. Sent first.                                  |
+| `progress`     | `{label}`                                                    | A step of the turn, such as `Thinking` or `Reading status`.                                    |
+| `text`         | `{delta}`                                                    | The next piece of the answer's text. The pieces, in order, add up to the reply's text.         |
+| `reply`        | `{conversationId, text, actions}`                            | The end of the turn: the whole saved text and the buttons. It replaces whatever `text` showed. |
+| `error`        | `{code, message}`                                            | The turn failed after the stream opened. The pieces shown so far are not saved.                |
+| `pending`      | `{}`                                                         | A retried first message that is still being answered: wait on its conversation.                |
+| `approval`     | `{id, tool, title, database, destructive, lines, expiresAt}` | A change the model asked for. The turn waits until it is answered, rejected or expired.        |
+| `approval_end` | `{id, outcome}`                                              | How an approval ended: `approved`, `rejected`, `expired` or `cancelled`.                       |
 
 A comment line, `: ping`, keeps the connection alive while the model works or an approval waits.
 
@@ -1069,8 +1342,9 @@ reply is in the conversation when the person comes back.
 
 The HTTP adapter's PostgreSQL is not a customer database. It holds bcrypt
 password hashes, sessions, organizations, environment inventory, join token hashes,
-deploy keys, the work queue, support access windows, database history, usage
-samples and saved chats.
+cloud connections with their connect token hashes and reported steps, deploy keys,
+the work queue, support access windows, database history, usage
+samples, saved chats and provisioning runs.
 Connection secrets are sealed with AES-GCM under `STATE_ENCRYPTION_KEY`, 32
 bytes kept in a Secret and never in the database. Losing that key makes every
 sealed row unreadable. `STATE_ENCRYPTION_KEYS_RETIRED` lets a rotated key
@@ -1090,3 +1364,17 @@ still open old rows.
 - A release serves one named Organization, or every Organization when
   `adapter.state.organization` is `*`. Each row is keyed by Team, and connections by Organization, and a request for
   another Organization's id answers 404.
+- A provisioning run is the record of one create, upgrade, rebuild or delete of a
+  managed environment: ordered steps with a status, an attempt count and a safe
+  failure sentence, written before a step starts and after it ends. It never holds
+  a credential, token, key or kubeconfig. `internal/provision` works them. Any
+  replica claims a run with `FOR UPDATE SKIP LOCKED` and a renewable lease, and a
+  restart is a lapsed lease. A partial unique index allows one unfinished run per
+  environment, a failed one included. Delete is the exception: it cancels an idle
+  run and flags a running one, whose worker stops at the next lease renewal. A
+  step is the unit of retry: transient errors back off (five attempts over about
+  ten minutes by default), then the run is Failed and Retry re-runs from the
+  failed step. A lost cloud connection pauses the run without spending an attempt.
+  The sweeper closes any Access window whose run is finished, paused, failed,
+  cancelled or without a live lease, or whose window is older than `HUB_PROVISION_WINDOW_MAX_AGE` (30 minutes by default),
+  and drops the runs of an environment 90 days after its delete finished.

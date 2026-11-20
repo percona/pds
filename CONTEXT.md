@@ -21,8 +21,32 @@ A user who sees every team in their organization, creates teams and invites user
 _Avoid_: Admin (unqualified), owner, operator
 
 **Environment**:
-A Kubernetes cluster connected to the control plane through the Connect command, where a team's databases run. Code, the API and storage call it a cluster.
+A Kubernetes cluster connected to the control plane, where a team's databases run. Code, the API and storage call it a cluster.
 _Avoid_: cluster in customer copy, spoke, connected cluster
+
+**Connected environment**:
+An environment the customer brings up themselves by running the Connect command with their own cloud credentials.
+_Avoid_: Spoke, self-managed environment
+
+**Managed environment**:
+An environment the control plane brings up and keeps up in the customer's own cloud, acting through a cloud connection. It ends up running the same things as a connected environment.
+_Avoid_: BYOC cluster, hosted environment, push cluster
+
+**Cloud connection**:
+A team's standing permission for the control plane to act in one of the customer's cloud accounts, which the customer grants and can revoke. A managed environment is created through one.
+_Avoid_: Cloud account, account, credentials, integration
+
+**Provisioning run**:
+One ordered attempt to create, upgrade, rebuild or delete a managed environment, kept as steps the control plane can resume.
+_Avoid_: Job, task, workflow
+
+**AWS refusal**:
+A step of a provisioning run that AWS declines to carry out because of a quota, a missing permission or a region that is not enabled. It is not a revoked cloud connection: the control plane could still act in the account.
+_Avoid_: AWS error, failure, revocation
+
+**Access window**:
+The short period in which a managed environment's Kubernetes API is reachable from the control plane's declared outgoing IP addresses. It opens for a provisioning run and closes when the run ends.
+_Avoid_: Setup window, install window
 
 **Cluster agent**:
 The `pds-agent` process on an environment that reports to the hub and carries out its jobs.

@@ -2,7 +2,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppRoutes } from "@/routes";
-import { createMockDatabase, renderWithProviders } from "@/test/utils";
+import { createMockDatabase, createMockLifecycle, renderWithProviders } from "@/test/utils";
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -595,5 +595,159 @@ describe("Updating an environment", () => {
       "/environments/prod/update?team=alpha",
       "/environments/prod/update?team=beta",
     ]);
+  });
+});
+
+describe("EnvironmentsPage managed environments", () => {
+  const now = new Date().toISOString();
+  const account = (state: string) => ({
+    id: "cc_1",
+    accountId: "123456789012",
+    alias: "payments",
+    state,
+    allowedRegions: ["eu-west-1"],
+    stackRegion: "eu-west-1",
+    templateVersion: 1,
+    latestTemplateVersion: 1,
+    createdAt: now,
+    environments: ["orders"],
+  });
+  const managedRow = (extra: Record<string, unknown> = {}) => ({
+    name: "orders",
+    status: "pending",
+    origin: "managed",
+    state: "creating",
+    connectionId: "cc_1",
+    region: "eu-west-1",
+    provisioning: {
+      run: { id: 3, kind: "create", status: "running", startedAt: now },
+      progress: "in_progress",
+      phases: [
+        { name: "Creating network and Kubernetes cluster", status: "running" },
+        { name: "Connecting to the environment", status: "pending" },
+        { name: "Installing PDS", status: "pending" },
+        { name: "Finishing", status: "pending" },
+      ],
+    },
+    ...extra,
+  });
+
+  function stubManaged(row: Record<string, unknown>, accountState = "ready") {
+    stubApi((path) => {
+      if (path === "/api/environments") {
+        return { hub: true, environments: [row] };
+      }
+      if (path === "/api/cloud-connections") {
+        return { cloudConnections: [account(accountState)] };
+      }
+
+      return {};
+    });
+  }
+
+  it("shows a managed environment with its account, state and four phases", async () => {
+    stubManaged(managedRow());
+
+    renderWithProviders(<AppRoutes />, { route: "/environments" });
+
+    expect(await screen.findByText("Creating")).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        (_, element) =>
+          element?.tagName === "P" &&
+          element.textContent === "Created by PDS in AWS account payments in eu-west-1",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Creating network and Kubernetes cluster")).toBeInTheDocument();
+    expect(screen.getByText("Finishing")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Disconnect" })).not.toBeInTheDocument();
+    // There is nothing to monitor or open support on until the environment exists.
+    expect(screen.queryByRole("button", { name: "Monitoring" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Support access" })).not.toBeInTheDocument();
+  });
+
+  it("offers Retry after a failure and links an unreachable account to its fix", async () => {
+    stubManaged(
+      managedRow({
+        state: "failed",
+        provisioning: {
+          run: { id: 3, kind: "create", status: "failed", startedAt: now },
+          progress: "failed",
+          phases: [{ name: "Creating network and Kubernetes cluster", status: "failed" }],
+          failure: {
+            sentence: "AWS could not create the network. Retry the step.",
+            action: "retry",
+          },
+        },
+      }),
+      "unreachable",
+    );
+
+    renderWithProviders(<AppRoutes />, { route: "/environments" });
+
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Fix the AWS account" })).toHaveAttribute(
+      "href",
+      "/environments?fix=cc_1#aws-accounts",
+    );
+  });
+
+  it("lists the AWS accounts under the environments", async () => {
+    stubManaged(
+      managedRow({ state: "ready", provisioning: undefined, status: "connected", lastSeen: now }),
+    );
+
+    renderWithProviders(<AppRoutes />, { route: "/environments" });
+
+    expect(await screen.findByRole("heading", { name: "AWS accounts" })).toBeInTheDocument();
+  });
+
+  it("notes an available update and drift on the row and opens the lifecycle panel", async () => {
+    stubManaged(
+      managedRow({
+        state: "ready",
+        provisioning: undefined,
+        status: "connected",
+        lastSeen: now,
+        lifecycle: createMockLifecycle({
+          pendingChartVersion: "1.5.0",
+          drift: [{ resource: "NodeGroup", detail: "Instance type changed" }],
+        }),
+      }),
+    );
+    const user = userEvent.setup();
+
+    renderWithProviders(<AppRoutes />, { route: "/environments" });
+
+    expect(await screen.findByText("Update available")).toBeInTheDocument();
+    expect(screen.getByText("Changed outside PDS")).toBeInTheDocument();
+    expect(screen.queryByText("PDS 1.5.0 is available.")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Updates" }));
+
+    expect(await screen.findByText("PDS 1.5.0 is available.")).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Changed outside PDS" })).toHaveTextContent(
+      "NodeGroup",
+    );
+  });
+
+  it("shows a lost environment with Rebuild or Remove from PDS only, and no Delete", async () => {
+    stubManaged(
+      managedRow({
+        state: "lost",
+        provisioning: undefined,
+        status: "pending",
+        lifecycle: createMockLifecycle({ lost: true, lostReason: "Infrastructure missing" }),
+      }),
+    );
+
+    renderWithProviders(<AppRoutes />, { route: "/environments" });
+
+    expect(await screen.findByText("Lost")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Infrastructure missing");
+    expect(screen.getByRole("button", { name: "Rebuild" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove from PDS only" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Monitoring" })).not.toBeInTheDocument();
   });
 });

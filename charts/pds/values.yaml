@@ -24,6 +24,19 @@ commonLabels: {}
 # -- Extra annotations added to every rendered object.
 commonAnnotations: {}
 
+# A StorageClass that tags every EBS volume it provisions, so a managed
+# environment's delete finds the volumes by tag. Off unless the environment
+# runs on EKS and the control plane built it.
+taggedStorageClass:
+  # -- Install the StorageClass. It becomes the default class: when the cluster
+  # already has one, the newest default wins.
+  enabled: false
+  # -- Name of the StorageClass.
+  name: pds-gp3
+  # -- Tags added to each volume, key to value. They become the class's
+  # tagSpecification_N parameters in key order.
+  tags: {}
+
 rbac:
   # -- Create the adapter Roles and ClusterRoles (connection Secrets, events,
   # and metrics). Without them the adapter cannot read or write those objects.
@@ -133,6 +146,23 @@ adapter:
   # has.
   features:
     activity: true
+  # -- Agent role: the IAM user this agent makes for the environment's backups.
+  # It makes the user and its access key with the credentials of its own
+  # role (EKS Pod Identity), and writes the key to the stack.s3.existingSecret
+  # Secret, so the key never leaves the environment. A managed environment
+  # sets it. Empty means the key comes some other way, as on a connected
+  # environment. Setting it needs stack.s3 to be enabled.
+  backupKey:
+    # -- IAM user name. The agent's role may only touch the user named after
+    # its own cluster.
+    user: ""
+    # -- IAM path of the user, such as /pds/<connection>/.
+    path: ""
+    # -- Permissions boundary the user is made with, which caps what it can
+    # ever be granted.
+    boundaryArn: ""
+    # -- Value of the percona.com/pds tag on the user.
+    tag: ""
   # -- Hub and agent settings. These were free-form extraEnv, which meant the
   # documented way to set them was kubectl set env, and the next helm upgrade
   # rendered the Deployment without them.
@@ -203,6 +233,20 @@ adapter:
     # Enrollment sends it as agentImage. A private GHCR package is pulled with
     # registryTokenKey, not the org git token.
     agentImage: ""
+    # -- Published pds chart version a managed environment installs, such as
+    # 0.1.0. Empty refuses to create a managed environment.
+    managedChartVersion: ""
+    # -- Addresses this control plane's AWS calls come from, as CIDRs such as
+    # 203.0.113.7/32. They are the only addresses a managed environment's
+    # Kubernetes API is open to while the control plane works in it. Empty
+    # refuses to create a managed environment.
+    managedOutgoingCIDRs: []
+    # -- Agent role: the Flux HelmRelease whose state this agent reports on its
+    # heartbeat, as namespace/name such as flux-system/pds. A managed
+    # environment sets it, because the control plane keeps its pds release in
+    # Git. Empty reports none, as a connected environment does. Setting it
+    # also lets the agent read that one HelmRelease.
+    releaseRef: ""
     # -- Agent role: the hub origin this spoke dials.
     url: ""
     # -- Agent role: the name the hub lists this environment under.

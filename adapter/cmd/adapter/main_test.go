@@ -565,3 +565,10 @@ func TestSurfaceFlagsLeaveTheOperatorsSetAsItWas(t *testing.T) {
 	assert.Equal(t, map[string]bool{features.Chat: false}, operator)
 	assert.Equal(t, false, got[features.Chat])
 }
+
+func TestCloudConnectionsStayOffWithoutAControlPlanePrincipal(t *testing.T) {
+	svc, err := newCloudConnections(t.Context(), config.Config{}, nil, slog.Default())
+
+	require.NoError(t, err)
+	assert.Nil(t, svc)
+}

@@ -169,6 +169,9 @@ type environmentTargets struct {
 	BackupStorage string
 	// MonitoringConfig is the MonitoringConfig the pmm-client reports to.
 	MonitoringConfig string
+	// OwnershipID tags the database's load balancer, and is empty for an
+	// environment the control plane did not build.
+	OwnershipID string
 }
 
 // buildInstanceYAML writes one Instance manifest. A restoreFrom names the
@@ -215,7 +218,7 @@ func buildInstanceYAML(
 	}
 	if exposure.External {
 		proxy := spec.Components[everest.ComponentProxy]
-		proxy.Service = oe.LoadBalancerServiceFor(exposure)
+		proxy.Service = oe.LoadBalancerServiceFor(exposure, targets.OwnershipID)
 		spec.Components[everest.ComponentProxy] = proxy
 	}
 	if restoreFrom != "" {
