@@ -46,7 +46,7 @@ describe("ConnectEnvironmentPage", () => {
       }),
     );
 
-    renderWithProviders(<AppRoutes />, { route: "/environments/new" });
+    renderWithProviders(<AppRoutes />, { route: "/environments/new?mode=command" });
 
     expect(
       await screen.findByRole("heading", { level: 1, name: "Create an environment" }),
@@ -90,7 +90,7 @@ describe("ConnectEnvironmentPage", () => {
       }),
     );
 
-    renderWithProviders(<AppRoutes />, { route: "/environments/new?name=test" });
+    renderWithProviders(<AppRoutes />, { route: "/environments/new?mode=command&name=test" });
 
     expect(await screen.findByLabelText("Environment name")).toHaveValue("test");
     expect(await screen.findByText(/test is already connected/)).toBeInTheDocument();
@@ -154,7 +154,7 @@ describe("ConnectEnvironmentPage", () => {
       }),
     );
 
-    renderWithProviders(<AppRoutes />, { route: "/environments/new" });
+    renderWithProviders(<AppRoutes />, { route: "/environments/new?mode=command" });
 
     expect(
       await screen.findByRole("heading", { level: 1, name: "Create an environment" }),
@@ -233,7 +233,7 @@ describe("ConnectEnvironmentPage", () => {
       }),
     );
 
-    renderWithProviders(<AppRoutes />, { route: "/environments/new" });
+    renderWithProviders(<AppRoutes />, { route: "/environments/new?mode=command" });
 
     expect(
       await screen.findByRole("heading", { level: 1, name: "Create an environment" }),
@@ -284,7 +284,7 @@ describe("ConnectEnvironmentPage", () => {
       }),
     );
 
-    renderWithProviders(<AppRoutes />, { route: "/environments/new" });
+    renderWithProviders(<AppRoutes />, { route: "/environments/new?mode=command" });
 
     await userEvent.type(await screen.findByLabelText("Environment name"), "eks-testing");
 
@@ -328,7 +328,7 @@ describe("ConnectEnvironmentPage", () => {
       }),
     );
 
-    renderWithProviders(<AppRoutes />, { route: "/environments/new" });
+    renderWithProviders(<AppRoutes />, { route: "/environments/new?mode=command" });
 
     expect(
       await screen.findByText(
@@ -368,7 +368,7 @@ describe("ConnectEnvironmentPage", () => {
       }),
     );
 
-    renderWithProviders(<AppRoutes />, { route: "/environments/new" });
+    renderWithProviders(<AppRoutes />, { route: "/environments/new?mode=command" });
 
     expect(
       await screen.findByText(
@@ -435,7 +435,7 @@ describe("ConnectEnvironmentPage", () => {
       }),
     );
 
-    renderWithProviders(<AppRoutes />, { route: "/environments/new" });
+    renderWithProviders(<AppRoutes />, { route: "/environments/new?mode=command" });
 
     // The org backing this control plane is ours. The page offers the command
     // without saying where the configuration for that environment is kept.

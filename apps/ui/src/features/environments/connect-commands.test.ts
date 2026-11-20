@@ -3,6 +3,7 @@ import {
   deleteEnvironmentCommand,
   joinEnvironmentCommand,
   isEnvironmentName,
+  reservedEnvironmentName,
 } from "./connect-commands";
 
 describe("isEnvironmentName", () => {
@@ -64,5 +65,15 @@ describe("deleteEnvironmentCommand", () => {
     expect(
       deleteEnvironmentCommand({ hubUrl: "https://hub.example/; curl evil", name: "prod-east" }),
     ).toContain("'https://hub.example/; curl evil/api/internal/connect/bootstrap.sh'");
+  });
+});
+
+describe("reservedEnvironmentName", () => {
+  it.each(["connect", "new", "aws-accounts"])("keeps %s for the router", (name) => {
+    expect(reservedEnvironmentName(name)).toBe(true);
+  });
+
+  it("lets an ordinary name through", () => {
+    expect(reservedEnvironmentName("orders")).toBe(false);
   });
 });

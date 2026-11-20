@@ -85,6 +85,7 @@ describe("parentPage", () => {
     ["/environments/spoke-a/update", "/environments", "environments"],
     ["/environments/spoke-a/new", "/environments/spoke-a", "databases"],
     ["/environments/new", "/environments", "environments"],
+    ["/environments/aws-accounts/new", "/environments", "environments"],
     ["/activity/42", "/activity", "activity"],
     ["/support/CS0001", "/support", "support"],
   ])("sends %s to %s", (pathname, to, label) => {
@@ -116,6 +117,7 @@ describe("BackLink", () => {
     ["/environments/spoke-a/new", "Back to databases", "/environments/spoke-a"],
     ["/environments/spoke-a", "Back to environments", "/environments"],
     ["/environments/new", "Back to environments", "/environments"],
+    ["/environments/aws-accounts/new", "Back to environments", "/environments"],
     ["/environments/spoke-a/aws-cleanup", "Back to environments", "/environments"],
     ["/environments/spoke-a/openeverest", "Back to environments", "/environments"],
     ["/environments/spoke-a/update", "Back to environments", "/environments"],

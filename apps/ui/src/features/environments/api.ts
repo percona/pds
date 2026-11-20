@@ -4,8 +4,10 @@ import type {
   EnvironmentSnapshot,
   ConnectGuide,
   JoinToken,
+  ManagedCreated,
   Monitoring,
   MonitoringSettings,
+  RunStarted,
 } from "./types";
 
 /** Reads the connected environments. A failed read is an error. */
@@ -93,5 +95,47 @@ export function putMonitoring(
     method: "PUT",
     body: settings,
     signal,
+  });
+}
+
+/**
+ * Asks PDS to build an environment in one of the Team's AWS accounts. The answer
+ * comes before anything exists in AWS: the environment is already creating and
+ * its run is queued.
+ */
+export function createManagedEnvironment(
+  connectionId: string,
+  input: { name: string; region: string },
+  team?: string,
+  signal?: AbortSignal,
+): Promise<ManagedCreated> {
+  return requestJson<ManagedCreated>(
+    `/api/cloud-connections/${encodeURIComponent(connectionId)}/environments`,
+    { method: "POST", body: input, team, signal },
+  );
+}
+
+/** Re-runs the step of a run that failed. Nothing before it runs again. */
+export function retryRun(name: string, runId: number, signal?: AbortSignal): Promise<RunStarted> {
+  return requestJson<RunStarted>(
+    `/api/environments/${encodeURIComponent(name)}/runs/${runId}/retry`,
+    { method: "POST", signal },
+  );
+}
+
+/**
+ * Deletes a managed environment and what PDS built for it in AWS, after its
+ * typed name. With `pdsOnly` it forgets the environment in PDS and leaves
+ * everything in the AWS account, which is for an account PDS can no longer reach.
+ */
+export async function deleteManagedEnvironment(
+  name: string,
+  confirm: string,
+  options: { pdsOnly?: boolean; signal?: AbortSignal } = {},
+): Promise<void> {
+  await requestJson<RunStarted | undefined>(`/api/environments/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+    body: options.pdsOnly ? { confirm, scope: "pds_only" } : { confirm },
+    signal: options.signal,
   });
 }

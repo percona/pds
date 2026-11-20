@@ -1,4 +1,7 @@
 export {
+  createManagedEnvironment,
+  deleteManagedEnvironment,
+  retryRun,
   disconnectEnvironment,
   fetchEnvironments,
   fetchEnvironmentSnapshot,
@@ -15,6 +18,9 @@ export {
 } from "./environment-context";
 export { UnreachableBanner, UnreachableEmpty } from "./unreachable";
 export { CommandBlock } from "./command-block";
+export { ProvisioningPanel } from "./provisioning-panel";
+export { ManagedDeleteDialog } from "./managed-delete-dialog";
+export { managedPill } from "./managed-state";
 export { MonitoringPanel } from "./monitoring-panel";
 export { awsCleanupPath, joinDatabaseNamespace, joinOwnershipTag } from "./aws-cleanup";
 export { GuideRefusal, Mono, Step, useGuideTarget } from "./guide";
@@ -30,6 +36,9 @@ export type {
   Environment,
   EnvironmentSnapshot,
   EnvironmentStatus,
+  EnvironmentState,
+  Provisioning,
+  ManagedCreated,
   ConnectGuide,
   JoinToken,
   Monitoring,
