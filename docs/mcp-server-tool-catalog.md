@@ -131,14 +131,14 @@ Annotations are hints. The real gates are the registration rules and access tier
 - **API:** `GET /api/environments`.
 - **Input:** none.
 - **Result:** `{environments: [{name, namespace?, status, lastSeen?, origin, state, connectionId?, region?, provisioning?}]}`. `origin` is `connected` or `managed`; `state` is `creating`, `ready`, `degraded`, `failed` or `deleting`. `provisioning` is set on a managed environment, see "Managed environments" below.
-- **Description:** List the environments of this control plane, with their status and when each was last seen. origin says whether the user connected the Kubernetes cluster or PDS built the environment, and state says how it is. A managed environment also carries provisioning: the four phases of its latest run and, when a run failed, what to do. Use an environment name when creating a database.
+- **Description:** List the environments of this control plane, with their status and when each was last seen. origin says whether the user connected the Kubernetes cluster or PDS built the environment, and state says how it is. A managed environment also carries provisioning: the four phases of its latest run and, when a run failed, what to do, and lifecycle: a newer PDS version, the maintenance window, changes made outside PDS and whether its infrastructure is lost. Use an environment name when creating a database.
 
 ### get_environment
 
 - **API:** `GET /api/environments/{name}`.
 - **Input:** `name`.
-- **Result:** one entry of `list_environments`.
-- **Description:** Get one environment with its status, origin and state. A managed environment carries provisioning: its latest run, the four phases (Creating network and Kubernetes cluster, Connecting to the environment, Installing PDS, Finishing) and, when a run failed, failure with the sentence to tell the user and the one action. When AWS refused a step, failure.refusal says which quota or permission and where.
+- **Result:** one entry of `list_environments`. A managed environment has `state` `ready`, `degraded`, `creating`, `failed`, `deleting` or `lost`, `provisioning` and `lifecycle`. `lifecycle` holds `chartVersion`, `pendingChartVersion`, `skippedChartVersion`, `deferred` and `deferredUntil`, `maintenanceWindow` (`day` 0 for Sunday to 6, `hour`, `timeZone`, `nextStart`, `nextEnd`), `templateRevision`, `latestTemplateRevision`, `templateOutOfDate` and `templateSummary` (for example "Template revision 1, latest 2"), `kubernetesVersion` and `kubernetesUpgradeAvailable`, `drift` (each `resource` and `detail`, from the hourly check), `driftCheckedAt`, and `lost`, `lostReason` ("Infrastructure missing") and `lostAt`. The Kubernetes version and template revision are what the hourly check last read, and are empty or zero until it has.
+- **Description:** Get one environment with its status, origin and state. A managed environment carries provisioning: its latest run, the four phases (Creating network and Kubernetes cluster, Connecting to the environment, Installing PDS, Finishing) and, when a run failed, failure with the sentence to tell the user and the one action. When AWS refused a step, failure.refusal says which quota or permission and where. lifecycle names a pending PDS version, its deferral, the maintenance window, templateSummary when the infrastructure template is old, kubernetesUpgradeAvailable, drift by resource (changed outside PDS: report it, PDS never overwrites it) and lostReason when the Kubernetes cluster is gone. When state is lost, ask the user whether to rebuild it with rebuild_environment. Removing it from PDS only is for the user in the console.
 
 ### list_cloud_connections
 
@@ -194,7 +194,7 @@ The Go registry in `adapter/internal/mcp` serves all three (`wait.go`). Its dead
 
 - **API:** `GET /api/environments`.
 - **Input:** `name`; `until` (`connected` default, or `deleted`); `timeoutSeconds` (1 to 45, default 30).
-- **Result:** `{outcome, name, status?, state?, provisioning?, waitedSeconds}`. `connected` when the environment reports in and no run is building it; `failed` or `blocked` when its latest run failed or a delete left something behind (both end the wait); `waiting` when a run is paused until the AWS account answers; `in_progress` while listed and not done; `deleted` when `until` is `deleted` and the environment is gone; `not_found` when it never appears.
+- **Result:** `{outcome, name, status?, state?, provisioning?, waitedSeconds}`. `connected` when the environment reports in and no run is building it; `failed` or `blocked` when its latest run failed or a delete left something behind (both end the wait); `lost` when its Kubernetes cluster is gone from the AWS account; `waiting` when a run is paused until the AWS account answers; `in_progress` while listed and not done; `deleted` when `until` is `deleted` and the environment is gone; `not_found` when it never appears.
 - **Description:** Wait for an environment to connect, up to timeoutSeconds (default 30, at most 45). Use it after create_environment, once the user has run the command from the console. Returns connected, in_progress or not_found. On in_progress, call it again: connecting can take several minutes.
 
 ## 6. Change tools
@@ -291,10 +291,10 @@ Each returns the envelope in section 7. All return before the work is done, and 
 
 ### upgrade_environment (changes)
 
-- **API:** `POST /api/environments/{environment}/runs` with `kind` `upgrade_pds` or `upgrade_kubernetes`. A run already in progress answers 409.
-- **Input:** `environment`; `kind` (`pds` or `kubernetes`).
+- **API:** `POST /api/environments/{environment}/runs` with `kind` `upgrade_pds` or `upgrade_kubernetes`, and for `upgrade_kubernetes` the optional `kubernetesVersion`. The tool never sends `confirmNodeGroupReplace`. A run already in progress, nothing newer to upgrade to, and an update that would replace the network, the Kubernetes cluster or the node group answer 409.
+- **Input:** `environment`; `kind` (`pds` or `kubernetes`); `kubernetesVersion` (only with `kubernetes`: the minor version one above the current one, and with none only the infrastructure template is updated).
 - **Result:** the envelope with `provisioning`; `next` is `wait_for_environment`.
-- **Description:** Start an upgrade of a managed environment now. kind pds upgrades PDS on it, and kubernetes upgrades the Kubernetes version and the nodes one minor version at a time. Refused while the environment has a run in progress. Use wait_for_environment to follow it.
+- **Description:** Start an upgrade of a managed environment now. kind pds upgrades PDS on it. kind kubernetes upgrades the Kubernetes version and the nodes one minor version at a time, and with no kubernetesVersion it only updates the infrastructure template (get_environment shows templateSummary when it is old). Refused while the environment has a run in progress, when nothing newer applies, and when the update would replace the network or the Kubernetes cluster or the node group: the user decides those in the console. Use wait_for_environment to follow it.
 
 ### delete_managed_environment (destructive changes)
 

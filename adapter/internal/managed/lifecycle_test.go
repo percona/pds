@@ -3,6 +3,7 @@ package managed_test
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strconv"
 	"sync"
 	"testing"
@@ -621,6 +622,58 @@ func TestAMissingNodeGroupIsDrift(t *testing.T) {
 	require.NoError(t, l.life.Check(t.Context()))
 
 	assert.Equal(t, []store.DriftItem{{Resource: "EKS node group pds-nodes", Detail: "Deleted outside PDS"}}, l.drift())
+}
+
+func TestTheHourlyCheckRecordsTheTemplateRevisionAndTheKubernetesVersionItRead(t *testing.T) {
+	l := newLifecycleLab(t)
+	l.ready("0.1.0")
+	l.hub.connected.Store(true)
+	l.stack("1", "1.32")
+
+	require.NoError(t, l.life.Check(t.Context()))
+
+	assert.Equal(t, 1, l.record().TemplateRevision)
+	assert.Equal(t, "1.32", l.record().KubernetesVersion)
+}
+
+func TestStatusSaysWhichTemplateRevisionTheStackIsOnAndWhetherAKubernetesUpgradeIsAvailable(t *testing.T) {
+	l := newLifecycleLab(t)
+	l.ready("0.1.0")
+	require.NoError(t, l.db.ManagedEnvironments().SetObserved(t.Context(), l.team, l.env, managed.TemplateRevision-1, "1.32"))
+	require.NoError(t, l.db.ManagedEnvironments().SetDrift(t.Context(), l.team, l.env, nil, l.now))
+
+	status, err := l.life.Status(t.Context(), l.who, l.env)
+
+	require.NoError(t, err)
+	assert.Equal(t, managed.TemplateRevision-1, status.TemplateRevision)
+	assert.Equal(t, managed.TemplateRevision, status.LatestTemplateRevision)
+	assert.True(t, status.TemplateOutOfDate())
+	assert.Equal(t, "1.32", status.KubernetesVersion)
+	assert.True(t, status.KubernetesUpgradeAvailable, "new environments start on 1.33")
+
+	require.NoError(t, l.db.ManagedEnvironments().SetObserved(t.Context(), l.team, l.env, managed.TemplateRevision, managed.NewEnvironmentKubernetesVersion))
+	status, err = l.life.Status(t.Context(), l.who, l.env)
+	require.NoError(t, err)
+	assert.False(t, status.TemplateOutOfDate())
+	assert.False(t, status.KubernetesUpgradeAvailable)
+}
+
+func TestTheKubernetesVersionNewEnvironmentsStartOnIsTheTemplatesDefault(t *testing.T) {
+	found := regexp.MustCompile(`(?m)^  KubernetesVersion:\n    Type: String\n    Default: "([0-9.]+)"`).FindStringSubmatch(managed.NetworkTemplate)
+
+	require.Len(t, found, 2)
+	assert.Equal(t, found[1], managed.NewEnvironmentKubernetesVersion)
+}
+
+func TestAnEnvironmentTheCheckHasNotReadYetIsNeitherOutOfDateNorUpgradable(t *testing.T) {
+	l := newLifecycleLab(t)
+	l.ready("0.1.0")
+
+	status, err := l.life.Status(t.Context(), l.who, l.env)
+
+	require.NoError(t, err)
+	assert.False(t, status.TemplateOutOfDate())
+	assert.False(t, status.KubernetesUpgradeAvailable)
 }
 
 func TestAHealthyEnvironmentHasNoDrift(t *testing.T) {

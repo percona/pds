@@ -59,6 +59,7 @@ type LifecycleRecords interface {
 	All(ctx context.Context) ([]store.ManagedEnvironment, error)
 	SetLost(ctx context.Context, team uint, name string, lost bool, now time.Time) error
 	SetDrift(ctx context.Context, team uint, name string, items []store.DriftItem, now time.Time) error
+	SetObserved(ctx context.Context, team uint, name string, templateRevision int, kubernetesVersion string) error
 	SetMaintenanceWindow(ctx context.Context, team uint, name string, w store.MaintenanceWindow) error
 	SetDeferral(ctx context.Context, team uint, name, version string, until time.Time) error
 }
@@ -123,6 +124,19 @@ type Status struct {
 	// Drift is what the latest check found changed outside PDS.
 	Drift          []store.DriftItem
 	DriftCheckedAt *time.Time
+	// TemplateRevision, KubernetesVersion and KubernetesUpgradeAvailable come from
+	// what the latest check read. Zero and empty mean it has read nothing yet.
+	TemplateRevision           int
+	LatestTemplateRevision     int
+	KubernetesVersion          string
+	KubernetesUpgradeAvailable bool
+}
+
+// TemplateOutOfDate reports whether the stack carries an older template
+// revision than this release embeds. An environment the check has not read yet
+// is not reported out of date.
+func (s Status) TemplateOutOfDate() bool {
+	return s.DriftCheckedAt != nil && s.TemplateRevision < s.LatestTemplateRevision
 }
 
 // Status reads an environment's lifecycle state.
@@ -131,6 +145,12 @@ func (l *Lifecycle) Status(ctx context.Context, who auth.Scope, name string) (St
 	if err != nil {
 		return Status{}, err
 	}
+
+	return l.Describe(rec), nil
+}
+
+// Describe is the lifecycle state a stored environment record says.
+func (l *Lifecycle) Describe(rec store.ManagedEnvironment) Status {
 	now := l.opts.Now()
 	next, _ := l.paths.Next(rec.ChartVersion, rec.SkippedVersion)
 	start, end := windowAt(now, rec.Window())
@@ -141,7 +161,20 @@ func (l *Lifecycle) Status(ctx context.Context, who auth.Scope, name string) (St
 		DeferredUntil: rec.DeferredUntil,
 		Window:        rec.Window(), WindowStart: start, WindowEnd: end,
 		Lost: rec.LostAt != nil, LostAt: rec.LostAt, Drift: rec.Drift, DriftCheckedAt: rec.DriftCheckedAt,
-	}, nil
+		TemplateRevision: rec.TemplateRevision, LatestTemplateRevision: TemplateRevision,
+		KubernetesVersion: rec.KubernetesVersion, KubernetesUpgradeAvailable: behindNewEnvironments(rec.KubernetesVersion),
+	}
+}
+
+// behindNewEnvironments reports whether version is an older minor than the one
+// a new environment starts on. An unreadable or unknown version is not.
+func behindNewEnvironments(version string) bool {
+	_, have, ok := strings.Cut(version, ".")
+	_, want, _ := strings.Cut(NewEnvironmentKubernetesVersion, ".")
+	h, errHave := strconv.Atoi(have)
+	w, errWant := strconv.Atoi(want)
+
+	return ok && errHave == nil && errWant == nil && h < w
 }
 
 // SetWindow records the weekly window the environment may be upgraded in.
@@ -528,6 +561,11 @@ func (l *Lifecycle) checkOne(ctx context.Context, rec store.ManagedEnvironment) 
 	}
 	cfn, err := l.deps.Cloud.DetectDrift(ctx, s.target)
 	if err != nil {
+		return err
+	}
+
+	revision, _ := strconv.Atoi(stack.Outputs["TemplateRevision"])
+	if err := l.records.SetObserved(ctx, rec.TeamID, rec.Name, revision, cluster.Version); err != nil {
 		return err
 	}
 

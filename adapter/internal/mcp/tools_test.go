@@ -129,7 +129,7 @@ func TestToolInputsAreTheCatalogsInputs(t *testing.T) {
 		"start_cloud_connection":     {nil, nil},
 		"create_managed_environment": {[]string{"connectionId", "name", "region"}, []string{"connectionId", "name", "region"}},
 		"retry_environment_run":      {[]string{"environment"}, []string{"environment"}},
-		"upgrade_environment":        {[]string{"environment", "kind"}, []string{"environment", "kind"}},
+		"upgrade_environment":        {[]string{"environment", "kind", "kubernetesVersion"}, []string{"environment", "kind"}},
 		"delete_managed_environment": {[]string{"confirm", "environment"}, []string{"environment"}},
 		"rebuild_environment":        {[]string{"environment"}, []string{"environment"}},
 		"remove_cloud_connection":    {[]string{"confirm", "id"}, []string{"id"}},

@@ -308,6 +308,7 @@ func NewServer(deps Deps) *Server {
 				environments.With(s.requireCaller).Delete("/cloud-connections/{id}", s.handleRemoveCloudConnection)
 				environments.With(s.requireCaller).Post("/cloud-connections/{id}/environments", s.handleCreateManagedEnvironment)
 				environments.With(s.requireCaller).Post("/cloud-connection-tokens", s.handleIssueCloudToken)
+				environments.Get("/cloud-connection-tokens/{id}", s.handleGetCloudToken)
 				environments.With(s.requireCaller).Delete("/cloud-connection-tokens/{id}", s.handleCancelCloudToken)
 
 				environments.Group(func(environment chi.Router) {
@@ -315,8 +316,12 @@ func NewServer(deps Deps) *Server {
 
 					environment.With(s.requireCaller).Delete("/environments/{name}", s.handleDisconnectEnvironment)
 					environment.Get("/environments/{name}", s.handleGetEnvironment)
+					environment.Get("/environments/{name}/remains", s.handleGetRemains)
 					environment.With(s.requireCaller).Post("/environments/{name}/runs", s.handleStartRun)
 					environment.With(s.requireCaller).Post("/environments/{name}/runs/{runId}/retry", s.handleRetryRun)
+					environment.With(s.requireCaller).Post("/environments/{name}/upgrades/defer", s.handleDeferUpgrade)
+					environment.With(s.requireCaller).Put("/environments/{name}/maintenance-window", s.handlePutMaintenanceWindow)
+					environment.With(s.requireCaller).Post("/environments/{name}/updates/preview", s.handlePreviewUpdate)
 					environment.Get("/environments/{name}/history", s.handleEnvironmentHistory)
 					environment.Get("/environments/{name}/monitoring", s.handleGetMonitoring)
 					environment.Get("/environments/{name}/monitoring/password", s.handleGetMonitoringPassword)

@@ -85,6 +85,14 @@ const (
 	ActionInvitationRevoke       = "invitation.revoke"
 	ActionInvitationClaim        = "invitation.claim"
 	ActionInvitationRefuse       = "invitation.refuse"
+	ActionEnvironmentCreate      = "environment.create"
+	ActionEnvironmentRetry       = "environment.retry"
+	ActionEnvironmentUpgrade     = "environment.upgrade"
+	ActionEnvironmentRebuild     = "environment.rebuild"
+	ActionEnvironmentDelete      = "environment.delete"
+	ActionEnvironmentDefer       = "environment.defer"
+	ActionEnvironmentWindow      = "environment.maintenance-window"
+	ActionCloudConnectionRemove  = "cloud_connection.remove"
 )
 
 // Resource kinds an event can point at. The detail view follows the pointer

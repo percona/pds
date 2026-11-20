@@ -122,6 +122,23 @@ func TestRemoveFromPDSIsRefusedWhileTheConnectionWorks(t *testing.T) {
 	assert.Empty(t, l.abandoner.messages)
 }
 
+func TestRemoveFromPDSIsAllowedForALostEnvironmentWhoseConnectionStillWorks(t *testing.T) {
+	l := newRemovalLab(store.CloudReady)
+	lostAt := time.Now()
+	l.remover = managed.NewRemover(
+		fakeRecords{rec: store.ManagedEnvironment{ID: "0123456789ab", TeamID: 7, Name: "orders", ConnectionID: "aaaaaaaaaaaa", LostAt: &lostAt}},
+		l.conn, l.runs, l.abandoner,
+		func(_ context.Context, _ uint, name string) error {
+			l.forgotten = append(l.forgotten, name)
+
+			return nil
+		})
+
+	require.NoError(t, l.remover.RemoveFromPDS(t.Context(), l.scope, "orders"))
+
+	assert.Equal(t, []string{"orders"}, l.forgotten)
+}
+
 func TestRemoveFromPDSStopsWhenARunIsWorkingOnTheEnvironment(t *testing.T) {
 	l := newRemovalLab(store.CloudUnreachable)
 	l.abandoner.err = store.ErrRunActive

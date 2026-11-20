@@ -162,6 +162,29 @@ func (c *CloudConnections) RevokeTokenByID(ctx context.Context, teamID uint, id 
 	return token, nil
 }
 
+// TokenByID reads one of the Team's tokens by its public id, whether or not it
+// still works. A token that is unknown or another Team's reads as
+// ErrCloudTokenInvalid.
+func (c *CloudConnections) TokenByID(ctx context.Context, teamID uint, id string) (CloudToken, error) {
+	if len(id) != 16 {
+		return CloudToken{}, ErrCloudTokenInvalid
+	}
+	db, err := c.open(ctx)
+	if err != nil {
+		return CloudToken{}, err
+	}
+	var token CloudToken
+	err = db.Where("team_id = ? AND substr(hash, 1, 16) = ?", teamID, id).First(&token).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return CloudToken{}, ErrCloudTokenInvalid
+	}
+	if err != nil {
+		return CloudToken{}, fmt.Errorf("read cloud token: %w", scrub(err))
+	}
+
+	return token, nil
+}
+
 // TokenTeam returns the Team a live token acts for.
 func (c *CloudConnections) TokenTeam(ctx context.Context, hash string, now time.Time) (CloudToken, error) {
 	db, err := c.open(ctx)
