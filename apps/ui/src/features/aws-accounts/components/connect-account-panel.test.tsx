@@ -15,7 +15,7 @@ function json(body: unknown, status = 200) {
 
 type Calls = { path: string; init?: RequestInit }[];
 
-function stubApi(onList: () => unknown, onOne: () => unknown) {
+function stubApi(onToken: () => unknown, onOne: () => unknown) {
   const calls: Calls = [];
   vi.stubGlobal(
     "fetch",
@@ -35,10 +35,7 @@ function stubApi(onList: () => unknown, onOne: () => unknown) {
         );
       }
       if (path === "/api/cloud-connection-tokens/tok_1") {
-        return json(null, 204);
-      }
-      if (path === "/api/cloud-connections") {
-        return json(onList());
+        return init?.method === "DELETE" ? json(null, 204) : json(onToken());
       }
       if (path.startsWith("/api/cloud-connections/")) {
         return json(onOne());
@@ -49,6 +46,16 @@ function stubApi(onList: () => unknown, onOne: () => unknown) {
   );
 
   return calls;
+}
+
+function tokenStatus(extra: Record<string, unknown> = {}) {
+  return {
+    id: "tok_1",
+    state: "waiting",
+    expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+    allowedRegions: ["eu-west-1"],
+    ...extra,
+  };
 }
 
 const created = () => new Date().toISOString();
@@ -74,7 +81,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("ConnectAccountPanel", () => {
   it("makes the command only when asked, and shows it to copy", async () => {
     const calls = stubApi(
-      () => ({ cloudConnections: [] }),
+      () => tokenStatus(),
       () => ({}),
     );
     const user = userEvent.setup();
@@ -98,7 +105,7 @@ describe("ConnectAccountPanel", () => {
 
   it("limits the regions the command may use", async () => {
     const calls = stubApi(
-      () => ({ cloudConnections: [] }),
+      () => tokenStatus(),
       () => ({}),
     );
     const user = userEvent.setup();
@@ -118,7 +125,7 @@ describe("ConnectAccountPanel", () => {
   it("follows the command to a connected account and says so once", async () => {
     let step = 0;
     stubApi(
-      () => ({ cloudConnections: [account()] }),
+      () => tokenStatus({ state: "connecting", connectionId: "cc_1" }),
       () => {
         step += 1;
         const at = new Date().toISOString();
@@ -149,7 +156,7 @@ describe("ConnectAccountPanel", () => {
 
   it("names a step that failed and what to do", async () => {
     stubApi(
-      () => ({ cloudConnections: [account()] }),
+      () => tokenStatus({ state: "connecting", connectionId: "cc_1" }),
       () => account({ steps: [{ step: "stack", status: "failed", at: new Date().toISOString() }] }),
     );
     const user = userEvent.setup();
@@ -164,15 +171,7 @@ describe("ConnectAccountPanel", () => {
 
   it("says when the account was connected before", async () => {
     stubApi(
-      () => ({
-        cloudConnections: [
-          account({
-            createdAt: "2026-01-01T00:00:00Z",
-            signalAt: new Date().toISOString(),
-            state: "ready",
-          }),
-        ],
-      }),
+      () => tokenStatus({ state: "connecting", connectionId: "cc_1" }),
       () => account({ createdAt: "2026-01-01T00:00:00Z", signalAt: new Date().toISOString() }),
     );
     const user = userEvent.setup();
@@ -183,9 +182,38 @@ describe("ConnectAccountPanel", () => {
     expect(await screen.findByText(/already connected/)).toBeInTheDocument();
   });
 
+  it("matches the account by the command's own status, not by time", async () => {
+    const calls = stubApi(
+      () => tokenStatus({ state: "connecting", connectionId: "cc_1" }),
+      () => account({ createdAt: "2026-01-01T00:00:00Z" }),
+    );
+    const user = userEvent.setup();
+
+    renderWithProviders(<ConnectAccountPanel pollMs={20} />);
+    await user.click(screen.getByRole("button", { name: "Create command" }));
+
+    await waitFor(() =>
+      expect(calls.some((call) => call.path === "/api/cloud-connections/cc_1")).toBe(true),
+    );
+    expect(calls.some((call) => call.path === "/api/cloud-connections")).toBe(false);
+  });
+
+  it("says when the command expired", async () => {
+    stubApi(
+      () => tokenStatus({ state: "expired" }),
+      () => ({}),
+    );
+    const user = userEvent.setup();
+
+    renderWithProviders(<ConnectAccountPanel pollMs={20} />);
+    await user.click(screen.getByRole("button", { name: "Create command" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("The command expired");
+  });
+
   it("cancels the command", async () => {
     const calls = stubApi(
-      () => ({ cloudConnections: [] }),
+      () => tokenStatus(),
       () => ({}),
     );
     const user = userEvent.setup();

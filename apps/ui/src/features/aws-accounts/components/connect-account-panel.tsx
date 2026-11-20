@@ -13,8 +13,8 @@ import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { CommandBlock } from "@/features/environments";
 import { cancelAwsConnectCommand, issueAwsConnectCommand } from "../api";
-import { awsAccountsKey, useAwsAccount, useAwsAccounts } from "../hooks";
-import { connectProgress, findConnectedAccount, type ConnectPhaseStatus } from "../progress";
+import { awsAccountsKey, useAwsAccount, useAwsConnectStatus } from "../hooks";
+import { connectProgress, type ConnectPhaseStatus } from "../progress";
 import type { AwsAccount, AwsConnectCommand } from "../types";
 
 const cloudShellUrl = "https://console.aws.amazon.com/cloudshell/home";
@@ -63,11 +63,10 @@ export function ConnectAccountPanel({
     },
   });
 
-  const following = issued !== null;
-  const list = useAwsAccounts({ pollMs, enabled: following });
-  const found = issued ? findConnectedAccount(list.data ?? [], issued.since) : undefined;
-  const one = useAwsAccount(found?.id, pollMs);
-  const account = one.data ?? found;
+  const status = useAwsConnectStatus(issued?.command.id, pollMs);
+  const one = useAwsAccount(status.data?.connectionId, pollMs);
+  const account = one.data;
+  const expired = status.data?.state === "expired";
   const progress = connectProgress(account, issued?.since ?? new Date());
   const existing =
     account !== undefined &&
@@ -87,7 +86,7 @@ export function ConnectAccountPanel({
 
   return (
     <div className="space-y-4">
-      {!following ? (
+      {issued === null ? (
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
             One command in your AWS account connects it here. It finds the account by itself, so you
@@ -186,7 +185,12 @@ export function ConnectAccountPanel({
               the command again as an administrator. The command carries on from where it stopped.
             </Problem>
           ) : null}
-          {progress.stopped ? (
+          {expired && !progress.done ? (
+            <Problem>
+              The command expired before it connected an account. Cancel it and create a new one.
+            </Problem>
+          ) : null}
+          {progress.stopped && !expired ? (
             <Problem>
               The command stopped reporting. If the terminal closed, run the command again. It waits
               for the roles it started and carries on.

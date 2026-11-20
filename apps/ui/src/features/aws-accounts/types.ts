@@ -39,3 +39,14 @@ export type AwsConnectCommand = {
   expiresAt: string;
   allowedRegions: string[];
 };
+
+export type AwsConnectTokenState = "waiting" | "connecting" | "ended" | "expired";
+
+/** Where one connect command stands, and the account it is working on once it has found it. */
+export type AwsConnectStatus = {
+  id: string;
+  state: AwsConnectTokenState;
+  connectionId?: string;
+  expiresAt: string;
+  allowedRegions: string[];
+};

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { connectProgress, findConnectedAccount } from "./progress";
+import { connectProgress } from "./progress";
 import type { AwsAccount, AwsAccountStep } from "./types";
 
 const since = new Date("2026-11-20T10:00:00Z");
@@ -126,31 +126,5 @@ describe("connectProgress", () => {
     );
 
     expect(progress.stopped).toBe(false);
-  });
-});
-
-describe("findConnectedAccount", () => {
-  it("finds an account the command created after it was issued", () => {
-    const found = findConnectedAccount(
-      [account({ id: "old", createdAt: "2026-11-01T00:00:00Z" }), account({ id: "new" })],
-      since,
-    );
-
-    expect(found?.id).toBe("new");
-  });
-
-  it("finds an existing account the command updated", () => {
-    const found = findConnectedAccount(
-      [account({ id: "old", createdAt: "2026-11-01T00:00:00Z", signalAt: "2026-11-20T10:00:30Z" })],
-      since,
-    );
-
-    expect(found?.id).toBe("old");
-  });
-
-  it("finds nothing while no account moved", () => {
-    expect(
-      findConnectedAccount([account({ createdAt: "2026-11-01T00:00:00Z" })], since),
-    ).toBeUndefined();
   });
 });
