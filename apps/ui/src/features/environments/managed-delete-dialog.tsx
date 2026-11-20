@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleAlert } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -13,9 +13,11 @@ import {
 } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { isNameConfirmed } from "@/features/databases";
-import { deleteManagedEnvironment } from "./api";
+import { deleteManagedEnvironment, fetchRemains } from "./api";
 import { environmentsKey } from "./environment-context";
+import type { Remains } from "./types";
 
 type ManagedDeleteDialogProps = {
   environment: string;
@@ -23,6 +25,8 @@ type ManagedDeleteDialogProps = {
   account: string;
   /** Offers Remove from PDS only, for an AWS account PDS cannot use any more. */
   accountUnreachable?: boolean;
+  /** The infrastructure is gone, so the only way out is Remove from PDS only. */
+  lost?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 };
@@ -37,6 +41,7 @@ export function ManagedDeleteDialog({
   environment,
   account,
   accountUnreachable = false,
+  lost = false,
   open,
   onOpenChange,
 }: ManagedDeleteDialogProps) {
@@ -45,6 +50,13 @@ export function ManagedDeleteDialog({
   const inputRef = useRef<HTMLInputElement>(null);
   const [typed, setTyped] = useState("");
   const [touched, setTouched] = useState(false);
+
+  const pdsOnlyOffered = accountUnreachable || lost;
+  const remains = useQuery({
+    queryKey: [...environmentsKey, "remains", environment],
+    queryFn: ({ signal }) => fetchRemains(environment, signal),
+    enabled: open && pdsOnlyOffered,
+  });
 
   const remove = useMutation({
     mutationFn: (pdsOnly: boolean) =>
@@ -79,11 +91,23 @@ export function ManagedDeleteDialog({
         }}
       >
         <DialogHeader>
-          <DialogTitle>Delete {environment}</DialogTitle>
+          <DialogTitle>
+            {lost ? `Remove ${environment} from PDS` : `Delete ${environment}`}
+          </DialogTitle>
           <DialogDescription data-testid="delete-consequence" className="text-foreground">
-            This deletes <span className="font-mono">{environment}</span>, its databases, and the
-            network and Kubernetes cluster PDS built for it in AWS account{" "}
-            <span className="font-mono">{account}</span>, and there is no undo.
+            {lost ? (
+              <>
+                This forgets <span className="font-mono">{environment}</span> in PDS. Its network
+                and Kubernetes cluster are already missing from AWS account{" "}
+                <span className="font-mono">{account}</span>, and what is left there stays there.
+              </>
+            ) : (
+              <>
+                This deletes <span className="font-mono">{environment}</span>, its databases, and
+                the network and Kubernetes cluster PDS built for it in AWS account{" "}
+                <span className="font-mono">{account}</span>, and there is no undo.
+              </>
+            )}
           </DialogDescription>
         </DialogHeader>
 
@@ -118,12 +142,16 @@ export function ManagedDeleteDialog({
             )}
           </Field>
 
-          {accountUnreachable ? (
-            <p className="text-sm text-muted-foreground">
-              PDS cannot reach this AWS account, so it cannot delete what it built there. Remove
-              from PDS only forgets the environment and leaves everything in the account. It keeps
-              billing until you delete it there.
-            </p>
+          {pdsOnlyOffered ? (
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">
+                {lost
+                  ? "Remove from PDS only forgets the environment and deletes nothing in AWS."
+                  : "PDS cannot reach this AWS account, so it cannot delete what it built there. Remove from PDS only forgets the environment and leaves everything in the account."}{" "}
+                What stays in AWS keeps billing until you delete it there.
+              </p>
+              <WhatStays remains={remains.data} failed={remains.isError} />
+            </div>
           ) : null}
 
           {remove.error ? (
@@ -149,7 +177,7 @@ export function ManagedDeleteDialog({
             >
               Cancel
             </Button>
-            {accountUnreachable ? (
+            {accountUnreachable && !lost ? (
               <Button
                 type="button"
                 variant="outline"
@@ -159,17 +187,66 @@ export function ManagedDeleteDialog({
                 Remove from PDS only
               </Button>
             ) : null}
-            <Button
-              type="submit"
-              variant="destructive"
-              disabled={!confirmed}
-              loading={remove.isPending}
-            >
-              {remove.isPending ? "Deleting..." : "Delete"}
-            </Button>
+            {lost ? (
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={!confirmed}
+                loading={remove.isPending}
+                onClick={() => remove.mutate(true)}
+              >
+                Remove from PDS only
+              </Button>
+            ) : (
+              <Button
+                type="submit"
+                variant="destructive"
+                disabled={!confirmed}
+                loading={remove.isPending}
+              >
+                {remove.isPending ? "Deleting..." : "Delete"}
+              </Button>
+            )}
           </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** What a PDS only removal leaves in the AWS account, from the control plane's own record. */
+function WhatStays({ remains, failed }: { remains: Remains | undefined; failed: boolean }) {
+  if (failed) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        The list of what stays in AWS could not be read. Check the AWS account for resources tagged
+        <span className="font-mono"> percona.com/pds</span>.
+      </p>
+    );
+  }
+  if (!remains) {
+    return <Skeleton className="h-16 w-full" />;
+  }
+
+  return (
+    <ul
+      aria-label="What stays in AWS"
+      className="space-y-1 rounded-lg border border-border px-4 py-3 text-sm"
+    >
+      <li>
+        CloudFormation stack <span className="font-mono">{remains.stackName}</span>
+      </li>
+      <li>
+        EKS cluster <span className="font-mono">{remains.eksName}</span>
+      </li>
+      {remains.bucket ? (
+        <li>
+          Backup bucket <span className="font-mono">{remains.bucket}</span>
+        </li>
+      ) : null}
+      <li>
+        Region <span className="font-mono">{remains.region}</span>
+      </li>
+    </ul>
   );
 }
