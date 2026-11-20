@@ -76,18 +76,35 @@ type Removal interface {
 	RemoveFromPDS(ctx context.Context, scope auth.Scope, name string) error
 }
 
+// Lifecycler is what happens to a managed environment after it is created: what
+// it reads of its upgrades, drift and loss, and the changes a person makes to
+// them. *Lifecycle is the implementation.
+type Lifecycler interface {
+	// Describe reads the lifecycle state a stored record says. It reports false
+	// where this control plane keeps no lifecycle.
+	Describe(rec store.ManagedEnvironment) (Status, bool)
+	SetWindow(ctx context.Context, who auth.Scope, name string, w store.MaintenanceWindow) error
+	Defer(ctx context.Context, who auth.Scope, name string, days int) error
+	UpgradeNow(ctx context.Context, who auth.Scope, name string) (store.ProvisioningRun, error)
+	PreviewUpdate(ctx context.Context, who auth.Scope, name string, in InfraUpdate) (Verdict, error)
+	UpdateInfrastructure(ctx context.Context, who auth.Scope, name string, in InfraUpdate) (store.ProvisioningRun, error)
+	Rebuild(ctx context.Context, who auth.Scope, name string) (store.ProvisioningRun, error)
+}
+
 // Manager is what a person does with a managed environment after it exists:
 // read how its runs stand, start another, retry a failed one, delete it.
 type Manager struct {
 	roster  Roster
 	book    RunBook
 	removal Removal
+	life    Lifecycler
 }
 
 // NewManager builds a Manager. removal may be nil, and deleting is then
-// unavailable.
-func NewManager(roster Roster, book RunBook, removal Removal) *Manager {
-	return &Manager{roster: roster, book: book, removal: removal}
+// unavailable. life may be nil, and upgrades, rebuilds and the maintenance
+// window are then unavailable.
+func NewManager(roster Roster, book RunBook, removal Removal, life Lifecycler) *Manager {
+	return &Manager{roster: roster, book: book, removal: removal, life: life}
 }
 
 // PhaseView is one of the stages of a create the console shows.
@@ -134,6 +151,8 @@ type Provisioning struct {
 type Managed struct {
 	Record       store.ManagedEnvironment
 	Provisioning Provisioning
+	// Lifecycle is set where this control plane keeps one.
+	Lifecycle *Status
 }
 
 // ProgressOf maps a run status onto the progress a person reads.
@@ -298,7 +317,13 @@ func (m *Manager) Environments(ctx context.Context, team uint) ([]Managed, error
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, Managed{Record: record, Provisioning: p})
+		managedEnv := Managed{Record: record, Provisioning: p}
+		if m.life != nil {
+			if status, ok := m.life.Describe(record); ok {
+				managedEnv.Lifecycle = &status
+			}
+		}
+		out = append(out, managedEnv)
 	}
 
 	return out, nil

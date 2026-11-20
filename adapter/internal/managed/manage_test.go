@@ -104,6 +104,7 @@ func newManager(book *fakeBook, remover managed.Removal) *managed.Manager {
 		},
 		book,
 		remover,
+		nil,
 	)
 }
 

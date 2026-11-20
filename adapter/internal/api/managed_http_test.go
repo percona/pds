@@ -190,6 +190,7 @@ type managedHTTP struct {
 	cloudDB *testutil.CloudStore
 	managed *memoryManaged
 	remover *memoryRemover
+	life    *memoryLifecycle
 	scope   auth.Scope
 	// connection is a Ready connection of Team 7, with the id the tests use.
 	connection string
@@ -221,6 +222,7 @@ func newManagedHTTP(t *testing.T) *managedHTTP {
 	databases := service.NewDatabase(engine.NewRegistry(), service.WithHub(hubSvc))
 
 	remover := &memoryRemover{runs: m, cloudDB: cloudDB}
+	life := newMemoryLifecycle(m)
 	creator := &managed.Environments{Creator: managed.NewCreator(m, cloud, m, managed.CreatorSettings{
 		OutgoingCIDRs: []string{"203.0.113.0/24"}, ChartVersion: "1.2.3", ImageRepository: "ghcr.io/example/pds",
 	})}
@@ -231,10 +233,10 @@ func newManagedHTTP(t *testing.T) *managedHTTP {
 		Config: testConfig(), Logger: log.New(io.Discard, log.FormatJSON, slog.LevelDebug),
 		Auth: signedIn{}, Identity: identity, Databases: databases,
 		CloudConnections: cloud, ManagedEnvironments: creator,
-		Managed: managed.NewManager(m, m, remover),
+		Managed: managed.NewManager(m, m, remover, life),
 	})
 
-	return &managedHTTP{srv: srv, cloud: cloud, cloudDB: cloudDB, managed: m, remover: remover, scope: scope, connection: enrolled.ConnectionID}
+	return &managedHTTP{srv: srv, cloud: cloud, cloudDB: cloudDB, managed: m, remover: remover, life: life, scope: scope, connection: enrolled.ConnectionID}
 }
 
 func (h *managedHTTP) do(t *testing.T, team uint, method, target, body string) *httptest.ResponseRecorder {

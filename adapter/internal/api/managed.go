@@ -59,6 +59,75 @@ type provisioningResponse struct {
 	Failure  *failureResponse `json:"failure,omitempty"`
 }
 
+type driftResponse struct {
+	Resource string `json:"resource"`
+	Detail   string `json:"detail"`
+}
+
+type maintenanceWindowResponse struct {
+	// Day is 0 for Sunday to 6 for Saturday, Hour 0 to 23 in TimeZone.
+	Day      int    `json:"day"`
+	Hour     int    `json:"hour"`
+	TimeZone string `json:"timeZone"`
+	// NextStart and NextEnd are the window that is open now, or the next one.
+	NextStart time.Time `json:"nextStart"`
+	NextEnd   time.Time `json:"nextEnd"`
+}
+
+// lifecycleResponse is what the control plane knows about a managed
+// environment's upgrades, drift and loss. It reads no AWS: the hourly check
+// wrote what it found.
+type lifecycleResponse struct {
+	ChartVersion        string `json:"chartVersion,omitempty"`
+	PendingChartVersion string `json:"pendingChartVersion,omitempty"`
+	// SkippedChartVersion is the version that failed here and was rolled back.
+	SkippedChartVersion string     `json:"skippedChartVersion,omitempty"`
+	Deferred            bool       `json:"deferred"`
+	DeferredUntil       *time.Time `json:"deferredUntil,omitempty"`
+
+	MaintenanceWindow maintenanceWindowResponse `json:"maintenanceWindow"`
+
+	TemplateRevision       int    `json:"templateRevision"`
+	LatestTemplateRevision int    `json:"latestTemplateRevision"`
+	TemplateOutOfDate      bool   `json:"templateOutOfDate"`
+	TemplateSummary        string `json:"templateSummary,omitempty"`
+
+	KubernetesVersion          string `json:"kubernetesVersion,omitempty"`
+	KubernetesUpgradeAvailable bool   `json:"kubernetesUpgradeAvailable"`
+
+	Drift          []driftResponse `json:"drift"`
+	DriftCheckedAt *time.Time      `json:"driftCheckedAt,omitempty"`
+
+	Lost       bool       `json:"lost"`
+	LostReason string     `json:"lostReason,omitempty"`
+	LostAt     *time.Time `json:"lostAt,omitempty"`
+}
+
+func lifecycleView(s managed.Status) lifecycleResponse {
+	out := lifecycleResponse{
+		ChartVersion: s.ChartVersion, PendingChartVersion: s.NextChart, SkippedChartVersion: s.SkippedVersion,
+		Deferred: s.Deferred, DeferredUntil: s.DeferredUntil,
+		MaintenanceWindow: maintenanceWindowResponse{
+			Day: int(s.Window.Day), Hour: s.Window.Hour, TimeZone: s.Window.Zone, NextStart: s.WindowStart.UTC(), NextEnd: s.WindowEnd.UTC(),
+		},
+		TemplateRevision: s.TemplateRevision, LatestTemplateRevision: s.LatestTemplateRevision, TemplateOutOfDate: s.TemplateOutOfDate(),
+		KubernetesVersion: s.KubernetesVersion, KubernetesUpgradeAvailable: s.KubernetesUpgradeAvailable,
+		Drift: make([]driftResponse, 0, len(s.Drift)), DriftCheckedAt: s.DriftCheckedAt,
+		Lost: s.Lost, LostAt: s.LostAt,
+	}
+	if out.TemplateOutOfDate {
+		out.TemplateSummary = "Template revision " + strconv.Itoa(s.TemplateRevision) + ", latest " + strconv.Itoa(s.LatestTemplateRevision)
+	}
+	for _, item := range s.Drift {
+		out.Drift = append(out.Drift, driftResponse{Resource: item.Resource, Detail: item.Detail})
+	}
+	if s.Lost {
+		out.LostReason = managed.LostReason
+	}
+
+	return out
+}
+
 type runStartedResponse struct {
 	Run          runResponse          `json:"run"`
 	Provisioning provisioningResponse `json:"provisioning"`
@@ -127,7 +196,11 @@ func withManaged(row environmentResponse, env managed.Managed, connected bool) e
 	if row.Status == "" {
 		row.Status = "pending"
 	}
-	row.State = managed.StateOf(env.Provisioning, connected)
+	row.State = managed.StateOf(env.Provisioning, connected, env.Record.LostAt != nil)
+	if env.Lifecycle != nil {
+		view := lifecycleView(*env.Lifecycle)
+		row.Lifecycle = &view
+	}
 	if env.Provisioning.Run.ID != 0 {
 		view := provisioningView(env.Provisioning)
 		row.Provisioning = &view
