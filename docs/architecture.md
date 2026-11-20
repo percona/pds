@@ -16,6 +16,7 @@ to run it; [deployment](deployment.md) has the install procedures.
 | PMM                       | Connected environment, optional                       | Metrics (VictoriaMetrics behind PMM). A pmm-client sidecar on each database does the scraping. The agent reads PMM. The hub charts the readings the agent posts and does not call PMM itself.           |
 | Flux                      | Connected environments only                           | Applies the Instance manifests the hub commits to Git.                                                                                                                                                  |
 | GitHub                    | Hub only                                              | One private repository per connected environment holds its desired state.                                                                                                                               |
+| AWS                       | Customer accounts, optional                           | A cloud connection lets the hub assume a role in a customer's account and build a managed environment there. See [Cloud connections](#cloud-connections).                                              |
 | ServiceNow                | Percona SaaS, optional                                | Support cases through the Percona Connector API.                                                                                                                                                        |
 | AI providers              | External, optional                                    | Chat, with a key the customer pastes in the UI.                                                                                                                                                         |
 
@@ -27,7 +28,7 @@ An unknown value stops the process. Do not set the variable through
 
 | Role         | Serves                                 | Calls                                                                             | Database                                                                            |
 | ------------ | -------------------------------------- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| HTTP (empty) | The `/api` surface and `/api/internal` | Git, ServiceNow, AI providers                                                     | Required. Login lives there, so the process refuses to start without `DATABASE_URL` |
+| HTTP (empty) | The `/api` surface and `/api/internal` | Git, ServiceNow, AI providers, AWS and the Kubernetes API of a managed environment                                                     | Required. Login lives there, so the process refuses to start without `DATABASE_URL` |
 | `agent`      | `/healthz`, `/readyz`                  | The hub heartbeat, and the local OpenEverest and PMM for the work the hub returns | None                                                                                |
 
 ## Topologies
@@ -45,8 +46,8 @@ CRDs. A hub has no OpenEverest. A connected environment has no UI.
 | Shape                 | Installed by                             | Runs                                                  | Does not run                  |
 | --------------------- | ---------------------------------------- | ----------------------------------------------------- | ----------------------------- |
 | Hub                   | Chart defaults                           | UI, adapter, adapter database                         | OpenEverest, PMM, MinIO, Flux |
-| Connected environment | The Connect command, `values-spoke.yaml` | OpenEverest, providers, PMM, adapter as `agent`, Flux | UI, adapter database          |
-| Hub on one host       | `deploy/compose`                         | UI and adapter in Docker Compose, PostgreSQL outside  | Kubernetes access of any kind |
+| Connected environment | The Connect command, or a managed environment's create run, with `values-spoke.yaml` | OpenEverest, providers, PMM, adapter as `agent`, Flux | UI, adapter database          |
+| Hub on one host       | `deploy/compose`                         | UI and adapter in Docker Compose, PostgreSQL outside  | Kubernetes access, except to the managed environments it builds |
 
 Namespaces do not follow the shape:
 
@@ -530,7 +531,9 @@ POST            /v1/clusters/main/namespaces/{ns}/backups
 ## Hub and connected environments
 
 A connected environment dials the hub. The hub never dials it, so an environment behind
-NAT or a firewall joins with outbound HTTPS only.
+NAT or a firewall joins with outbound HTTPS only. A managed environment is the one
+exception: the control plane reaches its Kubernetes API while it creates or deletes
+it (see [Managed environments](#managed-environments)), and it then runs this same loop.
 
 1. **Join.** The hub mints a single use join token and prints a command. The
    command downloads `bootstrap.sh` from the hub, which enrolls with the token
@@ -715,10 +718,9 @@ kubeconfig is stored, only what makes the next assume possible.
   as blocking the delete and left. Access entries are named by their `pds-*`
   cluster, since they are made without tags. A test lists every AWS call the
   `internal/client/aws` package declares and fails when the control plane role
-  is not granted its action. Template version 2 adds the drift reads, moves the
-  sweep to the control plane, and fixes the stack role condition, so a
-  connection made from version 1 is Out of date until its command is rerun. The
-  policy has not been run against a live account yet.
+  is not granted its action. Rerunning the connect command updates the stack, which
+  is how a connection reaches a newer template version: one below
+  `service.CloudTemplateVersion` stays Out of date until the command is rerun.
 - **Connect script.** It reads the account and enrolls with a connect token,
   creates or updates the stack with `aws cloudformation deploy`, turns on
   termination protection, and asks the control plane to check. A step is reported
@@ -899,6 +901,16 @@ connected one. `internal/managed` holds the create run, and
   Service of every database it exposes and on monitoring's, reading the id from
   the environment's record (`hub.Options.OwnershipID`). A create that cannot read
   it is refused rather than written untagged. Connected environments carry none.
+- **Limits.** These are not built:
+  - Support access. The roles a window binds are installed by the join script,
+    which a managed environment does not run, so a window on a managed
+    environment gives an engineer nothing defined.
+  - Git credentials per environment. One set of write credentials serves every
+    environment, and because the release applies as cluster-admin they act as
+    cluster-admin on every managed environment the control plane serves.
+  - Mirrors and air-gapped control planes. A managed environment pulls the chart
+    from `oci://ghcr.io/percona/charts`, the agent image from `HUB_AGENT_IMAGE` and the Flux
+    manifest from GitHub, so a control plane that cannot reach them cannot create one.
 
 ### Cloud connection and managed environment routes
 
@@ -1184,7 +1196,7 @@ alerting provisioning directory through `extraVolumes` and `extraVolumeMounts`,
 and writes the chart's own `pmm-config` volume back because setting
 `extraVolumes` replaces the chart's list. A digest of the rules sits on the pod
 as an annotation, so a changed rule rolls PMM. The `hub-platform` Role on the
-connected environment grants ConfigMaps for this. Only the join script can install
+connected environment grants ConfigMaps for this. Only a join (the join script, or a managed environment's `join` step) can install
 that Role: the hub holds no kubeconfig, and the platform Kustomization runs as
 `hub-platform`, which cannot edit Roles. The agent tells the hub it ran a
 join of this release with the `alertRules` mark on its heartbeat. The hub
@@ -1210,8 +1222,10 @@ database that Kustomization owned.
 
 - **Desired state lives in Git, actions do not.** Replaying a backup or a
   restore from Git would repeat it. Only what should converge is committed.
-- **No inbound path into a customer cluster.** The hub holds no kubeconfig and
-  no route to a customer network.
+- **No standing inbound path into a customer cluster.** The hub holds no
+  kubeconfig and no route to a customer network. A managed environment's
+  Kubernetes API is open to the declared addresses only while a step needs it, and
+  the control plane signs in with a one-minute token.
 - **Plain Flux controllers.** Flux is Apache-2.0 like this repository. The
   Flux Operator is AGPL-3.0, so it is not shipped into customer clusters.
 - **Fleet tools that were considered and rejected:**
@@ -1362,5 +1376,5 @@ still open old rows.
   ten minutes by default), then the run is Failed and Retry re-runs from the
   failed step. A lost cloud connection pauses the run without spending an attempt.
   The sweeper closes any Access window whose run is finished, paused, failed,
-  cancelled or without a live lease, or whose window is older than 30 minutes,
+  cancelled or without a live lease, or whose window is older than `HUB_PROVISION_WINDOW_MAX_AGE` (30 minutes by default),
   and drops the runs of an environment 90 days after its delete finished.

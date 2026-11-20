@@ -13,7 +13,8 @@ on one host. A connected environment joins whichever hub the customer uses.
 | The lab on a laptop: a hub and one connected environment | [Laptop](#laptop) |
 | A self-hosted hub on Kubernetes | [Hub on Kubernetes](#hub-on-kubernetes) |
 | A self-hosted hub on one host | [Hub on one host](#hub-on-one-host) |
-| An environment joined to that hub | [Create an environment](#create-an-environment) |
+| An environment you run, joined to that hub | [Connect an environment](#connect-an-environment) |
+| An environment the hub builds in your AWS account | [Cloud connections](#cloud-connections) and [Managed environments](#managed-environments) |
 | The public landing page | [Landing page](#landing-page) |
 
 Every Kubernetes install uses `--namespace everest-system --create-namespace`,
@@ -27,7 +28,7 @@ turn on OIDC.
 |------|-------|-------|
 | `values.yaml` | Hub | Defaults: stack off, UI on, adapter database and its PostgreSQL operator on. Requires `adapter.hub.publicURL` and a Git backend |
 | `values-hub-lab.yaml` | Hub in the lab | An overlay on the chart defaults that adds a host path for `gitDir`. It turns nothing off by itself |
-| `values-spoke.yaml` | Connected environment | Overlay the chart snapshot renders. Create an environment writes the same shape; the lab does not install this file |
+| `values-spoke.yaml` | Connected environment | Overlay the chart snapshot renders. The Connect command writes the same shape, and a managed environment's release is rendered from it; the lab does not install this file |
 
 ## Laptop
 
@@ -234,16 +235,20 @@ that has the detail.
 7. **Check it.** `GET <origin>/api/auth/methods` lists `oidc`. Sign in with each provider, confirm the Organization and its
    `default` Team exist, and rename the Organization in Settings.
 8. **Connect an environment** from the console and run the command it prints
-   (see [Create an environment](#create-an-environment)). Check the
+   (see [Connect an environment](#connect-an-environment)). Check the
    environment shows under its Team, and under All teams for an admin.
 9. **Sign the MCP server in.** `PDS_URL=<origin> npx -y @gas-lab/pds-mcp@next login`
    opens the browser at the consent page, where the person picks the Organization, the Team
    and what the agent may do (see [Agent sign in](#agent-sign-in-oauth)). The address
    `<origin>` has to be `adapter.hub.publicURL`, because it is the issuer.
 
-## Create an environment
+## Connect an environment
 
-In the console open Environments, then Create an environment, and create the command.
+This is the path for a Kubernetes cluster you run, or for an EKS cluster the
+script makes. To have the control plane build the environment in your AWS account
+instead, see [Managed environments](#managed-environments).
+
+In the console open Environments, then Create an environment, then Run a command yourself instead, and create the command.
 `POST /api/connect/tokens` with the operator token does the same. Run it on a
 machine with `kubectl` and `helm`, plus `aws` and `eksctl` unless you pass
 `--local`:
@@ -481,7 +486,7 @@ with each window and removes when it ends.
 A cloud connection lets this control plane act in a customer's AWS account.
 The roles the customer creates trust one principal, which is the AWS identity
 the adapter runs as, and `HUB_CLOUD_PRINCIPAL_ARN` names it. Set it through the
-chart's `adapter.extraEnv`:
+chart's `adapter.extraEnv`, or in `pds.env` for Compose:
 
 | Variable | Value |
 |----------|-------|
@@ -489,31 +494,69 @@ chart's `adapter.extraEnv`:
 
 Unset, the enroll, events and verify routes answer 501. The adapter reaches AWS through
 the default credential chain, so on EKS give its ServiceAccount a Pod Identity
-association with that role. The role needs `sts:AssumeRole` and
-`sts:SetSourceIdentity` on `arn:aws:iam::*:role/pds/*`, and nothing else. The
-template, the connect script and how a connection is checked are in
-[architecture.md](architecture.md#cloud-connections).
+association with that role. On Compose use an instance role, or the `AWS_*`
+variables in `pds.env`. The role needs `sts:AssumeRole` and
+`sts:SetSourceIdentity` on `arn:aws:iam::*:role/pds/*`, and nothing else.
+
+The customer connects an account from the console (Environments, Create an
+environment, Connect an AWS account), which prints a command. The command is valid
+for one hour:
+
+```bash
+curl -fsSL 'https://hub.example.com/api/internal/cloud-connection/connect.sh' | bash -s -- --token 'ccn_...'
+```
+
+Run it in AWS CloudShell, or in a shell where `aws` is signed in as someone who
+can create IAM roles. `--regions` narrows the Regions chosen in the console, and
+`--region` picks where the stack lives. The script serves `template.yaml` from the
+same path, so the customer's account runs the text this release embeds.
+
+The template has its own version, `service.CloudTemplateVersion`, which the
+control plane requires as a minimum. A connection whose stack reports a lower
+one is Out of date. Running the same command again updates the stack to the
+template the control plane now serves, and that is the only way a template
+changes: the control plane never changes its own stack. The version is
+separate from `managedTemplate.revision`, which numbers the templates a managed
+environment's stack is made from; see
+[compatibility.md](compatibility.md#managed-environments). The connection's
+state (Pending, Ready, Unreachable, Out of date), the permissions and the check
+are in [architecture.md](architecture.md#cloud-connections).
 
 ## Managed environments
 
 A control plane builds managed environments only when it can reach their
-Kubernetes API from addresses it declares. The chart sets the first two from
-`adapter.hub.managedOutgoingCIDRs` (a list) and `adapter.hub.managedChartVersion`;
-the Compose stack reads all of them from `pds.env`:
+Kubernetes API from addresses it declares and knows which chart to install. The
+chart sets the first two from `adapter.hub.managedOutgoingCIDRs` (a list) and
+`adapter.hub.managedChartVersion`, and the other three take `adapter.extraEnv`.
+The Compose stack reads all of them from `pds.env`:
 
 | Variable | Default | Value |
 |----------|---------|-------|
-| `HUB_MANAGED_OUTGOING_CIDRS` | none | The addresses this control plane's AWS calls come from, as comma separated CIDRs such as `203.0.113.7/32`. Only they may reach an environment's endpoint while it is open. `0.0.0.0/0` is accepted when you choose it and leaves IAM as the only protection. Empty refuses managed environments |
+| `HUB_MANAGED_OUTGOING_CIDRS` | none | The addresses this control plane's AWS calls come from, as comma separated CIDRs such as `203.0.113.7/32`. Only they may reach an environment's endpoint while it is open. `0.0.0.0/0` is accepted when you choose it, for a control plane with no stable outgoing address, and leaves IAM as the only protection. Empty refuses managed environments |
 | `HUB_MANAGED_CHART_VERSION` | none | The published `pds` chart version a managed environment installs, such as `0.1.0`. It has to be a release in `oci://ghcr.io/percona/charts`. Empty refuses managed environments |
 | `HUB_PROVISION_LEASE_TTL` | `1m` | How long a provisioning run's lease lasts unrenewed. A worker that dies is replaced after it |
 | `HUB_PROVISION_MAX_ATTEMPTS` | `5` | Automatic attempts of one step before the run fails and waits for Retry |
 | `HUB_PROVISION_WINDOW_MAX_AGE` | `30m` | How long an Access window may stay open before the sweeper closes it |
 
-A managed environment installs the published chart and the agent image in
-`HUB_AGENT_IMAGE`, so a build with neither cannot create one. The control plane
-needs the identity it assumes customer roles from, and it downloads the pinned
-Flux manifest from GitHub at create time. The hub's Git write credentials act as
-cluster-admin on every managed environment it serves. See
+Managed environments also need `HUB_CLOUD_PRINCIPAL_ARN` and the hub's Git
+settings. A managed environment installs the published chart and the agent image
+in `HUB_AGENT_IMAGE`, so a build with neither cannot create one. The control
+plane downloads the pinned Flux manifest from GitHub at create time and checks
+it against a digest compiled in.
+
+The control plane's Git write credentials act as cluster-admin on every managed
+environment it serves, because the release is applied by an account with
+cluster-admin. Guard them like the cluster-admin of each environment.
+
+Per environment, the maintenance window defaults to Sunday 02:00 UTC for two
+hours and can be changed in the console. An upgrade of the chart version inside
+it needs an entry in `support.managedUpgrade.from` of the pin; see
+[compatibility.md](compatibility.md#managed-environments). Rolling a stack to a
+newer template, or moving Kubernetes a minor version, is a run a User starts.
+
+Not available: support access windows on a managed environment, Git credentials
+per environment, and mirrors or air-gapped control planes that cannot reach the
+published chart registry. See
 [architecture.md](architecture.md#managed-environments).
 
 ## Connected environments left running
@@ -521,8 +564,8 @@ cluster-admin on every managed environment it serves. See
 The laptop command is the lab. See [Laptop](#laptop).
 
 `--down` on that command touches nothing in AWS. An environment joined with the
-Create an environment command without `--local`, and its bucket, keep billing until you
-delete them. `--delete` on the join script covers a join that finished and one
+Connect command without `--local`, and its bucket, keep billing until you
+delete them. A managed environment bills until you delete it from PDS. `--delete` on the join script covers a join that finished and one
 that did not, and the Environments page shows the command.
 
 ## Organizations and sign-in
@@ -769,7 +812,7 @@ five minutes.
 
 The environment's own join command must run once first: it installs the
 `hub-platform` Role that lets Flux apply the rules, and no hub action can.
-Run the command from Create an environment again for that environment. Until
+Run the join command again for that environment. A managed environment's create run installs the Role itself. Until
 then the hub logs that it is waiting for the join command and writes
 nothing for it. A change to its monitoring settings in the meantime leaves
 the rules out too, so Flux is never given a ConfigMap it cannot apply. An
@@ -840,7 +883,7 @@ where kubectl points at the environment's Kubernetes cluster. It is not a tested
 upgrade path, so back up the databases first, and it refuses a downgrade, an
 installed version below the floor in the pin, and a busy database or backup. See
 [compatibility](compatibility.md#updating-an-environment-in-place-at-your-own-risk).
-The join command from Create an environment still repairs a connection, and
+The join command from Connect an environment still repairs a connection, and
 installs the release it carries without the checks.
 
 ## Troubleshooting

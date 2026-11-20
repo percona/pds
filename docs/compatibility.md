@@ -92,20 +92,32 @@ must match.
 
 ## Managed environments
 
-The pin carries two more things for environments the control plane builds in a
+The pin carries three more things for environments the control plane builds in a
 customer's AWS account.
 
+- **Flux version.** `flux.version` is the Flux release both the join script and a
+  managed environment's bootstrap install. The control plane applies a manifest
+  only when its SHA-256 matches a digest compiled into the adapter, and
+  `scripts/check-compatibility.sh` checks the join script's version against the
+  pin, and a test holds the join script's digest equal to the adapter's, so a Flux
+  bump needs the digest added too.
 - **Template revision.** `managedTemplate.revision` numbers the revisions of the
   CloudFormation templates. Every stack records its revision. `cutFor` holds the
   chart and Flux versions the revision was last reviewed against. Changing the
   chart or Flux version fails `scripts/check-compatibility.sh` until the revision
   is bumped, or `cutFor` is moved to the new versions to leave the revision as it
   is. A revision never removes or renames a parameter or output the adapter reads.
+  It is separate from the version of the cloud connection template, which a
+  customer updates by rerunning the connect command.
 - **Managed upgrade.** `support.managedUpgrade.from` maps a chart version an
-  environment runs to the chart versions the control plane may move it to. A
-  version with no entry has no managed upgrade, and the map starts empty. It is
-  separate from `support.update`, which is the join script's in-place update of
-  a connected environment.
+  environment runs to the chart versions the control plane may move it to:
+  `from: {"0.1.0": ["0.2.0"]}`. Each key and target is a version, and each key
+  lists at least one target. In the window the control plane moves an
+  environment to the newest target listed for its version. A version with no
+  entry has no managed upgrade, and the map starts empty. It is separate from
+  `support.update`, which is the join script's in-place update of a connected
+  environment. The adapter embeds a copy of the pin in `internal/managed`, which a
+  test keeps equal.
 
 PMM is optional. It is not part of the create path. The OpenEverest,
 provider, and operator rows are one unit even when PMM is off.
