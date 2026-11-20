@@ -228,21 +228,25 @@ func TestTheStateOfAManagedEnvironmentFollowsItsRunsThenItsHeartbeat(t *testing.
 		name      string
 		run       store.ProvisioningRun
 		connected bool
+		lost      bool
 		want      string
 	}{
-		{"creating", store.ProvisioningRun{Kind: managed.KindCreate, Status: store.RunRunning}, false, managed.StateCreating},
-		{"create failed", store.ProvisioningRun{Kind: managed.KindCreate, Status: store.RunFailed}, false, managed.StateFailed},
-		{"deleting", store.ProvisioningRun{Kind: store.KindDelete, Status: store.RunQueued}, true, managed.StateDeleting},
-		{"delete blocked is still deleting", store.ProvisioningRun{Kind: store.KindDelete, Status: store.RunFailed}, true, managed.StateDeleting},
-		{"upgrade running keeps the environment ready", store.ProvisioningRun{Kind: managed.KindUpgradePDS, Status: store.RunRunning}, true, managed.StateReady},
-		{"connected after a create", store.ProvisioningRun{Kind: managed.KindCreate, Status: store.RunSucceeded}, true, managed.StateReady},
-		{"silent after a create", store.ProvisioningRun{Kind: managed.KindCreate, Status: store.RunSucceeded}, false, managed.StateDegraded},
+		{"creating", store.ProvisioningRun{Kind: managed.KindCreate, Status: store.RunRunning}, false, false, managed.StateCreating},
+		{"create failed", store.ProvisioningRun{Kind: managed.KindCreate, Status: store.RunFailed}, false, false, managed.StateFailed},
+		{"deleting", store.ProvisioningRun{Kind: store.KindDelete, Status: store.RunQueued}, true, false, managed.StateDeleting},
+		{"delete blocked is still deleting", store.ProvisioningRun{Kind: store.KindDelete, Status: store.RunFailed}, true, false, managed.StateDeleting},
+		{"upgrade running keeps the environment ready", store.ProvisioningRun{Kind: managed.KindUpgradePDS, Status: store.RunRunning}, true, false, managed.StateReady},
+		{"connected after a create", store.ProvisioningRun{Kind: managed.KindCreate, Status: store.RunSucceeded}, true, false, managed.StateReady},
+		{"silent after a create", store.ProvisioningRun{Kind: managed.KindCreate, Status: store.RunSucceeded}, false, false, managed.StateDegraded},
+		{"infrastructure missing", store.ProvisioningRun{Kind: managed.KindCreate, Status: store.RunSucceeded}, false, true, managed.StateLost},
+		{"a rebuild in progress is creating", store.ProvisioningRun{Kind: managed.KindRebuild, Status: store.RunRunning}, false, true, managed.StateCreating},
+		{"a delete of a lost environment is deleting", store.ProvisioningRun{Kind: store.KindDelete, Status: store.RunRunning}, false, true, managed.StateDeleting},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := managed.Provisioning{Run: managed.RunView{Kind: tc.run.Kind}}
 			p.Progress = managed.ProgressOf(tc.run)
 
-			assert.Equal(t, tc.want, managed.StateOf(p, tc.connected))
+			assert.Equal(t, tc.want, managed.StateOf(p, tc.connected, tc.lost))
 		})
 	}
 }

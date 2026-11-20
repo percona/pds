@@ -40,6 +40,9 @@ const (
 	StateDegraded = "degraded"
 	StateFailed   = "failed"
 	StateDeleting = "deleting"
+	// StateLost is an environment whose infrastructure is gone from AWS while it
+	// stopped reporting. The person rebuilds it or removes it from PDS.
+	StateLost = "lost"
 )
 
 // The one action a failed run offers.
@@ -154,8 +157,9 @@ func ProgressOf(run store.ProvisioningRun) string {
 }
 
 // StateOf is the state of the environment as a whole. A run that builds it
-// decides while it is unfinished; after that the heartbeat does.
-func StateOf(p Provisioning, connected bool) string {
+// decides while it is unfinished; after that a missing infrastructure and then
+// the heartbeat do.
+func StateOf(p Provisioning, connected, lost bool) string {
 	building := p.Run.Kind == KindCreate || p.Run.Kind == KindRebuild
 	switch {
 	case p.Run.Kind == store.KindDelete && p.Progress != ProgressReady && p.Progress != ProgressCancelled:
@@ -164,6 +168,8 @@ func StateOf(p Provisioning, connected bool) string {
 		return StateFailed
 	case building && (p.Progress == ProgressInProgress || p.Progress == ProgressWaiting):
 		return StateCreating
+	case lost:
+		return StateLost
 	case connected:
 		return StateReady
 	}
