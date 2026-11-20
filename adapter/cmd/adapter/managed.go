@@ -14,6 +14,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/percona/pds/adapter/internal/api"
 	"github.com/percona/pds/adapter/internal/auth"
 	"github.com/percona/pds/adapter/internal/client/aws"
 	"github.com/percona/pds/adapter/internal/client/kube"
@@ -253,6 +254,10 @@ func newManagedEnvironments(
 	}
 
 	settings, creatorSettings := managedSettings(cfg)
+	granted, err := api.CloudTemplateGrants()
+	if err != nil {
+		return nil, nil, err
+	}
 	deps := managed.Deps{
 		Records:     records,
 		Connections: db.CloudConnections(),
@@ -270,6 +275,7 @@ func newManagedEnvironments(
 		),
 		Hub:      hubSide,
 		Settings: settings,
+		Granted:  granted,
 	}
 
 	late := &lateRuns{}

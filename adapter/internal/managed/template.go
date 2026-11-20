@@ -8,7 +8,7 @@ import _ "embed"
 // TemplateRevision stamps the stack templates. It is the revision in
 // charts/pds/compatibility.yaml, recorded on every stack as a tag and an
 // output, and a test holds the two together.
-const TemplateRevision = 1
+const TemplateRevision = 2
 
 // OwnershipTag is the tag key on everything an environment owns in AWS. Its
 // value is the environment's ID.
@@ -23,5 +23,5 @@ var NetworkTemplate string
 // StackParameterNames are the template parameters that have no default, which
 // the create step always passes.
 var StackParameterNames = []string{
-	"EnvironmentId", "EksName", "EksRoleArn", "NodeRoleArn", "EbsCsiRoleArn",
+	"EnvironmentId", "EksName", "EksRoleArn", "NodeRoleArn", "EbsCsiRoleArn", "AgentRoleArn",
 }

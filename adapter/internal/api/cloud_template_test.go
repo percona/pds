@@ -125,7 +125,7 @@ func TestThePrincipalParameterRefusesAnAccountRoot(t *testing.T) {
 func TestEveryRoleSitsUnderTheConnectionsPathWithAConnectionNamedRole(t *testing.T) {
 	tpl := loadCloudTemplate(t)
 	roles := tpl.ofType("AWS::IAM::Role")
-	require.Len(t, roles, 5, "control plane, CloudFormation service, EKS cluster, node and EBS CSI")
+	require.Len(t, roles, 6, "control plane, CloudFormation service, EKS cluster, node, EBS CSI and agent")
 
 	for name, role := range roles {
 		assert.Equal(t, map[string]any{"Fn::Sub": "/pds/${ConnectionId}/"}, role.Properties["Path"], name)
@@ -151,6 +151,12 @@ func TestTheServiceRoleCarriesTheBuildPoliciesAndTheControlPlaneCarriesTheSweepP
 	policies := tpl.ofType("AWS::IAM::ManagedPolicy")
 	attached := asList(tpl.Resources["ServiceRole"].Properties["ManagedPolicyArns"])
 	for name := range policies {
+		if name == "BackupUserBoundary" {
+			assert.NotContains(t, fmt.Sprint(tpl.Resources["ServiceRole"].Properties["ManagedPolicyArns"]), name, "a boundary caps a user and grants nothing to a role")
+			assert.NotContains(t, fmt.Sprint(tpl.Resources["ControlPlaneRole"].Properties["ManagedPolicyArns"]), name)
+
+			continue
+		}
 		if name == "CleanupPolicy" {
 			assert.NotContains(t, fmt.Sprint(tpl.Resources["ServiceRole"].Properties["ManagedPolicyArns"]), name, "the sweep runs as the control plane")
 			assert.Contains(t, fmt.Sprint(tpl.Resources["ControlPlaneRole"].Properties["ManagedPolicyArns"]), name, "%s is attached", name)
@@ -307,12 +313,12 @@ var sdkActions = map[string][]string{
 	"s3.DeleteBucket":                                  {"s3:DeleteBucket"},
 }
 
-// declaredSDKCalls is every SDK method the aws client names in an interface,
+// declaredSDKCalls is every SDK method a client package names in an interface,
 // which is how each of its calls is declared and faked.
-func declaredSDKCalls(t *testing.T) []string {
+func declaredSDKCalls(t *testing.T, dir string) []string {
 	t.Helper()
 
-	files, err := filepath.Glob("../client/aws/*.go")
+	files, err := filepath.Glob(dir + "/*.go")
 	require.NoError(t, err)
 	declared := regexp.MustCompile(`(?m)^\s+([A-Z][A-Za-z]+)\(context\.Context, \*([a-z0-9]+)\.[A-Za-z]+Input`)
 	seen := map[string]bool{}
@@ -382,7 +388,7 @@ func TestEveryAWSCallTheControlPlaneMakesIsGrantedToItsRole(t *testing.T) {
 	tpl := loadCloudTemplate(t)
 	granted := grantedTo(t, tpl, "ControlPlaneRole")
 
-	for _, call := range declaredSDKCalls(t) {
+	for _, call := range declaredSDKCalls(t, "../client/aws") {
 		needs, known := sdkActions[call]
 		require.True(t, known, "%s is called by the aws client and the audit does not know which actions it needs", call)
 		for _, action := range needs {
@@ -452,4 +458,90 @@ func TestEveryDestructiveActionOfTheControlPlaneNeedsAnOwnershipTag(t *testing.T
 			}
 		}
 	}
+}
+
+func TestEveryAWSCallTheAgentMakesIsGrantedToItsRole(t *testing.T) {
+	granted := grantedTo(t, loadCloudTemplate(t), "AgentRole")
+
+	for _, call := range declaredSDKCalls(t, "../client/backupkey") {
+		service, method, _ := strings.Cut(call, ".")
+		require.Equal(t, "iam", service, "the agent talks to IAM and nothing else")
+		assert.True(t, allows(granted, "iam:"+method), "%s needs iam:%s, which the agent role is not granted", call, method)
+	}
+}
+
+func TestTheAgentRoleIsAssumedOnlyByPodIdentity(t *testing.T) {
+	role := loadCloudTemplate(t).Resources["AgentRole"]
+	require.Equal(t, "AWS::IAM::Role", role.Type)
+
+	trust := statements(t, role.Properties["AssumeRolePolicyDocument"])
+	require.Len(t, trust, 1)
+	assert.Equal(t, map[string]any{"Service": "pods.eks.amazonaws.com"}, trust[0]["Principal"])
+	assert.ElementsMatch(t, []string{"sts:AssumeRole", "sts:TagSession"}, asList(trust[0]["Action"]),
+		"TagSession is what puts the cluster's name on the session, which the policy reads")
+}
+
+func TestTheAgentRoleMayOnlyTouchTheUserNamedAfterItsOwnEKSCluster(t *testing.T) {
+	tpl := loadCloudTemplate(t)
+	inline := tpl.Resources["AgentRole"].Properties["Policies"].([]any)
+	require.Len(t, inline, 1)
+
+	var created bool
+	for _, statement := range statements(t, inline[0].(map[string]any)["PolicyDocument"]) {
+		require.Equal(t, "Allow", statement["Effect"])
+		resource := fmt.Sprint(statement["Resource"])
+		assert.Contains(t, resource, "user/pds/${ConnectionId}/${!aws:PrincipalTag/eks-cluster-name}-backup", "a user of another cluster is out of reach")
+		for _, action := range asList(statement["Action"]) {
+			assert.Regexp(t, `^iam:(CreateUser|TagUser|PutUserPolicy|DeleteUserPolicy|ListUserPolicies|CreateAccessKey|ListAccessKeys|DeleteAccessKey|DeleteUser)$`, action)
+		}
+		if contains(asList(statement["Action"]), "iam:CreateUser") {
+			created = true
+			condition := fmt.Sprint(statement["Condition"])
+			assert.Contains(t, condition, "iam:PermissionsBoundary")
+			assert.Contains(t, condition, "BackupUserBoundary", "a user is only made with the boundary that caps it")
+		}
+	}
+	assert.True(t, created)
+}
+
+func TestTheBackupBoundaryReachesBackupBucketsAndNothingElse(t *testing.T) {
+	boundary := loadCloudTemplate(t).Resources["BackupUserBoundary"]
+	require.Equal(t, "AWS::IAM::ManagedPolicy", boundary.Type)
+
+	for _, statement := range statements(t, boundary.Properties["PolicyDocument"]) {
+		require.Equal(t, "Allow", statement["Effect"])
+		for _, action := range asList(statement["Action"]) {
+			assert.Regexp(t, `^s3:`, action)
+		}
+		for _, resource := range asList(statement["Resource"]) {
+			assert.NotEqual(t, "*", resource)
+		}
+		assert.Contains(t, fmt.Sprint(statement["Resource"]), "arn:aws:s3:::pds-${AWS::AccountId}-", "the bucket name follows from the account and the environment")
+	}
+}
+
+func TestTheServiceRoleMayHandTheAgentRoleToPodIdentity(t *testing.T) {
+	tpl := loadCloudTemplate(t)
+	var passed bool
+	for _, statement := range statements(t, tpl.Resources["IamPolicy"].Properties["PolicyDocument"]) {
+		if contains(asList(statement["Action"]), "iam:PassRole") && strings.Contains(fmt.Sprint(statement["Resource"]), "AgentRole") {
+			passed = true
+			assert.Contains(t, fmt.Sprint(statement["Condition"]), "pods.eks.amazonaws.com")
+		}
+	}
+	assert.True(t, passed)
+	assert.Contains(t, tpl.Outputs, "AgentRoleArn")
+}
+
+func TestTheGrantsAnAWSRefusalIsComparedWithAreTheTemplatesOwn(t *testing.T) {
+	granted, err := CloudTemplateGrants()
+	require.NoError(t, err)
+
+	assert.True(t, granted("ec2:CreateVpc"), "the service role may create a VPC")
+	assert.True(t, granted("elasticloadbalancing:DeleteLoadBalancer"), "the control plane role may sweep load balancers")
+	assert.True(t, granted("ec2:DescribeVpcs"), "a wildcard grant covers what it names")
+	assert.True(t, granted("eks:CreateCluster"))
+	assert.False(t, granted("ec2:RunInstances"), "nothing grants it, so a refusal is an account policy's doing")
+	assert.False(t, granted("iam:CreateRole"))
+	assert.False(t, granted(""))
 }

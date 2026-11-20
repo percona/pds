@@ -119,3 +119,13 @@ func TestNodeGroupFollowsTheKubernetesVersionParameter(t *testing.T) {
 	assert.Equal(t, map[string]any{"Ref": "KubernetesVersion"}, group.Properties["Version"],
 		"a Kubernetes upgrade is one stack update that moves the cluster and then its node group")
 }
+
+func TestTheAgentRunsAsTheRoleItIsGivenWithoutStoringAKey(t *testing.T) {
+	association := parsed(t).Resources["AgentPodIdentity"]
+	require.Equal(t, "AWS::EKS::PodIdentityAssociation", association.Type)
+
+	assert.Equal(t, managed.ReleaseNamespace, association.Properties["Namespace"])
+	assert.Equal(t, managed.ReleaseName, association.Properties["ServiceAccount"], "the release's ServiceAccount is named after the release")
+	assert.Equal(t, map[string]any{"Ref": "AgentRoleArn"}, association.Properties["RoleArn"])
+	assert.Equal(t, map[string]any{"Ref": "Cluster"}, association.Properties["ClusterName"])
+}

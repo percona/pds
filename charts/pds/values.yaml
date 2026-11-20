@@ -146,6 +146,23 @@ adapter:
   # has.
   features:
     activity: true
+  # -- Agent role: the IAM user this agent makes for the environment's backups.
+  # It makes the user and its access key with the credentials of its own
+  # role (EKS Pod Identity), and writes the key to the stack.s3.existingSecret
+  # Secret, so the key never leaves the environment. A managed environment
+  # sets it. Empty means the key comes some other way, as on a connected
+  # environment. Setting it needs stack.s3 to be enabled.
+  backupKey:
+    # -- IAM user name. The agent's role may only touch the user named after
+    # its own cluster.
+    user: ""
+    # -- IAM path of the user, such as /pds/<connection>/.
+    path: ""
+    # -- Permissions boundary the user is made with, which caps what it can
+    # ever be granted.
+    boundaryArn: ""
+    # -- Value of the percona.com/pds tag on the user.
+    tag: ""
   # -- Hub and agent settings. These were free-form extraEnv, which meant the
   # documented way to set them was kubectl set env, and the next helm upgrade
   # rendered the Deployment without them.

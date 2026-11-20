@@ -814,6 +814,19 @@ rules:
     resourceNames:
       - "monitoring-service"
     verbs: ["get"]
+  # The agent writes the backup key it makes to this Secret, and the control
+  # plane asks it to remove the IAM user through this ConfigMap when the
+  # environment is deleted.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - "pds-s3"
+    verbs: ["get", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames:
+      - "pds-backup-user"
+    verbs: ["get", "update", "patch"]
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create"]
@@ -1230,6 +1243,20 @@ spec:
               value: "https://hub.example"
             - name: HUB_AGENT_IMAGE
               value: "ghcr.io/percona/percona-services-adapter:0.1.0-rc.1"
+            - name: AGENT_BACKUP_USER
+              value: "pds-k3j9x2m4p1q7-backup"
+            - name: AGENT_BACKUP_USER_PATH
+              value: "/pds/aaaaaaaaaaaa/"
+            - name: AGENT_BACKUP_BOUNDARY_ARN
+              value: "arn:aws:iam::123456789012:policy/pds/aaaaaaaaaaaa/pds-aaaaaaaaaaaa-backup-boundary"
+            - name: AGENT_BACKUP_BUCKET
+              value: "pds-123456789012-k3j9x2m4p1q7"
+            - name: AGENT_BACKUP_SECRET
+              value: "pds-s3"
+            - name: AGENT_BACKUP_TAG
+              value: "k3j9x2m4p1q7"
+            - name: AWS_REGION
+              value: "eu-west-1"
             - name: AGENT_RELEASE_REF
               value: "flux-system/pds"
             - name: HUB_MANAGED_CHART_VERSION

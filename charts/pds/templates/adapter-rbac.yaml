@@ -55,6 +55,21 @@ rules:
     resourceNames:
       - "monitoring-service"
     verbs: ["get"]
+  {{- if .Values.adapter.backupKey.user }}
+  # The agent writes the backup key it makes to this Secret, and the control
+  # plane asks it to remove the IAM user through this ConfigMap when the
+  # environment is deleted.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - {{ .Values.stack.s3.existingSecret | quote }}
+    verbs: ["get", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames:
+      - "pds-backup-user"
+    verbs: ["get", "update", "patch"]
+  {{- end }}
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create"]

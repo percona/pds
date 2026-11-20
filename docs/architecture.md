@@ -682,8 +682,9 @@ kubeconfig is stored, only what makes the next assume possible.
 - **Template.** `internal/api/cloud_connection_template.yaml` is embedded and
   served as is, the same text to everybody, and `cfn-lint` checks it in CI. Under
   the path `/pds/<connection id>/` it creates the role the control plane assumes,
-  the CloudFormation service role, the EKS cluster role, the node role and the
-  EBS CSI Pod Identity role, with ARNs that follow from the connection id. The
+  the CloudFormation service role, the EKS cluster role, the node role, the
+  EBS CSI Pod Identity role and the agent's Pod Identity role (with the
+  permissions boundary of the backup user it makes), with ARNs that follow from the connection id. The
   stack reports `TemplateVersion`, and the control plane requires at least
   `service.CloudTemplateVersion`: a lower one is Out of date. This version is the
   bootstrap template's own, apart from the revision in
@@ -758,7 +759,8 @@ connected one. `internal/managed` holds the create run, and
   run only through the connection's service role: a dedicated VPC, an EKS
   cluster with `authenticationMode` API, no creator admin rights and a private
   endpoint, a node group, and the Pod Identity agent, CoreDNS and EBS CSI
-  add-ons. Every resource carries `percona.com/pds`, and the EBS CSI driver tags
+  add-ons, and a Pod Identity association that gives the release's agent its role.
+  Every resource carries `percona.com/pds`, and the EBS CSI driver tags
   its volumes. The stack records `managed.TemplateRevision` as a tag and an
   output, and a test holds it equal to `managedTemplate.revision` in
   `charts/pds/compatibility.yaml`.
@@ -841,10 +843,21 @@ connected one. `internal/managed` holds the create run, and
   environment's Region, blocks public access and tags it with
   `percona.com/pds`. It is outside the stack because a stack cannot delete a
   bucket that holds objects. The release registers the bucket as the BackupStorage
-  `s3`, reading its access key from the Secret `pds-s3`. The control plane never makes
-  that key: it would pass through a stack output or its logs, and the connection's
-  role has no IAM user permissions. Until the Secret exists in the environment,
-  the BackupStorage has no key to read.
+  `s3`, reading its access key from the Secret `pds-s3`. The agent makes that
+  key, in the environment: it runs as the connection's agent role (EKS Pod
+  Identity, through the stack's `AgentPodIdentity` for the release's
+  ServiceAccount) and creates the IAM user `pds-<environment id>-backup` under
+  `/pds/<connection id>/`, with the connection's `backup-boundary` as its
+  permissions boundary, an inline policy for its own bucket and the ownership
+  tag, then an access key, and writes the key straight to `pds-s3` (the
+  chart's `adapter.backupKey`, read as `AGENT_BACKUP_*`; `agent.BackupKey`
+  reconciles it on every beat). The key never reaches the control plane, Git, a
+  stack output or a log, and the role the control plane assumes has no IAM user
+  permissions. The agent role may only touch the user named after the cluster its
+  session is tagged with, and the boundary caps the user at buckets named
+  `pds-<account>-*`. A key that is in the Secret is left alone, because IAM
+  cannot show a secret again; one lost to a failed write is made again. The
+  S3 BackupStorage job retries until the Secret exists.
 - **Refusals.** AWS errors become a step that fails with a typed reason (quota,
   permission, region not enabled) and one sentence that names the AWS account
   and the Kubernetes cluster and shows no raw AWS text. Throttling and role

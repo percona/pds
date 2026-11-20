@@ -77,6 +77,13 @@ func clearEnv(t *testing.T) {
 		"HUB_MANAGED_OUTGOING_CIDRS",
 		"HUB_MANAGED_CHART_VERSION",
 		"AGENT_RELEASE_REF",
+		"AGENT_BACKUP_USER",
+		"AGENT_BACKUP_USER_PATH",
+		"AGENT_BACKUP_BOUNDARY_ARN",
+		"AGENT_BACKUP_BUCKET",
+		"AGENT_BACKUP_SECRET",
+		"AGENT_BACKUP_TAG",
+		"AWS_REGION",
 		"HUB_PROVISION_LEASE_TTL",
 		"HUB_PROVISION_MAX_ATTEMPTS",
 		"HUB_PROVISION_WINDOW_MAX_AGE",
@@ -1697,5 +1704,60 @@ func TestLoadRefusesAReleaseReferenceThatIsNotNamespaceAndName(t *testing.T) {
 		_, err := config.Load()
 		require.Error(t, err, bad)
 		assert.Contains(t, err.Error(), "AGENT_RELEASE_REF")
+	}
+}
+
+func setAgentBackupKey(t *testing.T) {
+	t.Helper()
+
+	t.Setenv("AGENT_BACKUP_USER", "pds-k3j9x2m4p1q7-backup")
+	t.Setenv("AGENT_BACKUP_USER_PATH", "/pds/aaaaaaaaaaaa/")
+	t.Setenv("AGENT_BACKUP_BOUNDARY_ARN", "arn:aws:iam::123456789012:policy/pds/aaaaaaaaaaaa/pds-aaaaaaaaaaaa-backup-boundary")
+	t.Setenv("AGENT_BACKUP_BUCKET", "pds-123456789012-k3j9x2m4p1q7")
+	t.Setenv("AGENT_BACKUP_SECRET", "pds-s3")
+	t.Setenv("AGENT_BACKUP_TAG", "k3j9x2m4p1q7")
+	t.Setenv("AWS_REGION", "eu-west-1")
+}
+
+func TestLoadReadsTheBackupKeyAnAgentKeeps(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("HUB_GIT_DIR", "/tmp/hub-git")
+	t.Setenv("HUB_OPERATOR_TOKEN", "op-secret")
+	t.Setenv("HUB_PUBLIC_URL", "https://hub.example")
+
+	got, err := config.Load()
+	require.NoError(t, err)
+	assert.Empty(t, got.AgentBackup.User, "an environment that keeps its key some other way has none to make")
+
+	setAgentBackupKey(t)
+	got, err = config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, config.AgentBackup{
+		User: "pds-k3j9x2m4p1q7-backup", Path: "/pds/aaaaaaaaaaaa/",
+		BoundaryARN: "arn:aws:iam::123456789012:policy/pds/aaaaaaaaaaaa/pds-aaaaaaaaaaaa-backup-boundary",
+		Bucket:      "pds-123456789012-k3j9x2m4p1q7", Secret: "pds-s3", Tag: "k3j9x2m4p1q7", Region: "eu-west-1",
+	}, got.AgentBackup)
+}
+
+func TestLoadRefusesABackupKeySettingThatIsUnusableOrMissing(t *testing.T) {
+	for name, value := range map[string]string{
+		"AGENT_BACKUP_USER":         "has a space",
+		"AGENT_BACKUP_USER_PATH":    "/no-trailing-slash",
+		"AGENT_BACKUP_BOUNDARY_ARN": "arn:aws:iam::123456789012:role/not-a-policy",
+		"AGENT_BACKUP_BUCKET":       "Not_A_Bucket",
+		"AGENT_BACKUP_TAG":          "Has Space",
+		"AGENT_BACKUP_SECRET":       "",
+		"AWS_REGION":                "",
+	} {
+		clearEnv(t)
+		t.Setenv("HUB_GIT_DIR", "/tmp/hub-git")
+		t.Setenv("HUB_OPERATOR_TOKEN", "op-secret")
+		t.Setenv("HUB_PUBLIC_URL", "https://hub.example")
+		setAgentBackupKey(t)
+		t.Setenv(name, value)
+
+		_, err := config.Load()
+		require.Error(t, err, name)
+		assert.Contains(t, err.Error(), name)
 	}
 }

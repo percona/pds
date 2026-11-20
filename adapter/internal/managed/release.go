@@ -36,9 +36,21 @@ const (
 	HelmServiceAccount = "pds-helm"
 	// ChartRepository is the Flux source the release installs the chart from.
 	ChartRepository = "pds-charts"
+	// BackupUserRequest is the ConfigMap in the release's namespace that a delete
+	// creates to ask the agent to remove the IAM user it made for backups. The
+	// agent sets the removed key when it has.
+	BackupUserRequest    = "pds-backup-user"
+	BackupUserRequestKey = "request"
+	BackupUserRemove     = "remove"
+	BackupUserRemovedKey = "removed"
 	// ChartURL is where the control plane's published chart lives.
 	ChartURL = "oci://ghcr.io/percona/charts"
 )
+
+// BackupUserName is the IAM user the agent makes for an environment's backups.
+// The role the agent runs as may only touch the user named after its own
+// cluster, so the name follows from the environment's ID.
+func BackupUserName(environmentID string) string { return "pds-" + environmentID + "-backup" }
 
 // ReleaseInput is the small named set of values a managed environment adds to
 // the connected-environment overlay.
@@ -55,6 +67,11 @@ type ReleaseInput struct {
 	// Bucket and Region are the environment's backup store.
 	Bucket string
 	Region string
+	// BackupUser, BackupUserPath and BackupBoundaryARN name the IAM user the
+	// agent makes for the bucket's access key, and the boundary it is made with.
+	BackupUser        string
+	BackupUserPath    string
+	BackupBoundaryARN string
 }
 
 // RenderRelease renders the HelmRelease Flux applies for the whole agent
@@ -102,6 +119,20 @@ func RenderRelease(in ReleaseInput) ([]byte, error) {
 		"openeverest": map[string]any{
 			"upgrade": map[string]any{"preflightChecks": false},
 		},
+	}
+	if in.BackupUser != "" {
+		// The agent makes this user and writes its key to the Secret, so the key
+		// never reaches the control plane or Git. Its tag is the environment's ID.
+		for name, value := range map[string]string{
+			"backup user path": in.BackupUserPath, "backup user boundary": in.BackupBoundaryARN, "environment id": in.EnvironmentID,
+		} {
+			if value == "" {
+				return nil, fmt.Errorf("render the pds release: the %s is empty", name)
+			}
+		}
+		managedValues["adapter"].(map[string]any)["backupKey"] = map[string]any{
+			"user": in.BackupUser, "path": in.BackupUserPath, "boundaryArn": in.BackupBoundaryARN, "tag": in.EnvironmentID,
+		}
 	}
 	if in.EnvironmentID != "" {
 		// Every volume a database claims carries the ownership tag, so the delete

@@ -151,6 +151,26 @@ func TestPlanUpdateKeepsEveryParameterItDoesNotChange(t *testing.T) {
 	assert.False(t, plan.Empty)
 }
 
+func TestPlanUpdatePassesAParameterTheStackDidNotHaveYet(t *testing.T) {
+	cfn := &fakeCFN{stacks: []cfntypes.Stack{existingStack()}}
+	ch := &fakeChanges{described: []*cloudformation.DescribeChangeSetOutput{changeSet(cfntypes.ChangeSetStatusCreateComplete, "")}}
+	infra := updateInfra(cfn, &fakeEKS{}, ch, &fakeNodes{})
+
+	_, err := infra.PlanUpdate(t.Context(), target, UpdateSpec{
+		Name: "pds-run-8", Template: "Resources: {}", ServiceRoleARN: "arn:role",
+		Parameters: map[string]string{"AgentRoleArn": "arn:aws:iam::1:role/agent"},
+	})
+
+	require.NoError(t, err)
+	got := map[string]cfntypes.Parameter{}
+	for _, p := range ch.created[0].Parameters {
+		got[sdkaws.ToString(p.ParameterKey)] = p
+	}
+	assert.Equal(t, "arn:aws:iam::1:role/agent", sdkaws.ToString(got["AgentRoleArn"].ParameterValue),
+		"a revision adds a parameter, and the stack made before it has no value to keep")
+	assert.True(t, sdkaws.ToBool(got["EnvironmentId"].UsePreviousValue))
+}
+
 func TestPlanUpdateReportsAnUpdateThatChangesNothing(t *testing.T) {
 	cfn := &fakeCFN{stacks: []cfntypes.Stack{existingStack()}}
 	ch := &fakeChanges{described: []*cloudformation.DescribeChangeSetOutput{

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -160,4 +161,30 @@ func toStrings(in chan []byte) chan string {
 	go func() { out <- string(<-in) }()
 
 	return out
+}
+
+func TestTheBeatKeepsTheBackupKeyAndGoesOutEvenWhenItFails(t *testing.T) {
+	var calls atomic.Int32
+	bodies := make(chan []byte, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		select {
+		case bodies <- body:
+		default:
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	go func() {
+		_ = agent.Run(ctx, agent.Options{
+			HubURL: srv.URL, Token: "secret", Environment: "spoke-a", Namespace: "pds", Interval: time.Hour,
+			BackupKey: func(context.Context) error { calls.Add(1); return errors.New("AccessDenied") },
+		})
+	}()
+
+	waitForBody(t, toStrings(bodies))
+	assert.EqualValues(t, 1, calls.Load(), "the beat reconciles the key once")
 }

@@ -28,6 +28,11 @@ spec:
       strategy: rollback
   values:
     adapter:
+      backupKey:
+        boundaryArn: arn:aws:iam::111122223333:policy/pds/aaaaaaaaaaaa/pds-aaaaaaaaaaaa-backup-boundary
+        path: /pds/aaaaaaaaaaaa/
+        tag: 0123456789ab
+        user: pds-0123456789ab-backup
       database:
         enabled: false
         operator:

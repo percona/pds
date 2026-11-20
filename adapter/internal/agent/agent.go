@@ -100,6 +100,11 @@ type Options struct {
 	// environment. Nil means the environment has none, as a connected one does,
 	// and the beat carries no release.
 	Release func(ctx context.Context) (*hub.HeartbeatRelease, error)
+	// BackupKey keeps the environment's backup key. Nil means this environment
+	// keeps its key some other way, as a connected one does.
+	BackupKey func(ctx context.Context) error
+	// backupKeyErr is the last error BackupKey returned, logged once.
+	backupKeyErr *string
 	// releaseErr is the last error Release returned, so a read that keeps
 	// failing is logged once, not on every beat.
 	releaseErr *string
@@ -255,6 +260,9 @@ func Run(ctx context.Context, opts Options) error {
 	if opts.releaseErr == nil {
 		opts.releaseErr = new(string)
 	}
+	if opts.backupKeyErr == nil {
+		opts.backupKeyErr = new(string)
+	}
 	if opts.monitoring == nil {
 		opts.monitoring = &monitoringSeen{}
 	}
@@ -279,6 +287,7 @@ func Run(ctx context.Context, opts Options) error {
 
 	for {
 		expireSupport(ctx, opts, time.Now())
+		reconcileBackupKey(ctx, opts)
 		var err error
 		results, err = beat(ctx, opts, results)
 		if err != nil {

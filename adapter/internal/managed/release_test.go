@@ -16,14 +16,17 @@ var update = flag.Bool("update", false, "rewrite the golden files")
 
 func releaseInput() managed.ReleaseInput {
 	return managed.ReleaseInput{
-		ChartVersion:    "0.1.0",
-		HubURL:          "https://hub.example",
-		EnvironmentName: "orders",
-		EnvironmentID:   "0123456789ab",
-		ImageRepository: "ghcr.io/percona/pds-adapter",
-		ImageTag:        "0.1.0",
-		Bucket:          "pds-111122223333-0123456789ab",
-		Region:          "eu-west-1",
+		ChartVersion:      "0.1.0",
+		HubURL:            "https://hub.example",
+		EnvironmentName:   "orders",
+		EnvironmentID:     "0123456789ab",
+		ImageRepository:   "ghcr.io/percona/pds-adapter",
+		ImageTag:          "0.1.0",
+		Bucket:            "pds-111122223333-0123456789ab",
+		Region:            "eu-west-1",
+		BackupUser:        "pds-0123456789ab-backup",
+		BackupUserPath:    "/pds/aaaaaaaaaaaa/",
+		BackupBoundaryARN: "arn:aws:iam::111122223333:policy/pds/aaaaaaaaaaaa/pds-aaaaaaaaaaaa-backup-boundary",
 	}
 }
 
@@ -83,7 +86,7 @@ func TestRenderReleaseTagsVolumesWithTheEnvironmentID(t *testing.T) {
 
 func TestRenderReleaseWithoutAnIDLeavesTheTaggedStorageClassOut(t *testing.T) {
 	in := releaseInput()
-	in.EnvironmentID = ""
+	in.EnvironmentID, in.BackupUser = "", ""
 
 	got, err := managed.RenderRelease(in)
 	require.NoError(t, err)
@@ -133,4 +136,34 @@ func TestAFailedUpgradeRollsBackAfterOneAttemptAndStops(t *testing.T) {
 	assert.Zero(t, remediation.Retries, "retries counts attempts after the first, so one attempt is zero retries")
 	assert.True(t, remediation.RemediateLastFailure, "without it the single attempt that fails is not rolled back")
 	assert.Equal(t, "rollback", remediation.Strategy)
+}
+
+func TestRenderReleaseNamesTheBackupUserTheAgentMakesAndNoKey(t *testing.T) {
+	got, err := managed.RenderRelease(releaseInput())
+	require.NoError(t, err)
+
+	var release struct {
+		Spec struct {
+			Values struct {
+				Adapter struct {
+					BackupKey map[string]string `json:"backupKey"`
+				} `json:"adapter"`
+			} `json:"values"`
+		} `json:"spec"`
+	}
+	require.NoError(t, yaml.Unmarshal(got, &release))
+	assert.Equal(t, map[string]string{
+		"user": "pds-0123456789ab-backup", "path": "/pds/aaaaaaaaaaaa/", "tag": "0123456789ab",
+		"boundaryArn": "arn:aws:iam::111122223333:policy/pds/aaaaaaaaaaaa/pds-aaaaaaaaaaaa-backup-boundary",
+	}, release.Spec.Values.Adapter.BackupKey)
+	assert.NotContains(t, string(got), "AWS_SECRET_ACCESS_KEY", "no key reaches Git")
+}
+
+func TestRenderReleaseRefusesABackupUserWithNoPathToLiveUnder(t *testing.T) {
+	in := releaseInput()
+	in.BackupUserPath = ""
+
+	_, err := managed.RenderRelease(in)
+
+	require.Error(t, err)
 }

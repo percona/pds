@@ -91,6 +91,12 @@ func (i *Infra) PlanUpdate(ctx context.Context, t Target, spec UpdateSpec) (Chan
 		}
 		in.Parameters = append(in.Parameters, cfntypes.Parameter{ParameterKey: sdkaws.String(key), UsePreviousValue: sdkaws.Bool(true)})
 	}
+	// A revision may add a parameter, which a stack made before it has no value for.
+	for _, key := range sortedKeys(spec.Parameters) {
+		if _, has := current.Parameters[key]; !has {
+			in.Parameters = append(in.Parameters, cfntypes.Parameter{ParameterKey: sdkaws.String(key), ParameterValue: sdkaws.String(spec.Parameters[key])})
+		}
+	}
 	for _, key := range sortedKeys(spec.Tags) {
 		in.Tags = append(in.Tags, cfntypes.Tag{Key: sdkaws.String(key), Value: sdkaws.String(spec.Tags[key])})
 	}

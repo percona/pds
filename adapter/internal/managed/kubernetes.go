@@ -119,9 +119,14 @@ func (d Deps) connectionReady(s scope) error {
 // moving the Kubernetes version when one is given.
 func (d Deps) updateSpec(s scope, name, kubernetesVersion string) aws.UpdateSpec {
 	base := d.stackSpec(s)
-	spec := aws.UpdateSpec{Name: name, Template: base.Template, ServiceRoleARN: base.ServiceRoleARN, Tags: base.Tags}
+	// The agent role is the parameter revision 2 added, and a stack made before it
+	// has none to keep.
+	spec := aws.UpdateSpec{
+		Name: name, Template: base.Template, ServiceRoleARN: base.ServiceRoleARN, Tags: base.Tags,
+		Parameters: map[string]string{"AgentRoleArn": base.Parameters["AgentRoleArn"]},
+	}
 	if kubernetesVersion != "" {
-		spec.Parameters = map[string]string{"KubernetesVersion": kubernetesVersion}
+		spec.Parameters["KubernetesVersion"] = kubernetesVersion
 	}
 
 	return spec

@@ -5,6 +5,11 @@
 # reviewable. A hub keeps one replica, so this file does too.
 stack:
   enabled: false
+  s3:
+    enabled: true
+    bucket: pds-123456789012-k3j9x2m4p1q7
+    region: eu-west-1
+    existingSecret: pds-s3
 nameOverride: ""
 fullnameOverride: platform
 
@@ -62,6 +67,11 @@ adapter:
       enabled: true
     inCluster:
       storageClass: gp3-encrypted
+  backupKey:
+    user: pds-k3j9x2m4p1q7-backup
+    path: /pds/aaaaaaaaaaaa/
+    boundaryArn: arn:aws:iam::123456789012:policy/pds/aaaaaaaaaaaa/pds-aaaaaaaaaaaa-backup-boundary
+    tag: k3j9x2m4p1q7
   hub:
     joinTokenTTL: 12h
     heartbeatStale: 2m
