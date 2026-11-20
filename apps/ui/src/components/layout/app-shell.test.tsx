@@ -64,7 +64,7 @@ describe("AppShell", () => {
   it("renders the product name and primary navigation", async () => {
     renderShell();
 
-    expect(screen.getByText("Percona Database Service")).toBeInTheDocument();
+    expect(screen.getByText("PDS", { exact: true })).toBeInTheDocument();
     expect(screen.queryByText("MySQL on this Kubernetes cluster")).not.toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Main" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Environments" })).toHaveAttribute(

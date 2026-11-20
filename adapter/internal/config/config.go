@@ -126,7 +126,7 @@ type Config struct {
 
 	// InvitationTTL is how long an invitation an Organization admin makes
 	// stays claimable. InvitationFrom is the sender of the email that carries
-	// it; without it, or without ResendAPIKey, nothing is emailed and the
+	// it; without it, or without SESRegion, nothing is emailed and the
 	// admin shares the link.
 	InvitationTTL  time.Duration
 	InvitationFrom string
@@ -219,9 +219,11 @@ type Config struct {
 	// can be replaced without rewriting every row first.
 	StateEncryptionKeysRetired []string
 
-	// ResendAPIKey emails an invitation when InvitationFrom is also set.
-	// Without it, the admin only sees the link.
-	ResendAPIKey string
+	// SESRegion is the Amazon SES region that emails an invitation when
+	// InvitationFrom is also set. Credentials come from the AWS default
+	// chain, never from configuration. Without it, the admin only sees the
+	// link.
+	SESRegion string
 
 	// SupportTailnet is the private network support access runs over. Its
 	// credentials come from Secrets, and only a hub uses them.
@@ -493,7 +495,7 @@ func Load() (Config, error) {
 		HubClusterRegion:       strings.TrimSpace(lookup("HUB_CLUSTER_REGION", "us-west-2")),
 		EnvironmentName:        strings.TrimSpace(lookupRenamed("ENVIRONMENT_NAME", "CLUSTER_NAME", "")),
 		DatabaseURL:            strings.TrimSpace(os.Getenv("DATABASE_URL")),
-		ResendAPIKey:           strings.TrimSpace(lookup("RESEND_API_KEY", "")),
+		SESRegion:              strings.TrimSpace(lookup("SES_REGION", "")),
 	}
 
 	flags, err := loadFeatures()

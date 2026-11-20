@@ -108,7 +108,7 @@ func clearEnv(t *testing.T) {
 		"HUB_JOIN_SECRET",
 		"HUB_INVENTORY_CONFIGMAP",
 		"HUB_ORGANIZATION",
-		"RESEND_API_KEY",
+		"SES_REGION",
 	} {
 		t.Setenv(key, "")
 	}

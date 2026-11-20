@@ -13,4 +13,8 @@ describe("index.html meta description", () => {
   it.each(["MySQL", "PostgreSQL"])("names %s, as the page does", (engine) => {
     expect(description).toContain(engine);
   });
+
+  it("does not offer a Kubernetes cluster you already have", () => {
+    expect(description).not.toMatch(/already have|existing|your own Kubernetes|join a Kubernetes/i);
+  });
 });

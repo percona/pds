@@ -634,6 +634,14 @@ in the Secret.
 - name: HUB_PUBLIC_URL
   value: {{ . | quote }}
 {{- end }}
+{{- with .Values.adapter.hub.invitationFrom }}
+- name: INVITATION_FROM
+  value: {{ . | quote }}
+{{- end }}
+{{- with .Values.adapter.hub.sesRegion }}
+- name: SES_REGION
+  value: {{ . | quote }}
+{{- end }}
 {{- with .Values.adapter.hub.oauthIssuer }}
 - name: HUB_OAUTH_ISSUER
   value: {{ . | quote }}

@@ -1,0 +1,624 @@
+/* The faux console: the production console's screens drawn at stage size. A
+   stage that uses it carries .fx; the kit's tokens are mapped in stage-theme.css. */
+.fx p {
+  margin: 0;
+}
+
+.fx .ss-fit {
+  overflow: hidden;
+}
+
+.fx .ss-stage {
+  overflow: hidden;
+}
+
+.fx .fx-window {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+}
+
+.fx .fx-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1;
+  padding: 18px 16px;
+  background: var(--ss-surface);
+  font-size: 12px;
+  color: var(--ss-text);
+}
+
+.fx .fx-strong {
+  color: var(--ss-text-strong);
+}
+
+.fx .fx-mono {
+  font-family: var(--ss-mono);
+  font-size: 11px;
+  color: var(--ss-text-strong);
+}
+
+.fx .fx-muted {
+  color: var(--ss-text);
+}
+
+.fx .fx-title {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--ss-text-strong);
+}
+
+.fx .fx-small {
+  font-size: 11px;
+}
+
+.fx .fx-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.fx .fx-head > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fx .fx-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-lg);
+  background: var(--ss-surface);
+  overflow: hidden;
+}
+
+.fx .fx-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+}
+
+.fx .fx-row + .fx-row {
+  border-top: 1px solid var(--ss-line);
+}
+
+.fx .fx-grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.fx .fx-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.fx .fx-outline {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--ss-line);
+}
+
+.fx .fx-engine {
+  display: flex;
+  height: 16px;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--ss-text);
+}
+
+.fx .fx-icon {
+  flex: none;
+  display: block;
+  color: var(--ss-icon);
+}
+
+/* The sidebar */
+.fx .fx-side {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 8px;
+}
+
+.fx .fx-brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--ss-text-strong);
+}
+
+.fx .fx-brand img {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.fx .fx-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--ss-radius-md);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ss-text);
+}
+
+.fx .fx-nav[data-active] {
+  background: var(--ss-ink-2);
+  color: var(--ss-text-strong);
+}
+
+/* The databases list row */
+.fx .fx-db {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 12px;
+}
+
+.fx .fx-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fx .fx-backup {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--ss-text);
+}
+
+.fx .fx-backup span:last-child {
+  color: var(--ss-text-strong);
+}
+
+/* The provisioning screen */
+.fx .fx-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  width: 300px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.fx .fx-center .fx-card {
+  width: 100%;
+  text-align: left;
+}
+
+.fx .fx-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  font-size: 12px;
+  color: var(--ss-text-strong);
+}
+
+.fx .fx-step + .fx-step {
+  border-top: 1px solid var(--ss-line);
+}
+
+.fx .fx-step .fx-grow {
+  color: var(--ss-text-strong);
+}
+
+.fx .fx-step-state {
+  font-size: 11px;
+  color: var(--ss-text);
+}
+
+.fx .fx-mark {
+  width: 22px;
+  height: 22px;
+}
+
+/* A table, as the console's Table draws it */
+.fx .fx-table {
+  display: grid;
+  width: 100%;
+  font-size: 12px;
+}
+
+.fx .fx-tr {
+  display: grid;
+  grid-template-columns: 1.1fr 0.7fr 1fr 1.1fr 60px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+}
+
+.fx .fx-tr + .fx-tr {
+  border-top: 1px solid var(--ss-line);
+}
+
+.fx .fx-th {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ss-text);
+}
+
+/* Form fields and dialogs */
+.fx .fx-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fx .fx-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ss-text-strong);
+}
+
+.fx .fx-input {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  background: var(--ss-surface);
+  font-family: var(--ss-mono);
+  font-size: 12px;
+  color: var(--ss-text-strong);
+}
+
+.fx .fx-input[data-text] {
+  font-family: var(--ss-font);
+}
+
+.fx .fx-area {
+  padding: 8px 10px;
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  font-family: var(--ss-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-line;
+  color: var(--ss-text-strong);
+}
+
+.fx .fx-two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.fx .fx-choices {
+  display: flex;
+  gap: 8px;
+}
+
+.fx .fx-choice {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  height: 32px;
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  font-family: var(--ss-mono);
+  font-size: 12px;
+  color: var(--ss-text-strong);
+}
+
+.fx .fx-choice[data-on] {
+  border-color: var(--ss-accent);
+}
+
+.fx .fx-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.fx .fx-scrim {
+  background: var(--ss-ink-4);
+  align-items: center;
+}
+
+.fx .fx-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 340px;
+  padding: 18px;
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-lg);
+  background: var(--ss-surface);
+  box-shadow: var(--ss-shadow-float);
+}
+
+.fx .fx-dialog-head {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.fx .fx-step-num {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border: 1px solid var(--ss-line);
+  border-radius: 999px;
+  font-family: var(--ss-mono);
+  font-size: 11px;
+  color: var(--ss-text-strong);
+}
+
+.fx .fx-pre {
+  padding: 8px 10px;
+  border-radius: var(--ss-radius-md);
+  background: var(--ss-ink-2);
+  font-family: var(--ss-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  color: var(--ss-text-strong);
+}
+
+.fx .fx-dl {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 12px;
+}
+
+.fx .fx-dl > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fx .fx-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ss-text-strong);
+}
+
+.fx .fx-alert-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  font-size: 11px;
+  color: var(--ss-text);
+}
+
+/* The hero window */
+.fx .fx-hero-window {
+  width: 650px;
+  height: 460px;
+}
+
+.fx .fx-hero-window .fx-body {
+  padding-right: 90px;
+}
+
+.fx .fx-hero-window .fx-side-wrap {
+  flex: 1;
+}
+
+.fx .ss-stage[data-layout="compact"] .fx-hero-window {
+  top: 12px;
+  left: 10px;
+  width: 420px;
+  height: 460px;
+}
+
+.fx .ss-stage[data-layout="compact"] .fx-hero-window .fx-body {
+  padding: 14px 90px 14px 14px;
+}
+
+.fx .fx-url {
+  display: block;
+  white-space: nowrap;
+}
+
+.fx .ss-stage[data-layout="compact"] .fx-hero-window .fx-url {
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fx .ss-stage[data-layout="compact"] .fx-center {
+  width: 100%;
+}
+
+.fx .ss-stage[data-layout="compact"] .fx-db {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.fx .ss-stage[data-layout="compact"] .fx-backup {
+  display: none;
+}
+
+/* The operation stills */
+.fx .fx-still-window {
+  width: 560px;
+  height: 460px;
+}
+
+.fx .fx-still-window .fx-body {
+  padding-right: 76px;
+}
+
+.fx .ss-stage[data-layout="compact"] .fx-still-window {
+  top: 10px;
+  left: 10px;
+  width: 410px;
+  height: 460px;
+}
+
+.fx .ss-stage[data-layout="compact"] .fx-still-window .fx-body {
+  padding-right: 88px;
+}
+
+.fx .ss-stage[data-layout="compact"] .fx-dialog {
+  width: 100%;
+}
+
+.fx .ss-window__spacer {
+  display: none;
+}
+
+.fx .ss-stage[data-layout="compact"] .fx-tr {
+  grid-template-columns: minmax(0, 1fr) auto 60px;
+}
+
+.fx .ss-stage[data-layout="compact"] .fx-tr > :nth-child(2),
+.fx .ss-stage[data-layout="compact"] .fx-tr > :nth-child(3) {
+  display: none;
+}
+
+.fx .ss-stage[data-layout="compact"] .fx-still-window .fx-url {
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fx .fx-back {
+  width: 128px;
+}
+
+.fx .fx-step-state {
+  min-width: 64px;
+  text-align: right;
+}
+
+.fx .ss-stage[data-layout="compact"] .fx-wide-only {
+  display: none;
+}
+
+/* The agent terminal, in the page's tokens so it follows light and dark */
+.fx .ss-window[data-chrome="terminal"] {
+  --ss-term-bg: var(--ss-surface);
+  --ss-term-path: var(--ss-accent);
+  --ss-term-sigil: var(--ss-success-text);
+  --ss-term-ok: var(--ss-success-text);
+  --ss-term-dim: var(--ss-text);
+  box-shadow:
+    0 0 0 1px var(--ss-line),
+    var(--ss-shadow-hero);
+}
+
+.fx .ss-window[data-chrome="terminal"] .ss-window__dot {
+  background: var(--ss-ink-5);
+}
+
+.fx .ss-term__title {
+  color: var(--ss-text);
+}
+
+.fx .ss-term {
+  color: var(--ss-text);
+  padding: 14px 18px;
+}
+
+.fx .ss-term__cmd {
+  color: var(--ss-text-strong);
+}
+
+.fx .ss-term__caret {
+  background: var(--ss-text-strong);
+}
+
+.fx .fx-term-window {
+  top: 16px;
+  left: 16px;
+  width: 560px;
+  height: 330px;
+}
+
+.fx .fx-tgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: opacity 0.2s ease;
+}
+
+.fx .fx-tgroup[data-gone] {
+  opacity: 0;
+}
+
+.fx .fx-tline {
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.fx .fx-tline[data-on] {
+  opacity: 1;
+}
+
+.fx .ss-term .fx-answer {
+  margin-top: 8px;
+  max-width: 440px;
+  color: var(--ss-text-strong);
+  white-space: pre-wrap;
+}
+
+.fx .fx-term-window .ss-term > .fx-tgroup > .fx-tline,
+.fx .fx-term-window .ss-term .fx-tline {
+  white-space: pre;
+}
+
+.fx .ss-stage[data-layout="compact"] .fx-term-window {
+  top: 10px;
+  left: 10px;
+  width: 360px;
+  height: 330px;
+}
+
+.fx .ss-stage[data-layout="compact"] .fx-term-window .ss-term {
+  padding-right: 62px;
+}
+
+.fx .ss-stage[data-layout="compact"] .fx-answer {
+  max-width: 226px;
+}
+
+.fx .ss-stage[data-layout="compact"] .fx-tgroup {
+  gap: 2px;
+}
+
+.fx .fx-caret {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.fx .fx-caret[data-on] {
+  opacity: 1;
+}
+
+.fx .fx-tresult {
+  color: var(--ss-text);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.fx .fx-tresult[data-on] {
+  opacity: 1;
+}

@@ -11,6 +11,14 @@ describe("SiteHeader", () => {
     expect(screen.queryByRole("link", { name: /request access/i })).not.toBeInTheDocument();
   });
 
+  it("links to the public repository", () => {
+    render(<SiteHeader />);
+
+    const link = screen.getByRole("link", { name: "GitHub" });
+    expect(link).toHaveAttribute("href", "https://github.com/percona/pds");
+    expect(link).toHaveAttribute("rel", "noreferrer");
+  });
+
   it("flips the theme and remembers it under the console's key", async () => {
     const user = userEvent.setup();
     render(<SiteHeader />);

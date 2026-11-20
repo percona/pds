@@ -15,7 +15,7 @@ another module needs to import something. Tests sit next to the code.
 | `cmd/adapter` | The binary: configuration, wiring, roles, and the `adapter organization` command |
 | `internal/api` | HTTP: the chi router in `server.go`, handlers, `AppError` and `Respond`, the session guard, and the embedded join scripts and cloud connection template |
 | `internal/service` | Business logic. Services decide, call clients and return domain errors |
-| `internal/client/*` | One package per downstream: `everest`, `pmm`, `servicenow`, `github`, `claude`, `cursor`, `resend`, and `kube`, the only package that talks to the Kubernetes API, `clientmeta`, which fetches an OAuth client's metadata document, and `aws`, which assumes a cloud connection's role and reads the account |
+| `internal/client/*` | One package per downstream: `everest`, `pmm`, `servicenow`, `github`, `claude`, `cursor`, `ses`, and `kube`, the only package that talks to the Kubernetes API, `clientmeta`, which fetches an OAuth client's metadata document, and `aws`, which assumes a cloud connection's role and reads the account |
 | `internal/engine` | The engine plugin contract, the registry, and engine errors. `oe` is the shared OpenEverest implementation; `mysql` and `postgresql` are its two flavors |
 | `internal/hub` | Hub state: environment inventory, join tokens, the work queue, and the two Git stores (GitHub, or a local directory) |
 | `internal/agent` | The `agent` role: the heartbeat loop and the work it runs locally |

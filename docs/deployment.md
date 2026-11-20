@@ -308,12 +308,13 @@ curl -fsSL 'https://hub.example.com/api/internal/connect/bootstrap.sh' | bash -s
   with no terminal refuses. When `kubectl` reaches the EKS cluster it
   deletes the Flux `instances` Kustomization, every database and every Service
   of type LoadBalancer, waiting for each load balancer to go, all in a
-  kubeconfig of its own. Before it asks, it reads the EBS volumes the EBS CSI
-  driver provisioned with reclaim policy `Delete`, lists them, and deletes the
-  ones left available once the nodes are gone, because monitoring's claim stays
-  in use until then; a volume that stays is printed with the command that
-  deletes it, since a rerun finds nothing tagged. When `kubectl` cannot reach
-  the EKS cluster it warns that its volumes may stay and carries on. Then it runs `eksctl delete cluster
+  kubeconfig of its own. Before it asks, it lists the EBS volumes tagged
+  `kubernetes.io/cluster/<name>=owned`, the tag the EBS CSI driver puts on every volume it creates, with
+  their sizes. After the EKS cluster is gone it reads them again, so a volume created after
+  the plan is found too, and deletes the ones that are available, waiting for monitoring's
+  to detach. A volume that is attached or tagged for another EKS cluster is never deleted, and one
+  that stays is printed with the command that deletes it. This needs no `kubectl`, and it
+  runs when the EKS cluster was already deleted another way. Then it runs `eksctl delete cluster
   --wait`, reads the EKS cluster and its eksctl stack back, and only when both
   are gone deletes the bucket, the IAM user and any role stack left. A rerun
   after a half deleted EKS cluster finds its leftover eksctl stack by the same

@@ -2,9 +2,8 @@ import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { Faq } from "@/sections/faq";
 import { Hero } from "@/sections/hero";
-import { HowItWorks } from "@/sections/how-it-works";
 import { Operations } from "@/sections/operations";
-import { Pillars } from "@/sections/pillars";
+import { Proof } from "@/sections/proof";
 import { Pricing } from "@/sections/pricing";
 
 export function App() {
@@ -19,8 +18,7 @@ export function App() {
       <SiteHeader />
       <main id="main">
         <Hero />
-        <Pillars />
-        <HowItWorks />
+        <Proof />
         <Operations />
         <Pricing />
         <Faq />

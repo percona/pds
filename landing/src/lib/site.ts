@@ -7,10 +7,14 @@ export const productName = "Percona Database Service";
  */
 export const consoleUrl = import.meta.env.VITE_CONSOLE_URL || "/app/";
 
+/** The public repository. */
+export const githubUrl = "https://github.com/percona/pds";
+
 /** In-page anchors, shared by the header nav and the sections they point at. */
 export const sectionIds = {
-  howItWorks: "how-it-works",
+  tryIt: "try-it",
   operations: "operations",
+  proof: "proof",
   pricing: "pricing",
   faq: "faq",
 } as const;

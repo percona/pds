@@ -712,6 +712,41 @@ JSON
     echo "\${FAKE_NODEGROUPS:-ng-1}"
     exit 0
     ;;
+  *"ec2 describe-volumes"*)
+    # ec2-volumes holds one volume per line: id, size, state, and the EKS
+    # cluster whose tag it carries. The answer is the volumes the filter names.
+    if [[ "\${FAKE_VOLUMES_RC:-0}" != 0 ]]; then
+      echo "An error occurred (UnauthorizedOperation) when calling the DescribeVolumes operation" >&2
+      exit 254
+    fi
+    want=""
+    for arg in \$@; do
+      if [[ "\$arg" == "Name=tag:kubernetes.io/cluster/"*",Values=owned" ]]; then
+        want="\${arg#Name=tag:kubernetes.io/cluster/}"
+        want="\${want%,Values=owned}"
+      fi
+    done
+    [[ -n "\$want" && -f "${WORK}/ec2-volumes" ]] || exit 0
+    awk -v c="\$want" '\$4 == c {printf "%s\t%s\t%s\n", \$1, \$2, \$3}' "${WORK}/ec2-volumes"
+    exit 0
+    ;;
+  *"ec2 delete-volume"*)
+    if [[ "\${FAKE_VOLUMES_DELETE_RC:-0}" != 0 ]]; then
+      echo "An error occurred (VolumeInUse) when calling the DeleteVolume operation" >&2
+      exit 254
+    fi
+    volume=""
+    prev=""
+    for arg in \$@; do
+      if [[ "\$prev" == "--volume-id" ]]; then
+        volume="\$arg"
+      fi
+      prev="\$arg"
+    done
+    grep -v "^\${volume} " "${WORK}/ec2-volumes" >"${WORK}/ec2-volumes.new" || true
+    mv "${WORK}/ec2-volumes.new" "${WORK}/ec2-volumes"
+    exit 0
+    ;;
   *"ec2 describe-regions"*)
     if [[ "\${FAKE_DESCRIBE_REGIONS_RC:-0}" != 0 ]]; then
       echo "AccessDeniedException: not authorized to perform ec2:DescribeRegions" >&2
@@ -2755,6 +2790,114 @@ grep -q "eksctl delete cluster --name spoke-a" "${WORK}/calls" \
   || fail "rollback did not delete the cluster this run created: $(cat "${WORK}/calls")"
 pass "on-failure rollback still removes what the run created"
 
+# --- rollback deletes the EBS volumes the EKS cluster it created left behind ---
+# They are found by the tag the EBS CSI driver puts on them, so one monitoring
+# made before the failure goes too. Only a volume that is available is deleted,
+# and only one tagged for this EKS cluster.
+printf '%s\n' \
+  "vol-0aaa 20 available spoke-a" \
+  "vol-0bbb 8 available spoke-a" \
+  "vol-0ccc 20 in-use spoke-a" \
+  "vol-0ddd 20 available other-env" >"${WORK}/ec2-volumes"
+reset_join_flags
+ON_FAILURE="rollback"
+CREATED_CLUSTER=1
+(
+  false
+  on_exit
+) 2>"${WORK}/rollback-volumes.err" || true
+grep -qF "ec2 describe-volumes --region us-west-2 --filters Name=tag:kubernetes.io/cluster/spoke-a,Values=owned" "${WORK}/calls" \
+  || fail "rollback did not look for volumes by the EKS cluster tag: $(cat "${WORK}/calls")"
+for volume in vol-0aaa vol-0bbb; do
+  grep -q "^aws ec2 delete-volume --region us-west-2 --volume-id ${volume}\$" "${WORK}/calls" \
+    || fail "rollback left the available volume ${volume}: $(cat "${WORK}/calls")"
+done
+for volume in vol-0ccc vol-0ddd; do
+  grep -q "delete-volume.*${volume}" "${WORK}/calls" \
+    && fail "rollback deleted ${volume}, which is attached or tagged for another EKS cluster: $(cat "${WORK}/calls")"
+done
+eksctl_at="$(grep -n "^eksctl delete cluster" "${WORK}/calls" | head -n1 | cut -d: -f1)"
+volume_at="$(grep -n "^aws ec2 delete-volume" "${WORK}/calls" | head -n1 | cut -d: -f1)"
+[[ -n "$eksctl_at" && -n "$volume_at" && "$eksctl_at" -lt "$volume_at" ]] \
+  || fail "rollback deleted a volume before the EKS cluster that holds it: $(cat "${WORK}/calls")"
+grep -q "vol-0ccc" "${WORK}/rollback-volumes.err" \
+  || fail "rollback did not name the attached volume it left: $(cat "${WORK}/rollback-volumes.err")"
+pass "rollback deletes the available volumes tagged for the EKS cluster it created and no other"
+
+# A rollback of a join to an EKS cluster that was already there deletes no volume.
+printf '%s\n' "vol-0aaa 20 available spoke-a" >"${WORK}/ec2-volumes"
+reset_join_flags
+ON_FAILURE="rollback"
+CREATED_NODEGROUP=1
+CREATED_BUCKET=1
+(
+  false
+  on_exit
+) 2>/dev/null || true
+grep -q "ec2 describe-volumes\|ec2 delete-volume" "${WORK}/calls" \
+  && fail "rollback of a join to an existing EKS cluster touched volumes: $(cat "${WORK}/calls")"
+pass "rollback of a join to an existing EKS cluster deletes no volume"
+
+# An EKS cluster that would not delete still holds its volumes, so none is touched.
+printf '%s\n' "vol-0aaa 20 available spoke-a" >"${WORK}/ec2-volumes"
+reset_join_flags
+ON_FAILURE="rollback"
+CREATED_CLUSTER=1
+PHASE="creating the EKS cluster"
+save_state
+export FAKE_EKSCTL_RC=1
+(
+  false
+  on_exit
+) 2>"${WORK}/rollback-eksctl-fail.err" || true
+unset FAKE_EKSCTL_RC
+grep -q "ec2 delete-volume" "${WORK}/calls" \
+  && fail "rollback deleted a volume of an EKS cluster it could not delete: $(cat "${WORK}/calls")"
+[[ -f "$(state_path spoke-a us-west-2)" ]] \
+  || fail "rollback cleared resume state after the EKS cluster would not delete"
+pass "rollback leaves the volumes alone when the EKS cluster would not delete"
+
+# A volume that cannot be deleted is reported and keeps the resume state.
+printf '%s\n' "vol-0aaa 20 available spoke-a" >"${WORK}/ec2-volumes"
+reset_join_flags
+ON_FAILURE="rollback"
+CREATED_CLUSTER=1
+PHASE="creating the EKS cluster"
+save_state
+export FAKE_VOLUMES_DELETE_RC=1
+(
+  false
+  on_exit
+) 2>"${WORK}/rollback-volume-fail.err" || true
+unset FAKE_VOLUMES_DELETE_RC
+[[ -f "$(state_path spoke-a us-west-2)" ]] \
+  || fail "rollback cleared resume state after a volume would not delete"
+grep -qF "aws ec2 delete-volume --region us-west-2 --volume-id vol-0aaa" "${WORK}/rollback-volume-fail.err" \
+  || fail "rollback did not print the command that deletes the volume it could not: $(cat "${WORK}/rollback-volume-fail.err")"
+grep -q "Resume state was kept" "${WORK}/rollback-volume-fail.err" \
+  || fail "rollback did not say the resume state was kept: $(cat "${WORK}/rollback-volume-fail.err")"
+pass "rollback reports a volume it could not delete and keeps resume state"
+
+# A volume list that cannot be read is a failed rollback step, not a clean one.
+printf '%s\n' "vol-0aaa 20 available spoke-a" >"${WORK}/ec2-volumes"
+reset_join_flags
+ON_FAILURE="rollback"
+CREATED_CLUSTER=1
+PHASE="creating the EKS cluster"
+save_state
+export FAKE_VOLUMES_RC=1
+(
+  false
+  on_exit
+) 2>"${WORK}/rollback-volume-list.err" || true
+unset FAKE_VOLUMES_RC
+[[ -f "$(state_path spoke-a us-west-2)" ]] \
+  || fail "rollback cleared resume state after the volumes could not be listed"
+grep -q "could not list the EBS volumes" "${WORK}/rollback-volume-list.err" \
+  || fail "rollback did not say the volumes could not be listed: $(cat "${WORK}/rollback-volume-list.err")"
+pass "rollback treats a volume list it cannot read as an unfinished rollback"
+rm -f "${WORK}/ec2-volumes"
+
 reset_join_flags
 CREATED_BUCKET=1
 CREATED_IAM_USER=1
@@ -4748,15 +4891,27 @@ case "$*" in
     rm -f "${world}/stack.$(arg_after --stack-name "$@")"
     ;;
   *"ec2 describe-volumes"*)
-    volume="$(arg_after --volume-ids "$@")"
-    state="$(awk -v v="$volume" '$1 == v {print $2}' "${world}/volumes")"
-    if [[ -z "$state" ]]; then
-      echo "An error occurred (InvalidVolume.NotFound) when calling the DescribeVolumes operation" >&2
+    # volumes holds one per line: id, size, state, and the EKS cluster whose
+    # tag it carries. The answer is the volumes the tag filter names.
+    if [[ "${FAKE_DEL_VOLUMES_RC:-0}" != 0 ]]; then
+      echo "An error occurred (UnauthorizedOperation) when calling the DescribeVolumes operation" >&2
       exit 254
     fi
-    echo "$state"
+    want=""
+    for arg in "$@"; do
+      if [[ "$arg" == "Name=tag:kubernetes.io/cluster/"*",Values=owned" ]]; then
+        want="${arg#Name=tag:kubernetes.io/cluster/}"
+        want="${want%,Values=owned}"
+      fi
+    done
+    [[ -n "$want" ]] || exit 0
+    awk -v c="$want" '$4 == c {printf "%s\t%s\t%s\n", $1, $2, $3}' "${world}/volumes"
     ;;
   *"ec2 delete-volume"*)
+    if [[ "${FAKE_DEL_VOLUME_DELETE_RC:-0}" != 0 ]]; then
+      echo "An error occurred (VolumeInUse) when calling the DeleteVolume operation" >&2
+      exit 254
+    fi
     volume="$(arg_after --volume-id "$@")"
     grep -v "^${volume} " "${world}/volumes" >"${world}/volumes.new" || true
     mv "${world}/volumes.new" "${world}/volumes"
@@ -4772,6 +4927,8 @@ if [[ "$*" == *"delete cluster"* ]]; then
   [[ "${FAKE_DEL_CLUSTER_SURVIVES:-0}" == 1 ]] || rm -f "${DEL_WORLD}/cluster"
   [[ "${FAKE_DEL_CLUSTER_SURVIVES:-0}" == 1 ]] || rm -f "${DEL_WORLD}/stack.eksctl-spoke-a-cluster"
   [[ "${FAKE_DEL_STACK_SURVIVES:-0}" == 1 ]] || rm -f "${DEL_WORLD}/stack.eksctl-spoke-a-addon-iamserviceaccount-kube-system-ebs-csi-controller-sa"
+  # A database added after the plan was shown leaves a volume the plan did not list.
+  [[ -z "${FAKE_DEL_LATE_VOLUME:-}" ]] || echo "${FAKE_DEL_LATE_VOLUME} 8 available spoke-a" >>"${DEL_WORLD}/volumes"
   # A throttle or a denial that starts after the long delete.
   [[ "${FAKE_DEL_STACK_ERR_AFTER:-0}" != 1 ]] || touch "${DEL_WORLD}/stack-err"
 fi
@@ -4787,9 +4944,6 @@ case "$*" in
     ;;
   *"get svc"*)
     printf '%s' "${FAKE_DEL_LB_SERVICES:-}"
-    ;;
-  *"get pv"*)
-    printf '%s' "${FAKE_DEL_PV_HANDLES:-}"
     ;;
   *"delete svc"*)
     exit "${FAKE_DEL_KUBECTL_SVC_RC:-0}"
@@ -4949,8 +5103,8 @@ del_mutations() {
 }
 
 # --- a delete removes everything the join tagged, once the name is typed ---
-FAKE_DEL_VOLUMES=$'vol-0aaa available\nvol-0bbb available\n' del_world
-FAKE_DEL_LB_SERVICES=$'pds db-lb\nmonitoring pmm-lb\n' FAKE_DEL_PV_HANDLES=$'ebs.csi.aws.com vol-0aaa ebs.csi.aws.com\nebs.csi.aws.com vol-0bbb ebs.csi.aws.com\n' \
+FAKE_DEL_VOLUMES=$'vol-0aaa 20 available spoke-a\nvol-0bbb 8 available spoke-a\n' del_world
+FAKE_DEL_LB_SERVICES=$'pds db-lb\nmonitoring pmm-lb\n' \
   del_run spoke-a --delete --name spoke-a --region us-west-2
 [[ "$DEL_RC" == 0 ]] || fail "a delete of a tagged environment failed (${DEL_RC}): $(cat "${DEL}/out")"
 del_called "^eksctl delete cluster --name spoke-a --region us-west-2 --wait" \
@@ -5007,10 +5161,10 @@ del_before '^kubectl delete kustomization instances' '^kubectl delete instances'
   && del_before '^kubectl delete instances' '^kubectl delete svc' \
   && del_before '^kubectl delete svc' '^eksctl delete cluster' \
   || fail "the databases and load balancers did not go before the EKS cluster: $(cat "${DEL}/calls")"
-del_called "^kubectl get pv.*persistentVolumeReclaimPolicy==\"Delete\"" \
-  || fail "the EBS volumes were not saved, or not only those Kubernetes would delete: $(cat "${DEL}/calls")"
-del_before '^kubectl get pv' '^kubectl delete' \
-  || fail "the EBS volumes were saved after something was deleted: $(cat "${DEL}/calls")"
+del_called "^kubectl get pv" \
+  && fail "the volumes were read from Kubernetes, which misses one the cluster made later: $(cat "${DEL}/calls")"
+del_called "^aws ec2 describe-volumes --region us-west-2 --filters Name=tag:kubernetes.io/cluster/spoke-a,Values=owned" \
+  || fail "the EBS volumes were not found by the EKS cluster tag: $(cat "${DEL}/calls")"
 del_called "^kubectl delete pvc" \
   && fail "a volume claim was deleted, which stalls on monitoring's claim while its pod runs: $(cat "${DEL}/calls")"
 for volume in vol-0aaa vol-0bbb; do
@@ -5182,8 +5336,8 @@ grep -q "still there" "${DEL}/out" || fail "the run did not say the EKS cluster 
 pass "--delete reads the EKS cluster back and keeps the bucket and user when it is still there"
 
 # --- a volume that will not detach is said so and the rest is still deleted ---
-FAKE_DEL_VOLUMES=$'vol-0ccc in-use\n' del_world
-WAIT_INTERVAL=0 FAKE_DEL_PV_HANDLES=$'ebs.csi.aws.com vol-0ccc ebs.csi.aws.com\n' \
+FAKE_DEL_VOLUMES=$'vol-0ccc 20 in-use spoke-a\n' del_world
+WAIT_INTERVAL=0 \
   del_run spoke-a --delete --name spoke-a --region us-west-2
 [[ "$DEL_RC" != 0 ]] || fail "an EBS volume still in use exited 0: $(cat "${DEL}/out")"
 grep -q "vol-0ccc is in-use" "${DEL}/out" || fail "the volume that stayed was not named: $(cat "${DEL}/out")"
@@ -5250,28 +5404,77 @@ del_called "^kubectl " && fail "kubectl ran on a host without it: $(cat "${DEL}/
 del_called "^eksctl delete cluster" || fail "the EKS cluster was not deleted without kubectl: $(cat "${DEL}/calls")"
 pass "--delete warns and carries on when kubectl is not installed"
 
-# --- only volumes Kubernetes provisioned for a claim are deleted ---
-# A volume a customer attached by hand, one with another driver, and anything
-# that is not a volume ID are never on the list, even if they turn up in the
-# volume list and are available.
-FAKE_DEL_VOLUMES=$'vol-0aaa available\nvol-0ddd available\nvol-0eee available\n' del_world
-FAKE_DEL_PV_HANDLES=$'ebs.csi.aws.com vol-0aaa ebs.csi.aws.com\nebs.csi.aws.com vol-0ddd\nother.csi vol-0eee other.csi\nebs.csi.aws.com ../../x ebs.csi.aws.com\n' \
-  del_run spoke-a --delete --name spoke-a --region us-west-2
-[[ "$DEL_RC" == 0 ]] || fail "a delete with volumes of several kinds failed (${DEL_RC}): $(cat "${DEL}/out")"
+# --- only an available volume tagged for this EKS cluster is deleted ---
+# One tagged for another EKS cluster is never listed or deleted, and one that is
+# attached stays even when it is tagged for this one.
+FAKE_DEL_VOLUMES=$'vol-0aaa 20 available spoke-a\nvol-0ddd 20 available other-env\nvol-0eee 20 in-use spoke-a\n' del_world
+WAIT_INTERVAL=0 del_run spoke-a --delete --name spoke-a --region us-west-2
 del_called "^aws ec2 delete-volume --region us-west-2 --volume-id vol-0aaa" \
-  || fail "the volume Kubernetes provisioned was not deleted: $(cat "${DEL}/calls")"
-for volume in vol-0ddd vol-0eee "../../x"; do
-  grep -q "delete-volume.*${volume}" "${DEL}/calls" && fail "${volume} was not provisioned by the EBS CSI driver and was deleted: $(cat "${DEL}/calls")"
-  grep -q "describe-volumes.*${volume}" "${DEL}/calls" && fail "${volume} was looked up though it is not a provisioned volume: $(cat "${DEL}/calls")"
+  || fail "the available volume tagged for this EKS cluster was not deleted: $(cat "${DEL}/calls")"
+for volume in vol-0ddd vol-0eee; do
+  grep -q "delete-volume.*${volume}" "${DEL}/calls" && fail "${volume} is attached or tagged for another EKS cluster and was deleted: $(cat "${DEL}/calls")"
 done
+grep -q "vol-0ddd" "${DEL}/out" && fail "a volume tagged for another EKS cluster was listed: $(cat "${DEL}/out")"
 grep -q "vol-0aaa" "${DEL}/out" || fail "the plan did not list the volume it will delete: $(cat "${DEL}/out")"
-pass "--delete deletes only EBS volumes the CSI driver provisioned for a claim"
+pass "--delete deletes only available EBS volumes tagged for the EKS cluster"
 
-# --- a delete that cannot save the volumes says they may stay ---
-del_world
+# --- the plan lists each volume with its size, before the name is asked for ---
+FAKE_DEL_VOLUMES=$'vol-0aaa 20 available spoke-a\nvol-0bbb 8 available spoke-a\n' del_world
+del_run spoke-a --delete --name spoke-a --region us-west-2
+grep -q "EBS volume vol-0aaa, 20 GiB" "${DEL}/out" \
+  || fail "the plan did not list the volume with its size: $(cat "${DEL}/out")"
+grep -q "EBS volume vol-0bbb, 8 GiB" "${DEL}/out" \
+  || fail "the plan did not list the second volume with its size: $(cat "${DEL}/out")"
+plan_at="$(grep -n "EBS volume vol-0aaa" "${DEL}/out" | head -n1 | cut -d: -f1)"
+ask_at="$(grep -n "to confirm: " "${DEL}/out" | head -n1 | cut -d: -f1)"
+[[ -n "$plan_at" && -n "$ask_at" && "$plan_at" -le "$ask_at" ]] \
+  || fail "the volumes were listed after the prompt: $(cat "${DEL}/out")"
+pass "--delete lists the EBS volumes with their sizes before it asks"
+
+# --- a volume created after the plan, or with no saved list, is deleted too ---
+FAKE_DEL_VOLUMES=$'vol-0aaa 20 available spoke-a\n' del_world
+FAKE_DEL_LATE_VOLUME=vol-0f00d del_run spoke-a --delete --name spoke-a --region us-west-2
+[[ "$DEL_RC" == 0 ]] || fail "a delete with a late volume failed (${DEL_RC}): $(cat "${DEL}/out")"
+del_called "^aws ec2 delete-volume --region us-west-2 --volume-id vol-0f00d" \
+  || fail "a volume created after the plan was left behind: $(cat "${DEL}/calls")"
+[[ ! -s "${DEL}/world/volumes" ]] || fail "a volume tagged for spoke-a is still in the account: $(cat "${DEL}/world/volumes")"
+pass "--delete reads the volumes again after the nodes are gone"
+
+FAKE_DEL_VOLUMES=$'vol-0aaa 20 available spoke-a\n' del_world
 FAKE_DEL_KUBECTL_RC=1 del_run spoke-a --delete --name spoke-a --region us-west-2
-grep -q "EBS volumes of its databases may stay in your account" "${DEL}/out" \
-  || fail "an EKS cluster kubectl cannot reach was deleted without saying its volumes may stay: $(cat "${DEL}/out")"
+[[ "$DEL_RC" == 0 ]] || fail "an EKS cluster kubectl cannot reach stopped the delete (${DEL_RC}): $(cat "${DEL}/out")"
+del_called "^aws ec2 delete-volume --region us-west-2 --volume-id vol-0aaa" \
+  || fail "a volume was left because kubectl could not reach the EKS cluster: $(cat "${DEL}/calls")"
+grep -q "may stay in your account" "${DEL}/out" \
+  && fail "the run warned the volumes may stay though it finds them by tag: $(cat "${DEL}/out")"
+pass "--delete finds the volumes without kubectl"
+
+# The EKS cluster was deleted another way: its volumes are still found and deleted.
+FAKE_DEL_VOLUMES=$'vol-0aaa 20 available spoke-a\n' FAKE_DEL_CLUSTER=ABSENT FAKE_DEL_STACK=ABSENT \
+  FAKE_DEL_BUCKETS='' FAKE_DEL_USERS='' del_world
+del_run spoke-a --delete --name spoke-a --region us-west-2
+[[ "$DEL_RC" == 0 ]] || fail "volumes left by an EKS cluster deleted another way were not deleted (${DEL_RC}): $(cat "${DEL}/out")"
+del_called "^aws ec2 delete-volume --region us-west-2 --volume-id vol-0aaa" \
+  || fail "a volume left by an EKS cluster deleted another way stayed: $(cat "${DEL}/calls")"
+del_called "^eksctl " && fail "eksctl ran with no EKS cluster to delete: $(cat "${DEL}/calls")"
+pass "--delete deletes the volumes of an EKS cluster that is already gone"
+
+# A volume list that cannot be read stops the run before anything is deleted.
+FAKE_DEL_VOLUMES=$'vol-0aaa 20 available spoke-a\n' del_world
+FAKE_DEL_VOLUMES_RC=1 del_run spoke-a --delete --name spoke-a --region us-west-2
+[[ "$DEL_RC" != 0 ]] || fail "a volume list that could not be read exited 0: $(cat "${DEL}/out")"
+grep -q "could not list the EBS volumes" "${DEL}/out" || fail "the run did not say the volumes could not be listed: $(cat "${DEL}/out")"
+[[ -z "$(del_mutations)" ]] || fail "something was deleted though the volumes could not be listed: $(del_mutations)"
+pass "--delete stops before it deletes when it cannot list the volumes"
+
+# A volume that will not delete is printed with the command that deletes it.
+FAKE_DEL_VOLUMES=$'vol-0aaa 20 available spoke-a\n' del_world
+FAKE_DEL_VOLUME_DELETE_RC=1 del_run spoke-a --delete --name spoke-a --region us-west-2
+[[ "$DEL_RC" != 0 ]] || fail "a volume that would not delete exited 0: $(cat "${DEL}/out")"
+grep -qF "aws ec2 delete-volume --region us-west-2 --volume-id vol-0aaa" "${DEL}/out" \
+  || fail "the volume that stayed was not printed with its delete command: $(cat "${DEL}/out")"
+del_called "^aws s3 rb" || fail "a volume that would not delete stopped the bucket delete: $(cat "${DEL}/calls")"
+pass "--delete names a volume it could not delete and still deletes the rest"
 
 # --- a step that fails on the databases does not stop the delete ---
 del_world
@@ -5279,7 +5482,7 @@ FAKE_DEL_KUBECTL_DB_RC=1 del_run spoke-a --delete --name spoke-a --region us-wes
 [[ "$DEL_RC" == 0 ]] || fail "a database delete that failed stopped the EKS cluster delete (${DEL_RC}): $(cat "${DEL}/out")"
 del_called "^eksctl delete cluster" || fail "the EKS cluster was not deleted after the databases would not go: $(cat "${DEL}/calls")"
 grep -q "Carrying on" "${DEL}/out" || fail "a database delete that failed was not warned about: $(cat "${DEL}/out")"
-pass "--delete warns about volumes it cannot save and databases it cannot delete, and carries on"
+pass "--delete warns about databases it cannot delete and carries on"
 
 # --- a stack that cannot be read is never taken as gone ---
 del_world

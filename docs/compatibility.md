@@ -82,7 +82,7 @@ must match.
 | OpenEverest | 2.0.0-dev.4 | Chart `openeverest` from https://openeverest.github.io/helm-charts/ |
 | PXC provider | 0.3.1 | `provider-percona-xtradb-cluster` (`provider-pxc`) |
 | PXC operator | 1.20.0 | Installed by the PXC provider chart |
-| PostgreSQL provider | 0.5.0 | `provider-percona-postgresql` (`provider-postgresql`) |
+| PostgreSQL provider | 0.6.0 | `provider-percona-postgresql` (`provider-postgresql`) |
 | PostgreSQL operator | 3.0.0 | Installed by the PostgreSQL provider chart |
 | PMM chart | 1.9.1 | Optional; app 3.9.1 |
 | Instance CRD | core.openeverest.io/v1alpha1 | Adapter client constant |

@@ -60,7 +60,7 @@ providers:
     name: provider-percona-postgresql
     alias: provider-postgresql
     repository: oci://ghcr.io/openeverest/charts
-    version: "0.5.0"
+    version: "0.6.0"
     operator: "3.0.0"
 
 pmm:

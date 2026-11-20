@@ -136,7 +136,7 @@ An admin invites through `GET`/`POST /api/invitations`,
 invitation carries an email, a Team and a role. The token is single use and
 only its hash is stored, so the link (`<public URL>/claim?token=...`) is
 returned once, by the create and by a resend, and is emailed when
-`RESEND_API_KEY` and `INVITATION_FROM` are both set (`emailed` says whether it
+`SES_REGION` and `INVITATION_FROM` are both set (Amazon SES, with the AWS default credential chain) (`emailed` says whether it
 went). An Organization has one pending invitation per email, and a resend
 revokes the old row and mints a new link. It lives `INVITATION_TTL` (7 days). An
 `anyEmail` invitation has no address, only the User role and a 48 hour life.

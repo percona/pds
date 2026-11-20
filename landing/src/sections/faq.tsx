@@ -5,11 +5,11 @@ import { sectionIds } from "@/lib/site";
 const questions = [
   {
     q: "Where does my data live?",
-    a: "On the Kubernetes cluster you connect, in your own account. PDS does not hold the database. When the command creates an EKS cluster, backups go to an S3 bucket in that account. A Kubernetes cluster you already have keeps its own backup store. A support ticket has connection strings, passwords and secrets removed before it is sent.",
+    a: "On the EKS cluster the command creates in your own AWS account. PDS does not hold the database. Backups go to an S3 bucket in that account. A support ticket has connection strings, passwords and secrets removed before it is sent.",
   },
   {
     q: "What does PDS create in my AWS account?",
-    a: "By default, an EKS cluster with four t3.2xlarge nodes in the region you choose, a NAT gateway, an S3 bucket for backups, and the roles that go with them. AWS bills those to your account, and each database adds a load balancer. The command asks for the region before it creates anything. To join a Kubernetes cluster you already have, it creates nothing in AWS.",
+    a: "By default, an EKS cluster with four t3.2xlarge nodes in the region you choose, a NAT gateway, an S3 bucket for backups, and the roles that go with them. AWS bills those to your account, and each database adds a load balancer. The command asks for the region before it creates anything.",
   },
   {
     q: "What happens if I disconnect an environment?",

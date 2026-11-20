@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { NavLink } from "react-router";
+import { ExperimentalNotice } from "@/components/layout/experimental-notice";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { OrganizationSwitcher, SignedInAs, useIsAdmin } from "@/features/auth";
 import { useActivityAvailability } from "@/features/activity";
@@ -19,7 +20,7 @@ import { useAlerts } from "@/features/alerts";
 import { useFeature } from "@/features/flags";
 import { useSupportAvailability } from "@/features/support";
 import { TeamSelector } from "@/features/teams";
-import { productName } from "@/lib/product";
+import { shortenedProductName } from "@/lib/product";
 import { cn } from "@/lib/utils";
 import { assetUrl } from "@/lib/base-path";
 
@@ -80,12 +81,18 @@ export function Sidebar() {
       data-testid="sidebar"
       className="fixed inset-y-0 left-0 flex w-64 flex-col border-r border-border bg-card"
     >
-      <div className="flex h-14 items-center justify-between px-4">
-        <span className="flex items-center gap-2">
-          <img src={assetUrl("percona-mark.svg")} alt="" className="size-5" />
-          <span className="text-sm font-semibold tracking-tight">{productName}</span>
+      <div className="flex h-14 items-center justify-between px-3">
+        <span className="flex items-center gap-1.5">
+          <img src={assetUrl("percona-mark.svg")} alt="" className="size-5 shrink-0" />
+          <span className="flex flex-col items-start gap-0.5">
+            <span className="whitespace-nowrap text-sm font-semibold leading-tight tracking-tight">
+              {shortenedProductName}
+            </span>
+            <ExperimentalNotice />
+          </span>
         </span>
-        <ThemeToggle />
+        {/* The product name leaves 28px beside the icon, so the toggle is smaller than the default and tucks into the padding. */}
+        <ThemeToggle className="-mr-1 size-7 shrink-0" />
       </div>
 
       <div className="px-2 pb-2">
