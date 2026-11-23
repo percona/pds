@@ -756,8 +756,11 @@ provider-postgresql:
 
 # MongoDB provider. The operator watches every namespace so Instances in
 # stack.dbNamespace are reconciled from everest-system.
+# Its operator subchart is aliased operator, like the PXC provider's, so both
+# would otherwise be named <release>-operator and collide on install.
 provider-mongodb:
   operator:
+    fullnameOverride: pds-psmdb-operator
     watchAllNamespaces: true
 
 # Percona PostgreSQL operator for the adapter's own database, used when

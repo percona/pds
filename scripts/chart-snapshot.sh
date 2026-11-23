@@ -729,6 +729,47 @@ if [[ "${UPDATE}" != true ]]; then
     echo "ok values-spoke.yaml omits UI"
   fi
   rm -f "${spoke_render}"
+  # Two subcharts that bundle an operator under the same alias render objects
+  # of the same name, and a render does not fail on that: helm install does,
+  # on the second object. The stack is on here, so every provider renders.
+  spoke_stack="$(mktemp)"
+  if ! "${HELM}" template "${RELEASE}" "${CHART_DIR}" \
+      --namespace everest-system \
+      --values "${CHART_DIR}/values-spoke.yaml" \
+      --set adapter.hub.agentToken=lab-token >"${spoke_stack}" 2>&1; then
+    echo "values-spoke.yaml with the stack on failed to render: $(cat "${spoke_stack}")" >&2
+    status=1
+  elif ! python3 - "${spoke_stack}" <<'PY'
+import re
+import sys
+from collections import defaultdict
+
+seen = defaultdict(list)
+for doc in re.split(r"^---\s*$", open(sys.argv[1], encoding="utf-8").read(), flags=re.M):
+    source = re.search(r"^# Source: (.+)$", doc, re.M)
+    kind = re.search(r"^kind: (\S+)", doc, re.M)
+    meta = re.search(r"^metadata:\n((?:[ ]+.*\n|\n)*)", doc, re.M)
+    if not (source and kind and meta):
+        continue
+    name = re.search(r"^  name: (\S+)", meta.group(1), re.M)
+    namespace = re.search(r"^  namespace: (\S+)", meta.group(1), re.M)
+    if name:
+        key = (kind.group(1), namespace.group(1) if namespace else "", name.group(1).strip("\"'"))
+        seen[key].append(source.group(1))
+dupes = {k: v for k, v in seen.items() if len(v) > 1}
+for (kind, namespace, name), sources in sorted(dupes.items()):
+    print("%s %s/%s is rendered more than once:" % (kind, namespace or "-", name), file=sys.stderr)
+    for source in sources:
+        print("  " + source, file=sys.stderr)
+sys.exit(1 if dupes else 0)
+PY
+  then
+    echo "values-spoke.yaml with the stack on renders an object twice, which helm install refuses" >&2
+    status=1
+  else
+    echo "ok values-spoke.yaml with the stack on renders no object twice"
+  fi
+  rm -f "${spoke_stack}"
   # An Ingress that routes / at a Service the release did not create returns
   # 503 with nothing on the chart side saying why.
   # An Ingress on a spoke is refused outright rather than rendered without the
