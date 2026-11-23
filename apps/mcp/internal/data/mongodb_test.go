@@ -101,7 +101,7 @@ func TestTheTransportOfAMongoDBStringIsReadAsGivenAndNeverDowngraded(t *testing.
 
 func TestAMongoDBStringThatIsNotUsableIsRefusedWithoutRepeatingIt(t *testing.T) {
 	for _, uri := range []string{
-		"mongodb+srv://dba:x@cluster.example.com/admin",
+		"mongodb+srv://dba:x@srv.example.com/admin",
 		"mongodb://dba:x@/admin",
 		"mongodb://dba@h:27017/admin",
 		"mongodb://dba:x@h:99999/admin",
