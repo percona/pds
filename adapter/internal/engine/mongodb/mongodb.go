@@ -18,6 +18,7 @@ type EverestClient = oe.EverestClient
 var (
 	WithNamespace     = oe.WithNamespace
 	WithBackupStorage = oe.WithBackupStorage
+	WithBackupDeleter = oe.WithBackupDeleter
 )
 
 // New returns a MongoDB plugin that talks to the given Everest client.

@@ -497,7 +497,7 @@ server accepted it, the agent deletes the `PerconaPGCluster` it made (the one
 whose `dataSource` restores that backup) before reporting the failure.
 
 A MongoDB database is one replica set whose Instance carries the engine
-component alone: no proxy, no monitoring component and no backup section. The
+component alone: no proxy and no monitoring component. The
 heartbeat names the engines the agent serves (`engines`), and the hub refuses a
 MongoDB create on an environment whose last beat does not name it, because that
 environment needs an update to get the provider. MySQL and PostgreSQL need no
@@ -506,6 +506,23 @@ such mark. The hub also refuses, before it writes anything, a MongoDB name over
 and no message, and any access or allowed addresses, because a MongoDB
 database has no access from outside the Kubernetes cluster yet. The API accepts
 the engine, while the engine picker and the MCP engine list leave it out.
+
+A MongoDB Instance is created with backups on and a storage, because turning
+them on in a running database restarts every member. Staging and Prod carry the
+daily schedule, and a Dev database keeps the storage with no schedule for
+on-demand backups. The schedule is written without the provider's `retention`:
+the provider's retention deletes a backup together with its data and then
+recreates it from the object that still owns it, so nothing is pruned and every
+slot runs twice. The count a schedule keeps lives on the Instance as the
+annotation `pds.percona.com/backup-copies`, and each beat the agent deletes the
+OpenEverest Backup objects of that schedule beyond the count, oldest finished
+first, counting only succeeded scheduled backups. Turning the schedule off
+stops the pruning and keeps every backup. The agent lists backups through the
+OpenEverest API, and its only grant on the objects is `delete` on `backups`
+in the database namespace. A MongoDB backup reports when it finished and
+nothing reliable about when it started, so the console shows the finish time
+alone and no duration is worked out. Deleting the database deletes its backups
+and the data they wrote to the backup storage.
 
 The agent calls OpenEverest with the hand written client in
 `adapter/internal/client/everest`. It scopes calls to cluster `main`

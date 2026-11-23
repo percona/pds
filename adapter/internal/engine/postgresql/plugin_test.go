@@ -72,7 +72,7 @@ func seedProfile(t *testing.T, fake *fakeEverest, name, profile string) string {
 			ClassRef: everest.ObjectRef{Name: everest.BackupClassPostgreSQL},
 			Storages: []everest.InstanceBackupStorage{{
 				StorageRef: everest.ObjectRef{Name: testBackupStorage},
-				Schedules:  []everest.InstanceBackupSchedule{oe.ScheduleSpec(engine.DefaultSchedule())},
+				Schedules:  []everest.InstanceBackupSchedule{oe.ScheduleSpec(everest.ProviderPostgreSQL, engine.DefaultSchedule())},
 			}},
 		}
 	}

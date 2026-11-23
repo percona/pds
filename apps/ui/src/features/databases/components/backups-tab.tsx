@@ -96,6 +96,7 @@ export function BackupsTab({
           backingUp={backingUp}
           backUpEnabled={backupEnabled}
           onRestore={onRestore}
+          finishOnly={database.engine === "mongodb"}
         />
       ) : null}
     </div>

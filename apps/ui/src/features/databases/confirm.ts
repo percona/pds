@@ -14,3 +14,9 @@ export function isNameConfirmed(typed: string, name: string): boolean {
  * backups go with it.
  */
 export const POSTGRESQL_BACKUPS_STAY = "PostgreSQL backups stay in the backup storage.";
+
+/**
+ * Said wherever a delete is announced. Deleting a MongoDB database deletes its
+ * backups with it, including the data they wrote to the backup storage.
+ */
+export const MONGODB_BACKUPS_DELETED = "MongoDB backups are deleted from the backup storage too.";
