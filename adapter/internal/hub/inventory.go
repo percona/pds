@@ -3,6 +3,7 @@ package hub
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -62,6 +63,11 @@ type Heartbeat struct {
 	// holds an item until it hears back, so this is what stops a delete
 	// from being handed out a second time.
 	Results []WorkResult `json:"results,omitempty"`
+	// Engines are the engines this agent serves, which is the engines the
+	// environment's chart installed a provider for. An agent that predates the
+	// field reports none, so the hub refuses an engine that arrived later than
+	// the field and keeps serving MySQL and PostgreSQL.
+	Engines []string `json:"engines,omitempty"`
 	// PrivateAccess marks an agent that tells a private load balancer from
 	// a public one. An older agent reads every load balancer as public and
 	// would hand over a private database's password as a public one, so a
@@ -425,6 +431,17 @@ func (i *Inventory) MonitoringConfig(name string) string {
 	defer i.mu.Unlock()
 
 	return i.environments[name].last.MonitoringConfig
+}
+
+// ServesEngine reports whether a spoke's last beat named the engine.
+func (i *Inventory) ServesEngine(name, engineID string) bool {
+	if i == nil {
+		return false
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	return slices.Contains(i.environments[name].last.Engines, engineID)
 }
 
 // PMMReport says what a spoke's last beat reported about monitoring: whether

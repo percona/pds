@@ -20,6 +20,12 @@ export const engines: EngineOption[] = [
     detail: "The usual choice for existing PostgreSQL apps.",
     enabled: true,
   },
+  {
+    id: "mongodb",
+    label: "MongoDB",
+    detail: "The usual choice for existing MongoDB apps.",
+    enabled: false,
+  },
 ];
 
 export const visibleEngines = engines.filter((engine) => engine.enabled);
@@ -31,6 +37,36 @@ export const postgresqlNameLimit = 37;
 
 export const postgresqlNameReason =
   "Every member's labels carry this name, and a longer one is refused.";
+
+// The MongoDB provider derives the names of the replica set's objects from the
+// database name and refuses one over 22 characters. The adapter refuses it
+// too; checking it here only saves a round trip.
+export const mongodbNameLimit = 22;
+
+export const mongodbNameReason = "Its members' object names are built from it.";
+
+/**
+ * The longest name a create accepts for an engine, with why. MySQL has none
+ * beyond the 63 every name has.
+ */
+export const createNameLimits: Partial<
+  Record<DatabaseEngine, { limit: number; label: string; reason: string }>
+> = {
+  postgresql: {
+    limit: postgresqlNameLimit,
+    label: "PostgreSQL",
+    reason: postgresqlNameReason,
+  },
+  mongodb: { limit: mongodbNameLimit, label: "MongoDB", reason: mongodbNameReason },
+};
+
+/**
+ * MongoDB has no access from outside the Kubernetes cluster yet, so it has no
+ * Access choice.
+ */
+export function hasAccessChoice(engine: DatabaseEngine): boolean {
+  return engine !== "mongodb";
+}
 
 export const createPageDescription = `A ${joinLabels(visibleEngines, "or")} database on this Kubernetes cluster.`;
 

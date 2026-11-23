@@ -33,17 +33,20 @@ const AnnotationInstancePreset = "openeverest.io/instance-preset"
 const (
 	ProviderPXC        = "percona-xtradb-cluster"
 	ProviderPostgreSQL = "provider-percona-postgresql"
+	ProviderMongoDB    = "percona-server-mongodb"
 )
 
 // BackupClass names the provider charts install as cluster-scoped CRs.
 const (
 	BackupClassPXC        = "pxc"
 	BackupClassPostgreSQL = "pg"
+	BackupClassMongoDB    = "percona-backup-mongodb"
 )
 
-// Topology types the PXC and PostgreSQL providers advertise.
+// Topology types the providers advertise.
 const (
-	TopologyCluster = "cluster"
+	TopologyCluster    = "cluster"
+	TopologyReplicaSet = "replicaSet"
 )
 
 // Component keys inside Instance.spec.components.

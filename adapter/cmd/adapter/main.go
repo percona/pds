@@ -26,6 +26,7 @@ import (
 	"github.com/percona/pds/adapter/internal/client/tailnet"
 	"github.com/percona/pds/adapter/internal/config"
 	"github.com/percona/pds/adapter/internal/engine"
+	"github.com/percona/pds/adapter/internal/engine/mongodb"
 	"github.com/percona/pds/adapter/internal/engine/mysql"
 	"github.com/percona/pds/adapter/internal/engine/postgresql"
 	"github.com/percona/pds/adapter/internal/features"
@@ -154,6 +155,7 @@ func run() error {
 			Environment: cfg.EnvironmentName,
 			Namespace:   cfg.EverestNamespace,
 			Storage:     cfg.EverestBackupStorage,
+			Engines:     engineIDs(engineRegistry(cfg, everestClient)),
 			Databases:   databases,
 			Logger:      logger,
 			// The hub points new databases here at this config, so it is
@@ -645,8 +647,23 @@ func engineRegistry(cfg config.Config, client *everest.Client) *engine.Registry 
 		postgresql.WithNamespace(cfg.EverestNamespace),
 		postgresql.WithBackupStorage(cfg.EverestBackupStorage),
 	))
+	registry.Register(mongodb.New(
+		client,
+		mongodb.WithNamespace(cfg.EverestNamespace),
+		mongodb.WithBackupStorage(cfg.EverestBackupStorage),
+	))
 
 	return registry
+}
+
+// engineIDs names the engines a registry serves, in the order it lists them.
+func engineIDs(registry *engine.Registry) []string {
+	var ids []string
+	for _, plugin := range registry.All() {
+		ids = append(ids, plugin.Engine())
+	}
+
+	return ids
 }
 
 // errHubTeamRequired is a signed-in request that still has no Team, or an

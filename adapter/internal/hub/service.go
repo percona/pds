@@ -30,6 +30,14 @@ var ErrNotSupported = errors.New("that action is not available in hub mode")
 // ErrEngineNotSupported means the hub cannot write a manifest for that engine.
 var ErrEngineNotSupported = errors.New("that engine is not available in hub mode")
 
+// ErrAccessNotAvailable means a create asked for access from outside the
+// Kubernetes cluster for an engine that has none yet.
+var ErrAccessNotAvailable = errors.New("access from outside is not available for that engine")
+
+// ErrEngineNotOnEnvironment means the environment has not reported a provider
+// for the engine, so it needs an update before it can run one.
+var ErrEngineNotOnEnvironment = errors.New("the environment does not run that engine")
+
 // ErrRestoreNotSupported means restoring a backup into a new database is not
 // available for the source's engine.
 var ErrRestoreNotSupported = errors.New("restore to a new database is not available for that engine")
@@ -255,13 +263,15 @@ func (s *Service) Create(ctx context.Context, in engine.CreateInput) (*engine.In
 	if !ValidName(name) {
 		return nil, fmt.Errorf("%w: %q must be lowercase letters, numbers, and dashes", engine.ErrInvalidName, name)
 	}
-	if flavor.ID == oe.PostgreSQL.ID && len(name) > maxPostgreSQLName {
+	if field, limit := createNameLimit(flavor); limit > 0 && len(name) > limit {
 		return nil, &engine.BoundsError{
-			Field: "A PostgreSQL database name", Unit: "characters",
-			Value: len(name), Min: 1, Max: maxPostgreSQLName,
+			Field: field, Unit: "characters", Value: len(name), Min: 1, Max: limit,
 		}
 	}
 	if err := s.requireKnown(environment); err != nil {
+		return nil, err
+	}
+	if err := s.requireEngine(environment, flavor); err != nil {
 		return nil, err
 	}
 	path := instancePath(environment, name)
@@ -280,7 +290,7 @@ func (s *Service) Create(ctx context.Context, in engine.CreateInput) (*engine.In
 		return nil, fmt.Errorf("%w: %q on %s", engine.ErrExists, name, environment)
 	}
 
-	exposure, err := engine.CheckAccess(in)
+	exposure, err := accessFor(flavor, in)
 	if err != nil {
 		return nil, err
 	}
@@ -475,6 +485,54 @@ const maxRestoreCopyName = (63 - len("restore-job-") - len("-datasource") - 1) /
 // instance set, <name>-instance1-<4 characters>-<up to 10 characters>, and
 // Kubernetes refuses a label over 63.
 const maxPostgreSQLName = 63 - len("-instance1-xxxx-xxxxxxxxxx")
+
+// maxMongoDBName is the longest name a MongoDB database may carry. The provider
+// derives the replica set's object names from it and refuses a longer one with
+// a Failed phase and no message, so the limit is enforced before a manifest is
+// written.
+const maxMongoDBName = 22
+
+// createNameLimit is the longest name a create may carry for an engine, with
+// the words that name the limit in the refusal. Zero means only the DNS label
+// rule applies.
+func createNameLimit(flavor oe.Flavor) (field string, limit int) {
+	switch flavor.ID {
+	case oe.PostgreSQL.ID:
+		return "A PostgreSQL database name", maxPostgreSQLName
+	case oe.MongoDB.ID:
+		return "A MongoDB database name", maxMongoDBName
+	}
+
+	return "", 0
+}
+
+// accessFor is the exposure a create writes. A flavor that carries the engine
+// component alone has no load balancer to put it behind, so a request that
+// names an access or an allow list is refused rather than ignored.
+func accessFor(flavor oe.Flavor, in engine.CreateInput) (engine.Exposure, error) {
+	if !flavor.EngineOnly {
+		return engine.CheckAccess(in)
+	}
+	if in.Access != "" || len(in.SourceRanges) > 0 {
+		return engine.Exposure{}, fmt.Errorf("%w: %s", ErrAccessNotAvailable, flavor.ID)
+	}
+
+	return engine.Exposure{}, nil
+}
+
+// requireEngine refuses an engine the environment's last beat did not name.
+// MySQL and PostgreSQL ship in every release, so an agent that predates the
+// field still runs them.
+func (s *Service) requireEngine(environment string, flavor oe.Flavor) error {
+	if flavor.ID == oe.MySQL.ID || flavor.ID == oe.PostgreSQL.ID {
+		return nil
+	}
+	if !s.inv.ServesEngine(environment, flavor.ID) {
+		return fmt.Errorf("%w: %s on %s", ErrEngineNotOnEnvironment, flavor.ID, environment)
+	}
+
+	return nil
+}
 
 // RestoreToNewDatabase writes a second Instance on the environment the source runs
 // on, provisioned from the named backup. The source database is left as it is,

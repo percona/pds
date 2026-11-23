@@ -49,7 +49,10 @@ type Options struct {
 	Namespace   string
 	// Storage is the BackupStorage name this environment has registered, so the
 	// hub writes manifests that name an object this spoke actually has.
-	Storage   string
+	Storage string
+	// Engines are the engines this agent serves. The hub creates a database
+	// only for an engine the environment has named.
+	Engines   []string
 	Interval  time.Duration
 	Databases SpokeAPI
 	// Secrets answers the secret reads the hub asks for. Nil means this agent
@@ -582,6 +585,7 @@ func beat(ctx context.Context, opts Options, pending []hub.WorkResult) ([]hub.Wo
 		Environment:       opts.Environment,
 		Namespace:         opts.Namespace,
 		BackupStorage:     opts.Storage,
+		Engines:           opts.Engines,
 		MonitoringConfig:  reportedMonitoring(ctx, opts, now),
 		Results:           pending,
 		At:                now,

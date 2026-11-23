@@ -28,7 +28,7 @@ const maxRequestBody = 1 << 20
 // belong to the engine plugin, which is the only place that knows them.
 type createDatabaseRequest struct {
 	Name        string `json:"name" validate:"required"`
-	Engine      string `json:"engine" validate:"omitempty,oneof=mysql postgresql"`
+	Engine      string `json:"engine" validate:"omitempty,oneof=mysql postgresql mongodb"`
 	Profile     string `json:"profile" validate:"required"`
 	Namespace   string `json:"namespace"`
 	Environment string `json:"environment"`
@@ -613,6 +613,14 @@ func databaseError(err error, subject string) *AppError {
 
 	case errors.Is(err, hub.ErrEngineNotSupported):
 		return NotImplemented("Only MySQL and PostgreSQL databases can be created here. Pick one of them.").
+			WithCause(err)
+
+	case errors.Is(err, hub.ErrAccessNotAvailable):
+		return Validation("Access from outside the Kubernetes cluster is not available for MongoDB yet.").
+			WithCause(err)
+
+	case errors.Is(err, hub.ErrEngineNotOnEnvironment):
+		return Conflict("This environment does not run MongoDB yet. Update the environment, then try again.").
 			WithCause(err)
 
 	case errors.Is(err, hub.ErrNotSupported):

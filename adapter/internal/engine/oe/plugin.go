@@ -1,5 +1,5 @@
 // Package oe is the OpenEverest Instance engine plugin. One Flavor selects
-// MySQL or PostgreSQL; both share profiles, bounds, and the Instance API.
+// MySQL, PostgreSQL or MongoDB; both share profiles, bounds, and the Instance API.
 package oe
 
 import (
@@ -98,6 +98,10 @@ type Flavor struct {
 	// whose only schedule is turned off is kept and runs nothing, which is how
 	// a database without a schedule keeps a storage its manifest can list.
 	DropsIdleBackupStorage bool
+	// EngineOnly is a provider whose Instance carries the engine component
+	// alone: no proxy, no monitoring component and no backup section. The hub
+	// writes nothing for a part of the Instance until PDS serves it.
+	EngineOnly bool
 }
 
 // MySQL is the Percona XtraDB Cluster flavor.
@@ -123,6 +127,19 @@ var PostgreSQL = Flavor{
 	URIScheme:   "postgres",
 
 	DropsIdleBackupStorage: true,
+}
+
+// MongoDB is the Percona Server for MongoDB flavor. A database is one replica
+// set and clients reach its members directly, so there is no proxy.
+var MongoDB = Flavor{
+	ID:          "mongodb",
+	Provider:    everest.ProviderMongoDB,
+	Topology:    everest.TopologyReplicaSet,
+	BackupClass: everest.BackupClassMongoDB,
+	DefaultPort: 27017,
+	URIScheme:   "mongodb",
+
+	EngineOnly: true,
 }
 
 // EverestClient is the slice of the Everest API this plugin depends on.

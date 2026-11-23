@@ -174,6 +174,54 @@ func TestInstanceYAMLNeverEnablesBackupsWithoutAStorage(t *testing.T) {
 	}
 }
 
+// The MongoDB provider reconciles an engine component alone. A proxy, a pmm
+// component or a backup section is a part of the Instance it has no use for,
+// and the first two make it refuse the Instance.
+func TestInstanceYAMLWritesAMongoDBReplicaSetWithTheEngineComponentOnly(t *testing.T) {
+	targets := environmentTargets{BackupStorage: "s3", MonitoringConfig: "pmm"}
+	for profile, members := range map[string]int32{oe.ProfileDev: 1, oe.ProfileStaging: 3, oe.ProfileProd: 3} {
+		t.Run(profile, func(t *testing.T) {
+			body, p, err := instanceYAML("orders", "pds", "spoke-a", oe.MongoDB, profile, targets, engine.ResourceOverrides{}, engine.Exposure{})
+			require.NoError(t, err)
+			assert.Equal(t, members, p.members)
+
+			var doc struct {
+				Metadata everest.ObjectMeta   `json:"metadata"`
+				Spec     everest.InstanceSpec `json:"spec"`
+			}
+			require.NoError(t, yaml.Unmarshal(body, &doc))
+			assert.Equal(t, "percona-server-mongodb", doc.Spec.ProviderRef.Name)
+			assert.Equal(t, "replicaSet", doc.Spec.Topology.Type)
+			assert.Equal(t, "mongodb", doc.Metadata.Labels[oe.LabelEngine])
+			assert.Equal(t, "pds-mongodb-"+profile, doc.Metadata.Annotations["openeverest.io/instance-preset"])
+			require.Len(t, doc.Spec.Components, 1)
+			engineSpec := doc.Spec.Components[everest.ComponentEngine]
+			assert.Empty(t, engineSpec.Type)
+			assert.Equal(t, members, engineSpec.ReplicaCount())
+			assert.Nil(t, engineSpec.Service, "a MongoDB database has no load balancer yet")
+			assert.Nil(t, doc.Spec.Backup)
+		})
+	}
+}
+
+func TestScaleOfAMongoDBDatabaseAddsNoProxy(t *testing.T) {
+	body, _, err := instanceYAML("orders", "pds", "spoke-a", oe.MongoDB, oe.ProfileDev, environmentTargets{}, engine.ResourceOverrides{}, engine.Exposure{})
+	require.NoError(t, err)
+	members := 3
+
+	out, err := mutateInstanceYAML(body, func(spec *everest.InstanceSpec) error {
+		return applyScale(spec, engine.ScaleInput{Replicas: &members})
+	})
+	require.NoError(t, err)
+
+	var doc struct {
+		Spec everest.InstanceSpec `json:"spec"`
+	}
+	require.NoError(t, yaml.Unmarshal(out, &doc))
+	assert.NotContains(t, doc.Spec.Components, everest.ComponentProxy)
+	assert.Equal(t, int32(3), doc.Spec.Components[everest.ComponentEngine].ReplicaCount())
+}
+
 // TestInstanceYAMLKeepsAnUnscheduledPostgreSQLStorageWithItsScheduleOff
 // writes the storage of a database with no schedule under the control
 // plane's schedule turned off. The PostgreSQL provider removes a storage with

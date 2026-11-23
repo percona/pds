@@ -96,6 +96,8 @@ func TestDatabaseErrorMapsTheHubRefusals(t *testing.T) {
 	}{
 		{"environment required", hub.ErrEnvironmentRequired, "", http.StatusBadRequest, CodeValidation},
 		{"engine", fmt.Errorf("%w: mongodb", hub.ErrEngineNotSupported), "orders", http.StatusNotImplemented, CodeNotImplemented},
+		{"access from outside", hub.ErrAccessNotAvailable, "orders", http.StatusBadRequest, CodeValidation},
+		{"engine not on the environment", hub.ErrEngineNotOnEnvironment, "orders", http.StatusConflict, CodeConflict},
 		{"restore engine", hub.ErrRestoreNotSupported, "orders", http.StatusNotImplemented, CodeNotImplemented},
 		{"not supported", hub.ErrNotSupported, "orders", http.StatusNotImplemented, CodeNotImplemented},
 		{"persist", hub.ErrPersist, "orders", http.StatusBadGateway, CodeDownstream},

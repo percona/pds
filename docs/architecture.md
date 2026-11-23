@@ -496,6 +496,17 @@ When the create errors after the API
 server accepted it, the agent deletes the `PerconaPGCluster` it made (the one
 whose `dataSource` restores that backup) before reporting the failure.
 
+A MongoDB database is one replica set whose Instance carries the engine
+component alone: no proxy, no monitoring component and no backup section. The
+heartbeat names the engines the agent serves (`engines`), and the hub refuses a
+MongoDB create on an environment whose last beat does not name it, because that
+environment needs an update to get the provider. MySQL and PostgreSQL need no
+such mark. The hub also refuses, before it writes anything, a MongoDB name over
+22 characters, which the provider would only refuse later with a Failed phase
+and no message, and any access or allowed addresses, because a MongoDB
+database has no access from outside the Kubernetes cluster yet. The API accepts
+the engine, while the engine picker and the MCP engine list leave it out.
+
 The agent calls OpenEverest with the hand written client in
 `adapter/internal/client/everest`. It scopes calls to cluster `main`
 (`EVEREST_CLUSTER`) and namespace `pds` (`EVEREST_NAMESPACE`):
