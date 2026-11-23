@@ -1,4 +1,4 @@
-import type { Database } from "./types";
+import type { Database, DatabaseConnection } from "./types";
 
 /**
  * Stands in for the password on screen. Fixed width, so it leaks no length,
@@ -20,6 +20,10 @@ export function maskedConnectionUri(database: Database): string {
   }
   if (connection.maskedUri?.includes(connection.host)) {
     return connection.maskedUri;
+  }
+
+  if (database.engine === "mongodb") {
+    return mongodbUri(connection, `${escapeUserInfo(connection.username)}:${passwordMask}@`);
   }
 
   const scheme = database.engine === "postgresql" ? "postgres" : "mysql";
@@ -57,6 +61,13 @@ export function cliCommand(database: Database, password: string): string {
   }
 
   const { host, port, username } = connection;
+
+  if (database.engine === "mongodb") {
+    const user = escapeUserInfo(username);
+    const userInfo = password ? `${user}:${escapeUserInfo(password)}@` : `${user}@`;
+
+    return `mongosh ${quote(mongodbUri(connection, userInfo))}`;
+  }
 
   if (database.engine === "postgresql") {
     const psql = `psql -h ${quote(host)} -p ${quote(String(port))} -U ${quote(username)}`;
@@ -101,6 +112,11 @@ export function forwardedCliCommand(database: Database): string {
   }
 
   const { port, username } = connection;
+  if (database.engine === "mongodb") {
+    // The forward reaches one member, whose peers advertise names a laptop
+    // cannot resolve, so the driver must not go looking for the replica set.
+    return `mongosh ${quote(`mongodb://${escapeUserInfo(username)}@${forwardedHost}:${port}/admin?directConnection=true&ssl=false`)}`;
+  }
   if (database.engine === "postgresql") {
     return `psql -h ${forwardedHost} -p ${quote(String(port))} -U ${quote(username)}`;
   }
@@ -282,6 +298,39 @@ function splitUri(uri: string): UriParts | null {
   }
 
   return { prefix, userInfo: authority.slice(0, userInfoEnd), tail };
+}
+
+/**
+ * What the account a MongoDB database hands out can do, and how its traffic
+ * travels. The members refuse a TLS connection that presents no client
+ * certificate, so the string asks for none.
+ */
+export const mongodbAccountNote =
+  "This account reads and writes every database and can manage users. The connection inside the Kubernetes cluster is not encrypted.";
+
+/** The MongoDB string for the replica set, with the given user info in front of the members. */
+function mongodbUri(connection: DatabaseConnection, userInfo: string): string {
+  const members = connection.members?.length
+    ? connection.members
+    : [`${bracketed(connection.host)}:${connection.port}`];
+
+  return `mongodb://${userInfo}${members.join(",")}/admin?replicaSet=rs0&ssl=false`;
+}
+
+function bracketed(host: string): string {
+  return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+}
+
+/**
+ * Percent-escapes everything but the unreserved characters, so a user name or
+ * password holding a delimiter reads back as it was written. The adapter
+ * builds the string it hands out the same way.
+ */
+function escapeUserInfo(value: string): string {
+  return encodeURIComponent(value).replace(
+    /[!'()*]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
 }
 
 /**

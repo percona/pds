@@ -385,6 +385,9 @@ func (p *Plugin) toConnection(conn *everest.Connection, namespace, secretName st
 	if conn == nil || conn.Host == "" {
 		return nil
 	}
+	if p.flavor.ReplicaSet != "" {
+		return p.toReplicaSetConnection(conn, namespace, secretName)
+	}
 
 	out := &engine.Connection{
 		Host:        conn.Host,

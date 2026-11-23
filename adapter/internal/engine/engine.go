@@ -148,11 +148,15 @@ type Connection struct {
 	Host     string
 	Port     int
 	Username string
+	// Members is every address a client may dial, as host:port, for an engine
+	// whose clients reach the members directly. Host and Port stay the first
+	// member. Empty for an engine with one address.
+	Members []string
 	// SecretName is the connection Secret the provider published. It names
 	// where the credential lives for anyone the adapter cannot hand one to.
 	SecretName string
-	// ServiceName is the Service a port-forward targets. Empty when the host
-	// does not name one in this namespace.
+	// ServiceName is the Service a port-forward targets: for a replica set, one
+	// member's. Empty when the host does not name one in this namespace.
 	ServiceName string
 	URI         string
 }

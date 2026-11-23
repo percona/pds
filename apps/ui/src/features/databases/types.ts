@@ -30,6 +30,11 @@ export type DatabaseConnection = {
   port: number;
   username: string;
   /**
+   * Every address of a replica set, as host:port. Host and port are the first
+   * of them. Absent for an engine with one address.
+   */
+  members?: string[];
+  /**
    * The connection string with the password replaced, for display only. The
    * adapter omits it when there is nothing to mask, and a hub never has one,
    * so this is absent more often than not.
