@@ -2,12 +2,14 @@ package kube
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 var (
@@ -150,6 +152,33 @@ func (c *Client) CreateSecret(ctx context.Context, namespace, name string, label
 	}
 
 	return true, nil
+}
+
+// PatchSecret sets the named keys of a Secret that already exists and leaves
+// every other key as it is. It never reads the Secret, so the grant behind it
+// needs only patch. A missing Secret is ErrSecretNotFound.
+func (c *Client) PatchSecret(ctx context.Context, namespace, name string, values map[string]string) error {
+	if err := c.available(); err != nil {
+		return err
+	}
+
+	data := make(map[string][]byte, len(values))
+	for key, value := range values {
+		data[key] = []byte(value)
+	}
+	patch, err := json.Marshal(map[string]any{"data": data})
+	if err != nil {
+		return fmt.Errorf("patch secret %s/%s: %w", namespace, name, err)
+	}
+	_, err = c.clientset.CoreV1().Secrets(namespace).Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{})
+	if apierrors.IsNotFound(err) {
+		return ErrSecretNotFound
+	}
+	if err != nil {
+		return secretError("patch", namespace, name, err)
+	}
+
+	return nil
 }
 
 // DeleteSecretKeys removes keys from a Secret and leaves the rest. PutSecret

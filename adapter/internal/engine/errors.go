@@ -35,6 +35,9 @@ var (
 	// restore adopts: the agent has no Kubernetes access, or may not touch the
 	// operator's objects.
 	ErrSeedUnavailable = errors.New("this environment cannot seed a database")
+	// ErrRestoreInProgress means a restored database has not finished
+	// restoring, so there is nothing to do to it yet.
+	ErrRestoreInProgress = errors.New("restore has not finished")
 	// ErrBackupsUnavailable means the adapter has no backup storage to write
 	// to, so there is nothing for a schedule to run into. That is a deployment
 	// state rather than a bad request, so the HTTP layer answers 501.

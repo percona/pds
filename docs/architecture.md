@@ -524,6 +524,28 @@ nothing reliable about when it started, so the console shows the finish time
 alone and no duration is worked out. Deleting the database deletes its backups
 and the data they wrote to the backup storage.
 
+A MongoDB backup restores into a new database through the Instance, as a MySQL
+one does: the copy's Instance carries `spec.dataSource` naming the backup, no
+agent seeding is involved, and the copy keeps the source's profile and gets no
+load balancer. The API refuses an Instance with a data source unless backups
+are on with a storage, so the copy takes the environment's backup storage like
+any MongoDB database. The copy's name is held to the same 22 characters as any
+MongoDB name, and only a succeeded backup is accepted. The copy inherits the
+source's users Secret, and so its passwords, so the hub also owes a `rotate`
+item. The agent leaves it unreported until the Instance is Ready and its
+`DataSourceReady` condition is true, then patches fresh alphanumeric passwords
+into the `MONGODB_*_PASSWORD` keys of `everest-secrets-<copy>`, and the
+operator updates the users and the connection Secret within seconds. Until the
+item is acknowledged the hub shows a Ready copy as Restoring, an error from the
+agent leaves the item owed rather than dropping it, and deleting the copy
+cancels it. The connection Secret follows the rewrite by up to about twenty
+seconds, so a connection read in that window can still hold the source's
+password. A copy whose restore failed shows the provider's reason, or the
+fallback sentence when it gives none, and is deleted like any database. A
+restore whose source has lost its users Secret is not refused up front: the
+agent never reads Secrets in the database namespace, and nothing else it can
+read reports that Secret, so the provider's failure shows on the copy.
+
 A MongoDB connection is built by PDS and never taken from the provider's `uri`,
 which names no replica set and leaves the password unescaped. The provider's
 Secret holds `host`, a comma separated list of every member with its port, and
@@ -588,7 +610,7 @@ NAT or a firewall joins with outbound HTTPS only.
    reads locally, credentials stripped, with metric readings from its PMM and
    the alerts that PMM's Grafana Alertmanager has firing (see
    Alerts on the heartbeat, below). The
-   response is the work queue: backup, scale, delete, and credentials. The
+   response is the work queue: backup, scale, delete, credentials, and rotate. The
    agent runs them against the local OpenEverest and reports on a later beat.
    Credentials is how a new MySQL database starts: the hub writes its Instance
    to Git but leaves it out of the environment's `kustomization.yaml`, and the
@@ -604,13 +626,16 @@ NAT or a firewall joins with outbound HTTPS only.
    the exporter cuts, so the hub logs it. Once the index lists a database it
    stays listed even if its credentials item is still owed. A
    restore is never held, because the provider copies the source's users
-   Secret for it. A PostgreSQL database is never held either: nothing reads
+   Secret for it. A MongoDB restore is rotated afterwards instead, as above. A PostgreSQL database is never held either: nothing reads
    that Secret for it, so the hub lists it at once. The agent also
    watches the list itself: when a PostgreSQL database it had seen is gone, it
    deletes the Secrets the PostgreSQL operator left behind on the following
    beats until a pass finds none. It deletes them by name
    (`postgresql.LeftoverSecrets`), never lists or reads Secrets, and its Role
-   in the database namespace grants only `delete` and `create`. The per-member
+   in the database namespace grants only `delete`, `create` and `patch`. The
+   patch is the MongoDB restore's password rotation: it names the keys it sets
+   and reads nothing, and since delete and create already let the agent replace
+   any Secret there, it adds no reach. The per-member
    certificate Secrets have a random suffix and are left. A database that is listed again is never swept. The
    memory is per process, so a cleanup owed across an agent restart is not run.
 4. **Staleness.** An environment with no beat inside `adapter.hub.heartbeatStale`

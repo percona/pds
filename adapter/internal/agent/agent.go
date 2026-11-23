@@ -101,6 +101,11 @@ type Options struct {
 	// exporter misreads. Nil means this agent cannot, and says so: the hub
 	// then releases the database to the operator's own passwords.
 	Credentials func(ctx context.Context, namespace, name string) error
+	// Rotate writes new passwords into the users Secret of a MongoDB database
+	// restored from a backup, once the restore has finished, and answers
+	// engine.ErrRestoreInProgress until then. Nil means this agent cannot, and
+	// says so: the hub keeps the copy from reading as ready.
+	Rotate func(ctx context.Context, namespace, name string) error
 	// Support runs support access windows on this environment. Nil means this
 	// agent cannot, and says nothing about them.
 	Support SupportWorkloads
@@ -666,7 +671,7 @@ func beat(ctx context.Context, opts Options, pending []hub.WorkResult) ([]hub.Wo
 		return results, nil
 	}
 
-	return append(results, applyWork(ctx, opts.Logger, opts.Databases, opts.Credentials, opts.Seed, databaseItems)...), nil
+	return append(results, applyWork(ctx, opts.Logger, opts.Databases, opts.Credentials, opts.Seed, opts.Rotate, databaseItems)...), nil
 }
 
 // applyWork runs what the hub asked for and reports on each item, so the hub
@@ -686,6 +691,7 @@ func applyWork(
 	databases workDatabases,
 	credentials func(ctx context.Context, namespace, name string) error,
 	seed SeedFunc,
+	rotate func(ctx context.Context, namespace, name string) error,
 	items []hub.Work,
 ) []hub.WorkResult {
 	if len(items) == 0 {
@@ -729,6 +735,15 @@ func applyWork(
 			})
 		case hub.WorkSeed:
 			err = runSeed(ctx, seed, item)
+		case hub.WorkRotate:
+			err = runRotate(ctx, rotate, item)
+			if errors.Is(err, engine.ErrRestoreInProgress) {
+				// Nothing to report yet. The item stays in flight and the hub
+				// hands it out again.
+				cancel()
+
+				continue
+			}
 		default:
 			logger.WarnContext(ctx, "unknown hub work", slog.String("kind", item.Kind))
 			results = append(results, hub.WorkResult{ID: item.ID, Error: "unknown kind " + item.Kind})
@@ -780,6 +795,18 @@ func runSeed(ctx context.Context, seed SeedFunc, item hub.Work) error {
 	}
 
 	return seed(ctx, namespace, source, item.BackupID, item.Name)
+}
+
+func runRotate(ctx context.Context, rotate func(context.Context, string, string) error, item hub.Work) error {
+	if rotate == nil {
+		return errors.New("this agent cannot write secrets on this Kubernetes cluster")
+	}
+	namespace, name, ok := strings.Cut(item.Database, ".")
+	if !ok || namespace == "" || name == "" {
+		return fmt.Errorf("database %q does not name a namespace", item.Database)
+	}
+
+	return rotate(ctx, namespace, name)
 }
 
 // prepareCredentials writes the users Secret for one "namespace.name"

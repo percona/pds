@@ -226,6 +226,12 @@ so a delete cannot orphan the seeded database. A failed seed commits nothing and
 database. The agent's result carries a typed `reason` (`hub.Seed*`) that the
 hub turns into the failed copy's sentence; the error text goes to the log only,
 and a result with no reason keeps the original sentence.
+A MongoDB restore is a plain Instance commit with a data source, like MySQL's.
+Because the copy inherits the source's passwords, the hub also queues a
+`rotate` item, and the agent (`cmd/adapter/rotate.go`) patches new passwords into
+the copy's users Secret once the Instance is Ready and seeded. The hub shows the
+copy as Restoring until that item is acknowledged and never acknowledges one the
+agent failed.
 A create that errors after the API server made the cluster is
 followed by deleting that cluster when it restores the same backup, so a failed
 copy leaves nothing running.

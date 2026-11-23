@@ -181,6 +181,29 @@ describe("RestoreDialog", () => {
     expect(confirmButton()).toBeDisabled();
   });
 
+  // A MongoDB copy is held to the MongoDB limit, the longest name the provider
+  // accepts. The engine is hidden from the create form, so the dialog is
+  // rendered on a MongoDB database directly.
+  it("holds a MongoDB copy to the MongoDB name limit", async () => {
+    stubHubRestore(jsonResponse({ status: "accepted" }, 202));
+    renderHub({ database: { ...hubDatabase, name: "orders", engine: "mongodb" } });
+
+    await waitFor(() => expect(newNameField()).toHaveValue("orders-restore-1"));
+    expect(screen.getByText(/22 at most/)).toBeInTheDocument();
+    await userEvent.clear(newNameField());
+    await userEvent.type(newNameField(), "a".repeat(22));
+    await waitFor(() => expect(confirmButton()).toBeEnabled());
+
+    await userEvent.type(newNameField(), "a");
+    await userEvent.tab();
+    expect(
+      await screen.findByText(
+        "Use 22 characters or fewer. Its members' object names are built from it.",
+      ),
+    ).toBeInTheDocument();
+    expect(confirmButton()).toBeDisabled();
+  });
+
   // The adapter refuses this too, but a developer should not have to submit to
   // find out that the name is the database they are restoring from.
   it("refuses a name the environment already runs", async () => {

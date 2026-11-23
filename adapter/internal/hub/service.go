@@ -331,7 +331,7 @@ func (s *Service) Create(ctx context.Context, in engine.CreateInput) (*engine.In
 			slog.Warn("hub create rollback failed",
 				slog.String("path", path), slog.String("err", rollback.Error()))
 		}
-		s.cancelCredentials(environment, credentials.Database)
+		s.cancelWork(environment, WorkCredentials, credentials.Database)
 
 		return nil, err
 	}
@@ -396,6 +396,8 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 
 			return fmt.Errorf("%w: %q", engine.ErrNotFound, id)
 		}
+		s.cancelWork(environment, WorkRotate, ns+"."+name)
+
 		return wrapPersist(s.work.Push(environment, Work{Kind: WorkDelete, Database: ns + "." + name}))
 	}
 	if gitErr != nil {
@@ -414,19 +416,21 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	}
 	// A database deleted while held never reaches the environment, and a
 	// Secret written for it there would hold passwords nothing uses.
-	s.cancelCredentials(environment, ns+"."+name)
+	s.cancelWork(environment, WorkCredentials, ns+"."+name)
+	s.cancelWork(environment, WorkRotate, ns+"."+name)
 
 	return nil
 }
 
-// cancelCredentials drops the credentials item for a database that will not
-// be created after all. A failure leaves at worst an unused Secret on the
-// environment, so it is logged rather than returned.
-func (s *Service) cancelCredentials(environment, database string) {
-	if err := s.work.Cancel(environment, WorkCredentials, database); err != nil {
-		slog.Warn("hub could not drop the credentials work of a database",
-			slog.String("environment", environment), slog.String("database", database),
-			slog.String("err", err.Error()))
+// cancelWork drops the item of this kind owed for a database that will not be
+// created, or exists no more. A failure leaves at worst an unused Secret on
+// the environment, or a rotation the agent finds no database for, so it is
+// logged rather than returned.
+func (s *Service) cancelWork(environment, kind, database string) {
+	if err := s.work.Cancel(environment, kind, database); err != nil {
+		slog.Warn("hub could not drop work owed for a database",
+			slog.String("environment", environment), slog.String("kind", kind),
+			slog.String("database", database), slog.String("err", err.Error()))
 	}
 }
 
@@ -569,12 +573,21 @@ func (s *Service) RestoreToNewDatabase(ctx context.Context, id, backupID, name s
 	// built from this one twice over, and a PostgreSQL copy gives every member
 	// a label built from it. A label over 63 characters is refused, so a longer
 	// name commits a manifest that comes up as an empty database minutes later.
-	if postgres && len(name) > maxPostgreSQLName {
+	// A MongoDB copy is held to the length of any MongoDB name: the provider
+	// builds its restore object as <copy>-datasource, which fits.
+	mongo := flavor.ID == oe.MongoDB.ID
+	switch {
+	case postgres && len(name) > maxPostgreSQLName:
 		return nil, &engine.RestoreNameTooLongError{
 			Name: name, Limit: maxPostgreSQLName, Reason: engine.RestoreNameMembers,
 		}
-	}
-	if !postgres && len(name) > maxRestoreCopyName {
+	case mongo:
+		if field, limit := createNameLimit(flavor); len(name) > limit {
+			return nil, &engine.BoundsError{
+				Field: field, Unit: "characters", Value: len(name), Min: 1, Max: limit,
+			}
+		}
+	case !postgres && len(name) > maxRestoreCopyName:
 		return nil, &engine.RestoreNameTooLongError{Name: name, Limit: maxRestoreCopyName}
 	}
 	// The source is one of the names this refuses, which is the point: a
@@ -616,7 +629,13 @@ func (s *Service) RestoreToNewDatabase(ctx context.Context, id, backupID, name s
 		restoreFrom = ""
 		dest.daily = true
 	}
-	body, _, err := buildInstanceYAML(name, ns, environment, dest, s.targetsFor(environment), restoreFrom, engine.Exposure{})
+	targets := s.targetsFor(environment)
+	// The API refuses an Instance with a data source unless backups are on with
+	// a storage, so the provider can read the source backup.
+	if mongo && targets.BackupStorage == "" {
+		return nil, fmt.Errorf("%w: this environment has no backup storage", engine.ErrBackupsUnavailable)
+	}
+	body, _, err := buildInstanceYAML(name, ns, environment, dest, targets, restoreFrom, engine.Exposure{})
 	if err != nil {
 		return nil, err
 	}
@@ -638,7 +657,20 @@ func (s *Service) RestoreToNewDatabase(ctx context.Context, id, backupID, name s
 
 		return &RestoreIssued{Environment: environment, Name: name, ID: JoinID(environment, ns, name)}, nil
 	}
+	// The copy inherits the source's users Secret, so it accepts the source's
+	// passwords until the agent writes new ones. The item is owed before the
+	// manifest is written, and sits idle until the agent finds the copy Ready.
+	rotation := Work{Kind: WorkRotate, Database: ns + "." + name}
+	if mongo {
+		if err := s.work.Push(environment, rotation); err != nil {
+			return nil, wrapPersist(err)
+		}
+	}
 	if err := s.commitInstance(ctx, environment, name, body, "restore "+source+" into "+name); err != nil {
+		if mongo {
+			s.cancelWork(environment, WorkRotate, rotation.Database)
+		}
+
 		return nil, err
 	}
 
@@ -715,6 +747,53 @@ func (s *Service) settleSeeds(environment string, results []WorkResult) []WorkRe
 	}
 
 	return kept
+}
+
+// settleRotations returns the results that may be acknowledged. A rotation the
+// agent failed is kept owed: dropping it would show a copy that still shares
+// the source's passwords as ready, so it is handed out again and tried again.
+func (s *Service) settleRotations(environment string, results []WorkResult) []WorkResult {
+	owed := s.work.owed(environment, WorkRotate)
+	if len(owed) == 0 {
+		return results
+	}
+	kept := make([]WorkResult, 0, len(results))
+	for _, result := range results {
+		if item, ok := owed[result.ID]; ok && result.Error != "" {
+			slog.Warn("the agent could not set new credentials on a restored database, so it is tried again",
+				slog.String("environment", environment),
+				slog.String("database", item.Database),
+				slog.String("cause", result.Error))
+
+			continue
+		}
+		kept = append(kept, result)
+	}
+
+	return kept
+}
+
+// holdWhileRotating shows a restored MongoDB copy the provider reports as
+// Ready as still restoring, until the agent has written its new passwords. A
+// copy in any other phase keeps its own, with the provider's reason.
+func (s *Service) holdWhileRotating(environment string, inst *engine.Instance) {
+	if inst.Status.Phase != engine.PhaseReady {
+		return
+	}
+	namespace := inst.Namespace
+	if namespace == "" {
+		namespace = s.namespaceFor(environment)
+	}
+	for _, item := range s.work.owed(environment, WorkRotate) {
+		if item.Database == namespace+"."+inst.Name {
+			inst.Status = engine.Status{
+				Phase:   engine.PhaseRestoring,
+				Message: "The restore finished. New credentials are being set for this database.",
+			}
+
+			return
+		}
+	}
 }
 
 // forgetRestoreFailure drops the failed seed of this name, and reports whether
@@ -820,6 +899,7 @@ func (s *Service) List(ctx context.Context, environment string) ([]engine.Instan
 				keepDesiredExposure(&inst, prev.Exposure)
 			}
 			overlayLastBackup(&inst, snap.Backups)
+			s.holdWhileRotating(c.Name, &inst)
 			byID[inst.ID] = inst
 		}
 	}
@@ -863,6 +943,7 @@ func (s *Service) Get(ctx context.Context, id string) (*engine.Instance, error) 
 					inst.Profile = "custom"
 				}
 				overlayLastBackup(&inst, snap.Backups)
+				s.holdWhileRotating(environment, &inst)
 
 				return &inst, nil
 			}
@@ -1210,7 +1291,7 @@ func (s *Service) applyHeartbeatLocked(beat Heartbeat) error {
 	// negative and pinned a dead environment to connected for good.
 	beat.At = s.now()
 	// Settle what the last reply asked for before deciding what to ask next.
-	settled := s.settleSeeds(beat.Environment, beat.Results)
+	settled := s.settleRotations(beat.Environment, s.settleSeeds(beat.Environment, beat.Results))
 	if err := s.work.Ack(beat.Environment, s.releaseHeld(beat.Environment, settled)); err != nil {
 		return err
 	}
