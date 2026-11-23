@@ -802,7 +802,7 @@ func toBackupResponse(in engine.Backup) backupResponse {
 		Scheduled: in.Scheduled,
 		Message:   in.Message,
 	}
-	if !in.CreatedAt.IsZero() {
+	if !in.CreatedAt.IsZero() && !in.FinishOnly {
 		created := in.CreatedAt
 		out.CreatedAt = &created
 	}

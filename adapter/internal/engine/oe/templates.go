@@ -83,7 +83,7 @@ func (p *Plugin) toInstance(in *everest.Instance, fallbackNamespace string) engi
 		},
 	}
 	out.Sizing = sizingOf(eng)
-	out.BackupSchedule = ScheduleOf(in.Spec.Backup)
+	out.BackupSchedule = ScheduleOfInstance(in.Spec, in.Metadata)
 	out.Exposure = ExposureOf(in)
 
 	return out
@@ -300,13 +300,15 @@ func toPhase(in everest.InstanceStatus) string {
 	}
 }
 
-func toBackup(in everest.Backup) engine.Backup {
+func (p *Plugin) toBackup(in everest.Backup) engine.Backup {
 	out := engine.Backup{
 		ID:        in.Metadata.Name,
 		Status:    toBackupState(in.Status.State),
 		Scheduled: in.Spec.ScheduleName != "",
 		Message:   in.Status.Message,
 		Instance:  in.Spec.InstanceName(),
+
+		FinishOnly: p.flavor.FinishOnly,
 	}
 	if in.Status.CompletedAt != nil {
 		out.FinishedAt = in.Status.CompletedAt.UTC()

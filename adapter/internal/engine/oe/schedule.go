@@ -1,6 +1,9 @@
 package oe
 
 import (
+	"strconv"
+	"strings"
+
 	"github.com/percona/pds/adapter/internal/client/everest"
 	"github.com/percona/pds/adapter/internal/engine"
 )
@@ -19,15 +22,61 @@ func BackupClassFor(provider string) string {
 	return MySQL.BackupClass
 }
 
+// AnnotationBackupCopies holds how many scheduled backups the control plane
+// keeps for an Instance whose provider does not prune them. It stays on the
+// Instance when the schedule is turned off, so turning it back on restores it.
+const AnnotationBackupCopies = "pds.percona.com/backup-copies"
+
+// PrunedByControlPlane is whether the control plane, not the provider, deletes
+// the scheduled backups beyond the count a schedule keeps. The MongoDB
+// provider's own retention deletes a backup together with its data and then
+// recreates it from the object that still owns it, so nothing is ever pruned
+// and every slot runs twice.
+func PrunedByControlPlane(provider string) bool {
+	return provider == MongoDB.Provider
+}
+
 // ScheduleSpec is the provider's shape of the one schedule the control plane
-// writes.
-func ScheduleSpec(in engine.ScheduleInput) everest.InstanceBackupSchedule {
-	return everest.InstanceBackupSchedule{
-		Name:      engine.ScheduleName,
-		Enabled:   true,
-		Cron:      in.Cron(),
-		Retention: everest.CountRetention(int32(in.RetentionCopies)),
+// writes. A provider the control plane prunes for gets no retention.
+func ScheduleSpec(provider string, in engine.ScheduleInput) everest.InstanceBackupSchedule {
+	schedule := everest.InstanceBackupSchedule{
+		Name:    engine.ScheduleName,
+		Enabled: true,
+		Cron:    in.Cron(),
 	}
+	if !PrunedByControlPlane(provider) {
+		schedule.Retention = everest.CountRetention(int32(in.RetentionCopies))
+	}
+
+	return schedule
+}
+
+// StampCopies records on an Instance's annotations how many backups its
+// schedule keeps, when the control plane prunes them. Other providers keep the
+// count on the schedule itself.
+func StampCopies(meta *everest.ObjectMeta, provider string, in engine.ScheduleInput) {
+	if !PrunedByControlPlane(provider) || in.RetentionCopies <= 0 {
+		return
+	}
+	if meta.Annotations == nil {
+		meta.Annotations = map[string]string{}
+	}
+	meta.Annotations[AnnotationBackupCopies] = strconv.Itoa(in.RetentionCopies)
+}
+
+// ScheduleOfInstance reads an Instance's schedule as the UI states it,
+// including the count the control plane keeps for a provider that does not
+// carry it on the schedule.
+func ScheduleOfInstance(spec everest.InstanceSpec, meta everest.ObjectMeta) *engine.BackupSchedule {
+	out := ScheduleOf(spec.Backup)
+	if out == nil || out.RetentionCopies != 0 || !PrunedByControlPlane(spec.ProviderRef.Name) {
+		return out
+	}
+	if n, err := strconv.ParseInt(strings.TrimSpace(meta.Annotations[AnnotationBackupCopies]), 10, 32); err == nil && n > 0 {
+		out.RetentionCopies = int32(n)
+	}
+
+	return out
 }
 
 // ScheduleOf reads the schedule a backup spec carries, as the UI states it.
@@ -85,11 +134,11 @@ func toBackupSchedule(in everest.InstanceBackupSchedule) *engine.BackupSchedule 
 // control plane did not write is kept but turned off, so the database never
 // runs two and the one it had can still be read back.
 //
-// storage and class fill in what a spec with no backup section lacks. A class
-// already on the spec is kept, since changing it would strand the backups
-// taken under it.
-func ApplySchedule(current *everest.InstanceBackupSpec, storage, class string, in engine.ScheduleInput) *everest.InstanceBackupSpec {
-	out := everest.InstanceBackupSpec{Enabled: true, ClassRef: everest.ObjectRef{Name: class}}
+// storage and the class of provider fill in what a spec with no backup section
+// lacks. A class already on the spec is kept, since changing it would strand
+// the backups taken under it.
+func ApplySchedule(current *everest.InstanceBackupSpec, storage, provider string, in engine.ScheduleInput) *everest.InstanceBackupSpec {
+	out := everest.InstanceBackupSpec{Enabled: true, ClassRef: everest.ObjectRef{Name: BackupClassFor(provider)}}
 	if current != nil && current.ClassRef.Name != "" {
 		out.ClassRef = current.ClassRef
 	}
@@ -107,7 +156,7 @@ func ApplySchedule(current *everest.InstanceBackupSpec, storage, class string, i
 		out.Storages = []everest.InstanceBackupStorage{{StorageRef: everest.ObjectRef{Name: storage}}}
 	}
 
-	out.Storages[0].Schedules = append([]everest.InstanceBackupSchedule{ScheduleSpec(in)}, out.Storages[0].Schedules...)
+	out.Storages[0].Schedules = append([]everest.InstanceBackupSchedule{ScheduleSpec(provider, in)}, out.Storages[0].Schedules...)
 
 	return &out
 }

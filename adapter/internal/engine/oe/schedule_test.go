@@ -20,7 +20,7 @@ func TestBackupClassFor(t *testing.T) {
 func TestApplyScheduleOnASpecWithNoBackupSection(t *testing.T) {
 	weekly := engine.ScheduleInput{Enabled: true, Period: engine.PeriodWeekly, Hour: 1, Weekday: 3, RetentionCopies: 5}
 
-	got := oe.ApplySchedule(nil, "s3", everest.BackupClassPostgreSQL, weekly)
+	got := oe.ApplySchedule(nil, "s3", everest.ProviderPostgreSQL, weekly)
 
 	require.NotNil(t, got)
 	assert.True(t, got.Enabled)
@@ -45,7 +45,7 @@ func TestApplyScheduleKeepsOneOwnSchedule(t *testing.T) {
 		},
 	}
 
-	got := oe.ApplySchedule(current, "ignored", everest.BackupClassPXC, engine.DefaultSchedule())
+	got := oe.ApplySchedule(current, "ignored", everest.ProviderPXC, engine.DefaultSchedule())
 
 	assert.Equal(t, "custom-class", got.ClassRef.Name, "a class already on the spec is kept")
 	own := 0
@@ -129,7 +129,7 @@ func TestTurningOffAForeignOnlyScheduleReadsAsOff(t *testing.T) {
 }
 
 func TestDisableScheduleKeepsSettings(t *testing.T) {
-	current := oe.ApplySchedule(nil, "s3", everest.BackupClassPXC,
+	current := oe.ApplySchedule(nil, "s3", everest.ProviderPXC,
 		engine.ScheduleInput{Enabled: true, Period: engine.PeriodHourly, Minute: 7, RetentionCopies: 2})
 
 	got, changed := oe.DisableSchedule(current)

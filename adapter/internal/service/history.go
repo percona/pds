@@ -317,11 +317,13 @@ func BackupEntries(environment, databaseID string, backups []engine.Backup, at t
 			Outcome:     backup.Status,
 			Message:     Sanitize(backup.Message),
 			SizeBytes:   backup.SizeBytes,
-			StartedAt:   backup.CreatedAt,
+		}
+		if !backup.FinishOnly {
+			entry.StartedAt = backup.CreatedAt
 		}
 		if !backup.FinishedAt.IsZero() {
 			entry.FinishedAt = backup.FinishedAt
-			if !backup.CreatedAt.IsZero() {
+			if !backup.CreatedAt.IsZero() && !backup.FinishOnly {
 				entry.DurationMS = backup.FinishedAt.Sub(backup.CreatedAt).Milliseconds()
 			}
 		}

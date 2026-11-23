@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"time"
 
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
 	"github.com/percona/pds/adapter/internal/agent"
 	"github.com/percona/pds/adapter/internal/api"
 	"github.com/percona/pds/adapter/internal/auth"
@@ -176,6 +178,7 @@ func run() error {
 					logger.WarnContext(ctx, "volume size read failed", slog.String("cause", err.Error()))
 				}
 			}
+			opts.Retain = backupRetention(cfg, everestClient, environment)
 			opts.Credentials = newUsersSecrets(environment)
 			opts.Support = environment
 			opts.Cleanup = func(ctx context.Context, namespace, name string) (int, error) {
@@ -659,6 +662,25 @@ func engineRegistry(cfg config.Config, client *everest.Client) *engine.Registry 
 	))
 
 	return registry
+}
+
+// backupResource is the OpenEverest Backup object. Deleting one deletes the
+// operator's backup and the data it wrote to the backup storage.
+var backupResource = schema.GroupVersionResource{Group: "backup.openeverest.io", Version: "v1alpha1", Resource: "backups"}
+
+// backupRetention prunes the MongoDB backups a schedule no longer keeps. The
+// provider's own retention cannot, so the agent deletes the Backup objects.
+func backupRetention(cfg config.Config, client *everest.Client, environment *kube.Client) func(context.Context, []engine.Instance) (int, error) {
+	plugin := mongodb.New(
+		client,
+		mongodb.WithNamespace(cfg.EverestNamespace),
+		mongodb.WithBackupStorage(cfg.EverestBackupStorage),
+		mongodb.WithBackupDeleter(func(ctx context.Context, namespace, name string) error {
+			return environment.DeleteObject(ctx, backupResource, namespace, name)
+		}),
+	)
+
+	return plugin.PruneBackups
 }
 
 // engineIDs names the engines a registry serves, in the order it lists them.

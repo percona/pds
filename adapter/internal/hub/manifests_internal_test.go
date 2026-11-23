@@ -127,7 +127,7 @@ func TestApplyScheduleUsesTheEngineBackupClass(t *testing.T) {
 		t.Run(tt.provider, func(t *testing.T) {
 			spec := everest.InstanceSpec{ProviderRef: everest.ObjectRef{Name: tt.provider}}
 
-			require.NoError(t, applySchedule(&spec, "s3", engine.DefaultSchedule()))
+			require.NoError(t, applySchedule(&spec, &everest.ObjectMeta{}, "s3", engine.DefaultSchedule()))
 
 			require.NotNil(t, spec.Backup)
 			assert.Equal(t, tt.wantClass, spec.Backup.ClassRef.Name)
@@ -144,7 +144,7 @@ func TestApplyScheduleUsesTheEngineBackupClass(t *testing.T) {
 func TestApplyScheduleWithoutStorageIsRefused(t *testing.T) {
 	spec := everest.InstanceSpec{ProviderRef: everest.ObjectRef{Name: everest.ProviderPXC}}
 
-	err := applySchedule(&spec, "", engine.DefaultSchedule())
+	err := applySchedule(&spec, &everest.ObjectMeta{}, "", engine.DefaultSchedule())
 
 	require.ErrorIs(t, err, engine.ErrBackupsUnavailable)
 	assert.Nil(t, spec.Backup)
@@ -174,9 +174,9 @@ func TestInstanceYAMLNeverEnablesBackupsWithoutAStorage(t *testing.T) {
 	}
 }
 
-// The MongoDB provider reconciles an engine component alone. A proxy, a pmm
-// component or a backup section is a part of the Instance it has no use for,
-// and the first two make it refuse the Instance.
+// The MongoDB provider reconciles an engine component alone. A proxy or a pmm
+// component is a part of the Instance it has no use for, and makes it refuse
+// the Instance.
 func TestInstanceYAMLWritesAMongoDBReplicaSetWithTheEngineComponentOnly(t *testing.T) {
 	targets := environmentTargets{BackupStorage: "s3", MonitoringConfig: "pmm"}
 	for profile, members := range map[string]int32{oe.ProfileDev: 1, oe.ProfileStaging: 3, oe.ProfileProd: 3} {
@@ -199,9 +199,66 @@ func TestInstanceYAMLWritesAMongoDBReplicaSetWithTheEngineComponentOnly(t *testi
 			assert.Empty(t, engineSpec.Type)
 			assert.Equal(t, members, engineSpec.ReplicaCount())
 			assert.Nil(t, engineSpec.Service, "a MongoDB database has no load balancer yet")
-			assert.Nil(t, doc.Spec.Backup)
 		})
 	}
+}
+
+// Backups cannot be turned on in a running MongoDB database without rolling
+// every member, so a MongoDB database is created with them on and a storage. A
+// Dev database keeps the storage with no schedule, and Staging and Prod carry
+// the daily one. The provider's retention is left out, and the count the
+// control plane prunes to rides on the Instance.
+func TestInstanceYAMLWritesAMongoDBWithBackupsOnAndAStorage(t *testing.T) {
+	for profile, daily := range map[string]bool{oe.ProfileDev: false, oe.ProfileStaging: true, oe.ProfileProd: true} {
+		t.Run(profile, func(t *testing.T) {
+			body, _, err := instanceYAML("orders", "pds", "spoke-a", oe.MongoDB, profile, environmentTargets{BackupStorage: "s3"}, engine.ResourceOverrides{}, engine.Exposure{})
+			require.NoError(t, err)
+
+			var doc struct {
+				Metadata everest.ObjectMeta   `json:"metadata"`
+				Spec     everest.InstanceSpec `json:"spec"`
+			}
+			require.NoError(t, yaml.Unmarshal(body, &doc))
+			require.NotNil(t, doc.Spec.Backup)
+			assert.True(t, doc.Spec.Backup.Enabled)
+			assert.Equal(t, everest.BackupClassMongoDB, doc.Spec.Backup.ClassRef.Name)
+			require.Len(t, doc.Spec.Backup.Storages, 1)
+			assert.Equal(t, "s3", doc.Spec.Backup.Storages[0].StorageRef.Name)
+
+			if !daily {
+				assert.Empty(t, doc.Spec.Backup.Storages[0].Schedules)
+				assert.NotContains(t, doc.Metadata.Annotations, oe.AnnotationBackupCopies)
+
+				return
+			}
+			assert.Equal(t, []everest.InstanceBackupSchedule{{
+				Name: engine.ScheduleName, Enabled: true, Cron: "0 2 * * *",
+			}}, doc.Spec.Backup.Storages[0].Schedules, "no retention on the provider's schedule")
+			assert.Equal(t, "7", doc.Metadata.Annotations[oe.AnnotationBackupCopies])
+		})
+	}
+}
+
+func TestAMongoDBScheduleEditKeepsItsCopiesOnTheInstance(t *testing.T) {
+	body, _, err := instanceYAML("orders", "pds", "spoke-a", oe.MongoDB, oe.ProfileDev, environmentTargets{BackupStorage: "s3"}, engine.ResourceOverrides{}, engine.Exposure{})
+	require.NoError(t, err)
+
+	out, err := mutateInstanceYAML(body, func(spec *everest.InstanceSpec, meta *everest.ObjectMeta) error {
+		in := engine.ScheduleInput{Enabled: true, Period: engine.PeriodHourly, Minute: 5, RetentionCopies: 2}
+
+		return applySchedule(spec, meta, "s3", in)
+	})
+	require.NoError(t, err)
+
+	var doc struct {
+		Metadata everest.ObjectMeta   `json:"metadata"`
+		Spec     everest.InstanceSpec `json:"spec"`
+	}
+	require.NoError(t, yaml.Unmarshal(out, &doc))
+	got := oe.ScheduleOfInstance(doc.Spec, doc.Metadata)
+	assert.Equal(t, int32(2), got.RetentionCopies)
+	assert.Equal(t, "5 * * * *", got.Cron)
+	assert.Nil(t, doc.Spec.Backup.Storages[0].Schedules[0].Retention)
 }
 
 func TestScaleOfAMongoDBDatabaseAddsNoProxy(t *testing.T) {
@@ -209,7 +266,7 @@ func TestScaleOfAMongoDBDatabaseAddsNoProxy(t *testing.T) {
 	require.NoError(t, err)
 	members := 3
 
-	out, err := mutateInstanceYAML(body, func(spec *everest.InstanceSpec) error {
+	out, err := mutateInstanceYAML(body, func(spec *everest.InstanceSpec, _ *everest.ObjectMeta) error {
 		return applyScale(spec, engine.ScaleInput{Replicas: &members})
 	})
 	require.NoError(t, err)
@@ -237,7 +294,7 @@ func TestInstanceYAMLKeepsAnUnscheduledPostgreSQLStorageWithItsScheduleOff(t *te
 	require.NoError(t, yaml.Unmarshal(body, &doc))
 	require.NotNil(t, doc.Spec.Backup)
 	require.Len(t, doc.Spec.Backup.Storages, 1)
-	off := oe.ScheduleSpec(engine.DefaultSchedule())
+	off := oe.ScheduleSpec(everest.ProviderPostgreSQL, engine.DefaultSchedule())
 	off.Enabled = false
 	assert.Equal(t, []everest.InstanceBackupSchedule{off}, doc.Spec.Backup.Storages[0].Schedules)
 	assert.False(t, oe.ScheduleOf(doc.Spec.Backup).Runs())
@@ -253,10 +310,10 @@ func TestScheduleOnAnUnscheduledPostgreSQLDatabaseReplacesTheOffOne(t *testing.T
 		Spec everest.InstanceSpec `json:"spec"`
 	}
 	require.NoError(t, yaml.Unmarshal(body, &doc))
-	require.NoError(t, applySchedule(&doc.Spec, "s3", engine.DefaultSchedule()))
+	require.NoError(t, applySchedule(&doc.Spec, &everest.ObjectMeta{}, "s3", engine.DefaultSchedule()))
 
 	require.Len(t, doc.Spec.Backup.Storages, 1)
-	assert.Equal(t, []everest.InstanceBackupSchedule{oe.ScheduleSpec(engine.DefaultSchedule())}, doc.Spec.Backup.Storages[0].Schedules)
+	assert.Equal(t, []everest.InstanceBackupSchedule{oe.ScheduleSpec(everest.ProviderPostgreSQL, engine.DefaultSchedule())}, doc.Spec.Backup.Storages[0].Schedules)
 }
 
 // TestInstanceYAMLLeavesMySQLDevUnscheduled keeps MySQL as it was: its
@@ -286,5 +343,5 @@ func TestInstanceYAMLWritesTheDefaultSchedule(t *testing.T) {
 	require.NoError(t, yaml.Unmarshal(body, &doc))
 	require.NotNil(t, doc.Spec.Backup)
 	assert.Equal(t, everest.BackupClassPXC, doc.Spec.Backup.ClassRef.Name)
-	assert.Equal(t, []everest.InstanceBackupSchedule{oe.ScheduleSpec(engine.DefaultSchedule())}, doc.Spec.Backup.Storages[0].Schedules)
+	assert.Equal(t, []everest.InstanceBackupSchedule{oe.ScheduleSpec(everest.ProviderPXC, engine.DefaultSchedule())}, doc.Spec.Backup.Storages[0].Schedules)
 }

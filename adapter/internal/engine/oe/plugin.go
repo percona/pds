@@ -102,13 +102,17 @@ type Flavor struct {
 	// a database without a schedule keeps a storage its manifest can list.
 	DropsIdleBackupStorage bool
 	// EngineOnly is a provider whose Instance carries the engine component
-	// alone: no proxy, no monitoring component and no backup section. The hub
-	// writes nothing for a part of the Instance until PDS serves it.
+	// and its backup section alone: no proxy and no monitoring component. The
+	// hub writes nothing for a part of the Instance until PDS serves it.
 	EngineOnly bool
 	// ProvisioningIsUpdating is a provider that reports Provisioning for every
 	// change it makes, not only for the first start. A database it has
 	// reported Ready is then Updating while it reports Provisioning.
 	ProvisioningIsUpdating bool
+	// FinishOnly is a provider whose Backup reports only when it finished.
+	// Its creation time can precede the real start by minutes, so the start
+	// is never shown and no duration is worked out.
+	FinishOnly bool
 }
 
 // MySQL is the Percona XtraDB Cluster flavor.
@@ -149,6 +153,7 @@ var MongoDB = Flavor{
 
 	EngineOnly:             true,
 	ProvisioningIsUpdating: true,
+	FinishOnly:             true,
 }
 
 // EverestClient is the slice of the Everest API this plugin depends on.
@@ -170,6 +175,7 @@ type Plugin struct {
 
 	namespace     string
 	backupStorage string
+	deleteBackup  BackupDeleter
 }
 
 // Option configures a Plugin.
@@ -453,7 +459,7 @@ func (p *Plugin) BackupNamed(ctx context.Context, id, backupID string) (*engine.
 				return nil, findErr
 			}
 			if existing != nil {
-				out := toBackup(*existing)
+				out := p.toBackup(*existing)
 
 				return &out, nil
 			}
@@ -465,7 +471,7 @@ func (p *Plugin) BackupNamed(ctx context.Context, id, backupID string) (*engine.
 		return nil, fmt.Errorf("back up instance %q: %w", id, err)
 	}
 
-	out := toBackup(*created)
+	out := p.toBackup(*created)
 
 	return &out, nil
 }
@@ -510,7 +516,7 @@ func (p *Plugin) Backups(ctx context.Context, id string) ([]engine.Backup, error
 
 	out := make([]engine.Backup, 0, len(found))
 	for _, backup := range found {
-		out = append(out, toBackup(backup))
+		out = append(out, p.toBackup(backup))
 	}
 
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
@@ -548,7 +554,7 @@ func (p *Plugin) NamespaceBackups(ctx context.Context, namespace string) ([]engi
 			return nil, fmt.Errorf("list backups of %q: %w", instanceID(namespace, name), err)
 		}
 		for _, backup := range found {
-			out = append(out, toBackup(backup))
+			out = append(out, p.toBackup(backup))
 		}
 	}
 
