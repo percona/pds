@@ -9,6 +9,7 @@ import (
 
 	"github.com/percona/pds/apps/mcp/internal/connections"
 	"github.com/percona/pds/apps/mcp/internal/messages"
+	"github.com/percona/pds/apps/mcp/internal/mongoguard"
 	"github.com/percona/pds/apps/mcp/internal/oauth"
 	"github.com/percona/pds/apps/mcp/internal/sqlguard"
 	"github.com/percona/pds/apps/mcp/internal/sqlrun"
@@ -18,13 +19,13 @@ import (
 
 type readInput struct {
 	ID      string `json:"id" jsonschema:"Database id of a connected database."`
-	SQL     string `json:"sql" jsonschema:"One read only SQL statement."`
+	SQL     string `json:"sql" jsonschema:"One read only SQL statement. For a MongoDB database, one command as a JSON document whose first key is the command name."`
 	MaxRows int    `json:"maxRows,omitempty" jsonschema:"Most rows to return. Defaults to 100, at most 1000."`
 }
 
 type writeInput struct {
 	ID  string `json:"id" jsonschema:"Database id of a connected database."`
-	SQL string `json:"sql" jsonschema:"One SQL statement."`
+	SQL string `json:"sql" jsonschema:"One SQL statement. For a MongoDB database, one command as a JSON document whose first key is the command name."`
 }
 
 // QueryResult is the rows a statement returned.
@@ -102,15 +103,29 @@ func (s *Server) read(ctx context.Context, _ *sdk.CallToolRequest, in readInput)
 	if err != nil {
 		return nil, QueryResult{}, err
 	}
-	if _, err := sqlguard.Check(in.SQL, dialect(target.Engine), sqlguard.ReadOnly); err != nil {
-		return nil, QueryResult{}, toolError(err.Error())
-	}
-
 	rows := min(max(in.MaxRows, 0), maxRows)
 	if rows == 0 {
 		rows = defaultRows
 	}
-	res, err := s.deps.Runner.Read(ctx, target, password, in.SQL, sqlrun.Limits{MaxRows: rows, MaxBytes: maxBytes, Timeout: queryTimeout})
+	lim := sqlrun.Limits{MaxRows: rows, MaxBytes: maxBytes, Timeout: queryTimeout}
+
+	var res sqlrun.Result
+	if target.Engine == sqlrun.MongoDB {
+		cmd, err := mongoguard.Check(in.SQL, target.Database, mongoguard.ReadOnly)
+		if err != nil {
+			return nil, QueryResult{}, toolError(err.Error())
+		}
+		res, err = s.deps.Runner.Command(ctx, target, password, cmd, lim)
+		if err != nil {
+			return nil, QueryResult{}, failure(err)
+		}
+
+		return nil, QueryResult{Columns: res.Columns, Rows: nonNil(res.Rows), RowCount: len(res.Rows), Truncated: res.Truncated}, nil
+	}
+	if _, err := sqlguard.Check(in.SQL, dialect(target.Engine), sqlguard.ReadOnly); err != nil {
+		return nil, QueryResult{}, toolError(err.Error())
+	}
+	res, err = s.deps.Runner.Read(ctx, target, password, in.SQL, lim)
 	if err != nil {
 		return nil, QueryResult{}, failure(err)
 	}
@@ -163,12 +178,23 @@ func (s *Server) write(ctx context.Context, _ *sdk.CallToolRequest, in writeInpu
 	if err != nil {
 		return nil, WriteResult{}, err
 	}
+	lim := sqlrun.Limits{MaxRows: defaultRows, MaxBytes: maxBytes, Timeout: queryTimeout}
+	if target.Engine == sqlrun.MongoDB {
+		cmd, err := mongoguard.Check(in.SQL, target.Database, mongoguard.ReadWrite)
+		if err != nil {
+			return nil, WriteResult{}, toolError(err.Error())
+		}
+		res, err := s.deps.Runner.Command(ctx, target, password, cmd, lim)
+		if err != nil {
+			return nil, WriteResult{}, failure(err)
+		}
+
+		return nil, WriteResult{Columns: res.Columns, Rows: nonNil(res.Rows), Truncated: res.Truncated}, nil
+	}
 	kind, err := sqlguard.Check(in.SQL, dialect(target.Engine), sqlguard.ReadWrite)
 	if err != nil {
 		return nil, WriteResult{}, toolError(err.Error())
 	}
-
-	lim := sqlrun.Limits{MaxRows: defaultRows, MaxBytes: maxBytes, Timeout: queryTimeout}
 	if kind == sqlguard.ReturnsRows {
 		res, err := s.deps.Runner.WriteRows(ctx, target, password, in.SQL, lim)
 		if err != nil {

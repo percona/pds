@@ -16,7 +16,7 @@ on npm as `@gas-lab/pds-mcp`, and it does two things:
   holds no tool code: the tools, their inputs and their safety rules are the adapter's registry. The
   bridge adds no tool of its own.
 - `pds-mcp data` is a second stdio server, the local data server: it runs SQL on the person's own
-  computer against MySQL and PostgreSQL, keeps database passwords in the operating system credential
+  computer against MySQL, PostgreSQL and MongoDB, keeps database passwords in the operating system credential
   store, and makes one control plane request per database, for its connection string. Section 7.0 of
   the design doc is its contract.
 
@@ -52,6 +52,7 @@ lints it. Everything but `cmd/pds-mcp` is under `internal/`.
 | `internal/bridge`                                                                                         | The stdio to `/mcp` bridge on the SDK's stdio and streamable HTTP transports                                                                                                      |
 | `internal/data`                                                                                           | The data server: its tools, the sign in it asks the client for, the credential fetch, the `.env` and public address tools                                                         |
 | `internal/sqlguard`, `internal/sqlrun`                                                                    | The statement check, and the runner: read only transactions the engine enforces, row, byte and time limits, TLS                                                                   |
+| `internal/mongoguard`, `internal/mongorun`                                                                | The MongoDB command check, a deny by default list that alone separates the read tool from a write, and its runner: `maxTimeMS` on every command, row and byte limits              |
 | `internal/vault`, `internal/connections`, `internal/envfile`, `internal/publicip`, `internal/privatefile` | The credential store seam, the saved connections (no password), the `.env` writer, the public address lookup, and the private file writes the login file shares                   |
 | `internal/messages`                                                                                       | Every fixed sentence a person or an agent reads, and the copy test over them                                                                                                      |
 | `internal/fakecp`, `internal/harness`                                                                     | Test support: a control plane for tests, and a driver for the built binary                                                                                                        |
@@ -83,6 +84,10 @@ lints it. Everything but `cmd/pds-mcp` is under `internal/`.
   for it: a computer with no credential store gets a sentence and nothing is saved.
 - A tool of the data server returns only `toolError` values, which are fixed sentences, or an
   engine's own message, which `sqlrun` has cleaned. Never return an `err` from a driver.
+- A MongoDB command goes through `mongoguard.Check` and `mongorun.Run` and nothing else, and what is sent is the
+  checked tree written out again, never the text the agent typed. A new command, field or aggregation stage
+  is added to the lists in `mongoguard` with a test that the read tool refuses it or runs it, and every
+  bypass a test tries stays in the test file.
 - `run_query` is registered only while the saved sign in carries `pds:sql_write`, and its handler
   checks the grant again. A read goes through `sqlguard.Check` and `sqlrun.Read` and nothing else.
 - macOS and Linux only: the token store uses `flock`.
@@ -102,8 +107,9 @@ a request the control plane received, a file on disk. Never assert on internal s
   read only transaction refuses a write, a second statement and a switch to read write. They read
   `PDS_TEST_MYSQL_ADDR` and `PDS_TEST_POSTGRES_ADDR` (`host:port`) with
   `PDS_TEST_MYSQL_PASSWORD` and `PDS_TEST_POSTGRES_PASSWORD` for the `root` and `postgres` users and a
-  database named `app`, and skip only when the one they need is not set. The `mcp` workflow starts both
-  as services. Everything else uses the fake runner and `vault.Memory`, because the test machine's own
+  database named `app`, and skip only when the one they need is not set. The MongoDB tests read
+  `PDS_TEST_MONGODB_ADDR` and `PDS_TEST_MONGODB_PASSWORD` for the `root` user of the `admin` database. The
+  `mcp` workflow starts all three as services. Everything else uses the fake runner and `vault.Memory`, because the test machine's own
   keychain is never touched.
 - **Contract tests** (`contract`) run the built bridge against a real control plane: they sign in
   through the authorize and consent routes as a user whose password is known, then check what every

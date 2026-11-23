@@ -322,3 +322,14 @@ These came out of writing the catalog. Check them in review.
 - Status values of `list_environments` were not traced and are passed through.
 - The heartbeat interval was not read, so descriptions say state "can be a little behind".
 - The 45 second wait cap assumes a client limit of about 60 seconds, which was not confirmed.
+
+## 12. The local data server and MongoDB
+
+`pds-mcp data` serves five tools of its own, and `run_query` while the sign in allows SQL writes. They are not the registry's, and section 7.0 of the design document is their contract. This section lists how they behave for a MongoDB database. The MySQL and PostgreSQL behavior is unchanged.
+
+- **`connect_database`.** Input `id` and optional `database`. Accepts a `mongodb://` string with a member list and the `replicaSet`, `directConnection`, `authSource` and `ssl` or `tls` options. The result adds `members` and `replicaSet` to the connection. Annotations: not destructive, idempotent, open world.
+- **`run_read_query`.** Input `id`, `sql` and `maxRows`. For MongoDB `sql` is one command as a JSON document, run on the connection's database. Accepted: `find`, `aggregate`, `count`, `distinct`, `listCollections`, `listIndexes`, `listDatabases`, `collStats` and `dbStats`. Refused, each with a sentence that says why: any write command, an aggregate with a `$out` or `$merge` stage, server-side JavaScript (`$where`, `$function`, `$accumulator`, `$code`, `mapReduce`, `eval`), user, role, database, index and server commands, and any command not on the list. Every command has a time limit of at most 30 seconds, and a command that runs past it is stopped and the result says so. Result: `columns` (`["document"]`), `rows` (one document in each), `rowCount` and `truncated`. Annotations: read only, open world.
+- **`run_query`.** Input `id` and `sql`. For MongoDB it accepts everything above, and `insert`, `update`, `delete`, `findAndModify`, `createIndexes`, `create`, `drop` and an aggregate that ends in `$out` or `$merge` into the connection's own database. It is listed only while the sign in carries `pds:sql_write`, and refuses the same things in the same words. Result: `columns`, `rows` and `truncated`, with the server's answer as the document (`n`, `nModified`, `writeErrors`). There is no `rowsAffected`. Annotations: destructive, open world.
+- **`write_env`.** For MongoDB it writes `<prefix>_URL`, the connection string, and `<prefix>_NAME`. The password is in the string only with `includePassword`, which the user confirms, and the result says `passwordWritten`.
+
+The fixed sentences of these refusals are in `internal/messages` and follow the same copy rules as every other tool.

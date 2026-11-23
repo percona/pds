@@ -217,7 +217,7 @@ No tool returns a database password.
 ## Run SQL on your databases
 
 `pds-mcp data` is a second server in the same program. It runs on your machine, connects to your
-MySQL and PostgreSQL databases from there, and lets the agent read them and, if you allow it, change
+MySQL, PostgreSQL and MongoDB databases from there, and lets the agent read them and, if you allow it, change
 them. Add it beside the first one, with the same settings and `data` after the package name. For
 Claude Code:
 
@@ -241,14 +241,37 @@ If you start the data server without signing in, a client that can show a link a
 sign in page, and any other client tells you to run the command above. The data server never opens a
 browser itself.
 
-| Tool               | What it does                                                                                                                                                   |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `connect_database` | Fetches the password for a database id, keeps it in this computer's credential store and saves how to reach the database. It never creates a database.         |
-| `list_connections` | Lists the databases you connected: host, port, user and database name.                                                                                         |
-| `run_read_query`   | Runs one `SELECT`, `WITH`, `SHOW`, `EXPLAIN`, `VALUES`, `TABLE` or `DESCRIBE` statement in a read only transaction. At most 1000 rows, 256 KiB and 30 seconds. |
-| `run_query`        | Runs one statement that changes data or schema. Listed only while your sign in includes SQL writes.                                                            |
-| `get_my_ip`        | Returns this computer's public address as a `/32`, for a database's allowed addresses.                                                                         |
-| `write_env`        | Writes host, port, user and database name to a `.env` file in the working directory. It adds the password only when you confirm it.                            |
+| Tool               | What it does                                                                                                                                                                                         |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `connect_database` | Fetches the password for a database id, keeps it in this computer's credential store and saves how to reach the database. It never creates a database.                                               |
+| `list_connections` | Lists the databases you connected: host, port, user and database name.                                                                                                                               |
+| `run_read_query`   | Runs one `SELECT`, `WITH`, `SHOW`, `EXPLAIN`, `VALUES`, `TABLE` or `DESCRIBE` statement in a read only transaction. At most 1000 rows, 256 KiB and 30 seconds. For MongoDB it runs one read command. |
+| `run_query`        | Runs one statement that changes data or schema. Listed only while your sign in includes SQL writes.                                                                                                  |
+| `get_my_ip`        | Returns this computer's public address as a `/32`, for a database's allowed addresses.                                                                                                               |
+| `write_env`        | Writes host, port, user and database name to a `.env` file in the working directory, or the connection string for MongoDB. It adds the password only when you confirm it.                            |
+
+### MongoDB
+
+For a MongoDB database the statement is one command as a JSON document, whose first key is the
+command name, run on the database the connection names. Connect with the string PDS gives you:
+`connect_database` keeps every member and the replica set. Pass `database` to use a database other
+than the one in the string.
+
+```json
+{ "find": "orders", "filter": { "status": "open" }, "limit": 10 }
+```
+
+`run_read_query` runs `find`, `aggregate`, `count`, `distinct`, `listCollections`, `listIndexes`,
+`listDatabases`, `collStats` and `dbStats`. It refuses every write command, an aggregate with a `$out`
+or `$merge` stage, and JavaScript that runs on the database (`$where`, `$function`, `$accumulator`,
+`mapReduce`), each with a sentence that says why. MongoDB has no read only transaction, and the account
+PDS gives you can write, so the data server decides from the command before it sends anything.
+`run_query` adds `insert`, `update`, `delete`, `findAndModify`, `createIndexes`, `create` and
+`drop`, while your sign in includes SQL writes. Nothing else runs in either tool: no user or role
+commands, no `dropDatabase`, no server commands, and no collection whose name starts with `system.`.
+
+Every command has a time limit of at most 30 seconds, and a command that runs past it is stopped
+and says so. Each document comes back as one row.
 
 The `database_access_advice` prompt says which addresses to allow: the same VPC means private
 access, a laptop or another host means public access with this computer's `/32`, and never

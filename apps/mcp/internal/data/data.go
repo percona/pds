@@ -1,6 +1,6 @@
 // Package data is the local data server: a second stdio MCP server in the pds-mcp binary that
 // connects an agent to the databases of the control plane from this computer. It keeps each
-// database's password in the operating system's credential store, runs SQL on this computer's own
+// database's password in the operating system's credential store, runs SQL and MongoDB commands on this computer's own
 // connection, and lists its write tool only while the sign in holds the SQL write grant. The
 // control plane never sees the statements or the rows.
 package data
@@ -20,6 +20,8 @@ import (
 
 	"github.com/percona/pds/apps/mcp/internal/connections"
 	"github.com/percona/pds/apps/mcp/internal/messages"
+	"github.com/percona/pds/apps/mcp/internal/mongoguard"
+	"github.com/percona/pds/apps/mcp/internal/mongorun"
 	"github.com/percona/pds/apps/mcp/internal/oauth"
 	"github.com/percona/pds/apps/mcp/internal/sqlrun"
 	"github.com/percona/pds/apps/mcp/internal/tokenstore"
@@ -58,6 +60,8 @@ type Runner interface {
 	Read(ctx context.Context, t sqlrun.Target, password, statement string, lim sqlrun.Limits) (sqlrun.Result, error)
 	Write(ctx context.Context, t sqlrun.Target, password, statement string, lim sqlrun.Limits) (sqlrun.Result, error)
 	WriteRows(ctx context.Context, t sqlrun.Target, password, statement string, lim sqlrun.Limits) (sqlrun.Result, error)
+	// Command runs one MongoDB command that mongoguard accepted.
+	Command(ctx context.Context, t sqlrun.Target, password string, cmd mongoguard.Command, lim sqlrun.Limits) (sqlrun.Result, error)
 	Probe(ctx context.Context, t sqlrun.Target, password string) error
 }
 
@@ -79,8 +83,17 @@ func (DatabaseRunner) WriteRows(ctx context.Context, t sqlrun.Target, password, 
 	return sqlrun.WriteRows(ctx, t, password, statement, lim)
 }
 
+// Command runs a checked MongoDB command.
+func (DatabaseRunner) Command(ctx context.Context, t sqlrun.Target, password string, cmd mongoguard.Command, lim sqlrun.Limits) (sqlrun.Result, error) {
+	return mongorun.Run(ctx, t, password, cmd, lim)
+}
+
 // Probe checks that a database can be reached with a password.
 func (DatabaseRunner) Probe(ctx context.Context, t sqlrun.Target, password string) error {
+	if t.Engine == sqlrun.MongoDB {
+		return mongorun.Probe(ctx, t, password)
+	}
+
 	return sqlrun.Probe(ctx, t, password)
 }
 
