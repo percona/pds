@@ -19,13 +19,31 @@ const MainTechnology = "MySQL"
 // MainTechnologyPostgreSQL is the `u_main_technology` value for PostgreSQL.
 const MainTechnologyPostgreSQL = "PostgreSQL"
 
-// TechnologyFor maps an engine id to the ServiceNow technology field.
+// MainTechnologyMongoDB is the `u_main_technology` value for MongoDB.
+const MainTechnologyMongoDB = "MongoDB"
+
+// TechnologyFor maps an engine id to the ServiceNow technology field. An
+// engine it does not know routes as MySQL.
 func TechnologyFor(engine string) string {
+	if technology, known := KnownTechnology(engine); known {
+		return technology
+	}
+
+	return MainTechnology
+}
+
+// KnownTechnology is the technology an engine id names, and whether PDS knows
+// the engine at all.
+func KnownTechnology(engine string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(engine)) {
+	case "mysql":
+		return MainTechnology, true
 	case "postgresql", "postgres":
-		return MainTechnologyPostgreSQL
+		return MainTechnologyPostgreSQL, true
+	case "mongodb":
+		return MainTechnologyMongoDB, true
 	default:
-		return MainTechnology
+		return "", false
 	}
 }
 

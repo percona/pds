@@ -3,11 +3,13 @@ package mcp
 import (
 	"context"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
 
 	"github.com/percona/pds/adapter/internal/auth"
+	"github.com/percona/pds/adapter/internal/hub"
 )
 
 const (
@@ -61,8 +63,9 @@ func waitForReady(id string) *nextCall {
 }
 
 type createDatabaseInput struct {
-	Engine                    string   `json:"engine,omitempty" jsonschema:"The database engine. Defaults to mysql."`
-	Name                      string   `json:"name" jsonschema:"Lowercase letters, digits and dashes, at most 63 characters, 37 for postgresql."`
+	Engine string `json:"engine,omitempty" jsonschema:"The database engine. Defaults to mysql."`
+	// Name is described by the tool's tune, which says the limits of the engines on offer.
+	Name                      string   `json:"name"`
 	Environment               string   `json:"environment" jsonschema:"The environment to create it on, from list_environments."`
 	Profile                   string   `json:"profile" jsonschema:"Sets the default size."`
 	CPU                       *int     `json:"cpu,omitempty" jsonschema:"CPU cores."`
@@ -144,18 +147,20 @@ type deleteDatabaseInput struct {
 	Confirm string `json:"confirm,omitempty" jsonschema:"The database name, typed by the user. It must match exactly."`
 }
 
-func databaseChanges() []tool {
+func databaseChanges(mongodb bool) []tool {
+	engines := offeredEngines(mongodb)
+
 	return []tool{
 		define(spec{
 			name:  "create_database",
 			title: "Create a database",
-			description: "Create a MySQL or PostgreSQL database on one environment of this control plane. " +
-				"engine is mysql or postgresql and defaults to mysql: ask the user when they have not said. " +
+			description: "Create a " + joinWords(engineLabels(engines), "or") + " database on one environment of this control plane. " +
+				"engine is " + joinWords(engineIDs(engines), "or") + " and defaults to mysql: ask the user when they have not said. " +
 				"environment is required: call list_environments and ask the user which one. " +
 				"profile sets the default size: dev is 1 member, 1 CPU, 2 GB memory, 20 GB storage and no high availability; " +
 				"staging is 3 members, 2 CPU, 8 GB and 100 GB; prod is 3 members, 4 CPU, 16 GB and 250 GB. " +
 				"cpu, memoryGb and storageGb override the profile within limits: 1 to 64 CPU, 1 to 512 GB memory, 10 to 16000 GB storage. " +
-				"Databases are private by default, for both engines: reachable only on private address ranges, through an internal load balancer. " +
+				privateByDefault(mongodb) +
 				"For access public you must ask the user which addresses may connect and pass them as sourceRanges: never choose 0.0.0.0/0 yourself. " +
 				"If the user chooses it, warn them that any address on the internet can connect. A client that can ask the user asks them to confirm, and the call goes on only on their yes, whatever acknowledgeOpenToInternet says. For any other client, pass acknowledgeOpenToInternet true after the user confirms. " +
 				"The call returns before the database is ready: use wait_for_database. " +
@@ -163,7 +168,8 @@ func databaseChanges() []tool {
 			annotations: changing(false, false),
 			access:      auth.AccessChange,
 			tune: func(input, _ *jsonschema.Schema) {
-				input.Properties["engine"].Enum = []any{"mysql", "postgresql"}
+				input.Properties["engine"].Enum = engineEnum(engines)
+				input.Properties["name"].Description = nameLimits(mongodb)
 				input.Properties["profile"].Enum = []any{"dev", "staging", "prod"}
 				input.Properties["access"].Enum = []any{"private", "public"}
 				limit := maxSourceRanges
@@ -233,6 +239,36 @@ func databaseChanges() []tool {
 // opensToInternet is a range that admits every address: a prefix of length
 // zero, or an address that is all zeros, in either family.
 var opensToInternet = regexp.MustCompile(`(?:/0+|^(?:0\.0\.0\.0|::))$`)
+
+// privateByDefault is what create_database says about access.
+func privateByDefault(mongodb bool) string {
+	if !mongodb {
+		return "Databases are private by default, for both engines: reachable only on private address ranges, through an internal load balancer. "
+	}
+
+	return "MySQL and PostgreSQL databases are private by default: reachable only on private address ranges, through an internal load balancer. " +
+		"A MongoDB database has no access from outside the Kubernetes cluster yet, so leave access and sourceRanges out for it. "
+}
+
+// nameLimits is the sentence that says how long a name may be. The MongoDB
+// limit is the one the control plane enforces.
+func nameLimits(mongodb bool) string {
+	limits := "Lowercase letters, digits and dashes, at most 63 characters, 37 for postgresql"
+	if mongodb {
+		limits += ", " + strconv.Itoa(hub.MaxMongoDBName) + " for mongodb"
+	}
+
+	return limits + "."
+}
+
+func engineEnum(engines []offered) []any {
+	var enum []any
+	for _, id := range engineIDs(engines) {
+		enum = append(enum, id)
+	}
+
+	return enum
+}
 
 func createDatabase(ctx context.Context, c *call, in createDatabaseInput) (changed, error) {
 	if in.Access == "public" && len(in.SourceRanges) == 0 {

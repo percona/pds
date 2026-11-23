@@ -24,7 +24,7 @@ type PluginPrompt struct {
 // PluginGuidanceText returns the instructions at the widest tier, the offer
 // and the prompts, in the order the registry lists them.
 func PluginGuidanceText() PluginText {
-	g := loadGuidance()
+	g := loadGuidance(MongoDBEnabled)
 	text := PluginText{Instructions: g.instructionsFor(auth.AccessChangeDelete), Nudge: g.nudge}
 	for _, p := range g.prompts {
 		text.Prompts = append(text.Prompts, PluginPrompt{Name: p.Name, Title: p.Title, Description: p.Description})

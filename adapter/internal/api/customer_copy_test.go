@@ -242,22 +242,27 @@ func registryToolCopy(t *testing.T) []located {
 
 	// The highest tier lists every tool, and the client kind is what lets it.
 	caller := auth.Caller{Identity: auth.Identity{Client: auth.Client{Kind: auth.ClientChat}}, Access: auth.AccessChangeDelete}
-	session, err := mcp.New(nil, slog.New(slog.DiscardHandler), "test").Connect(t.Context(), caller)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = session.Close() })
 
-	list, err := session.ListTools(t.Context(), nil)
-	require.NoError(t, err)
-	require.NotEmpty(t, list.Tools)
-	var listed []string
-	for _, tool := range list.Tools {
-		listed = append(listed, tool.Name)
-	}
-	require.Contains(t, listed, "delete_database", "the copy of the change tools is read too")
-
+	// MongoDB's words are read with the engine switch on as well, because they
+	// reach customers on the day it is.
 	var out []located
-	for _, tool := range list.Tools {
-		out = append(out, toolCopy(t, tool)...)
+	for _, mongodb := range []bool{false, true} {
+		session, err := mcp.New(nil, slog.New(slog.DiscardHandler), "test", mcp.WithMongoDB(mongodb)).Connect(t.Context(), caller)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = session.Close() })
+
+		list, err := session.ListTools(t.Context(), nil)
+		require.NoError(t, err)
+		require.NotEmpty(t, list.Tools)
+		var listed []string
+		for _, tool := range list.Tools {
+			listed = append(listed, tool.Name)
+		}
+		require.Contains(t, listed, "delete_database", "the copy of the change tools is read too")
+
+		for _, tool := range list.Tools {
+			out = append(out, toolCopy(t, tool)...)
+		}
 	}
 
 	return out
@@ -279,34 +284,39 @@ func registryPromptCopy(t *testing.T) []located {
 
 	var out []located
 	for _, access := range []auth.Access{auth.AccessRead, auth.AccessChange, auth.AccessChangeDelete} {
-		caller := auth.Caller{Identity: auth.Identity{Client: auth.Client{Kind: auth.ClientChat}}, Access: access}
-		session, err := mcp.New(nil, slog.New(slog.DiscardHandler), "test").Connect(t.Context(), caller)
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = session.Close() })
+		for _, mongodb := range []bool{false, true} {
+			caller := auth.Caller{Identity: auth.Identity{Client: auth.Client{Kind: auth.ClientChat}}, Access: access}
+			session, err := mcp.New(nil, slog.New(slog.DiscardHandler), "test", mcp.WithMongoDB(mongodb)).Connect(t.Context(), caller)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = session.Close() })
 
-		instructions := session.InitializeResult().Instructions
-		require.NotEmpty(t, instructions)
-		out = append(out, located{at: "instructions at " + string(access), text: instructions})
+			instructions := session.InitializeResult().Instructions
+			require.NotEmpty(t, instructions)
+			out = append(out, located{at: "instructions at " + string(access), text: instructions})
 
-		list, err := session.ListPrompts(t.Context(), nil)
-		require.NoError(t, err)
-		require.NotEmpty(t, list.Prompts)
-		for _, prompt := range list.Prompts {
-			filled := map[string]string{}
-			required := map[string]string{}
-			for _, argument := range prompt.Arguments {
-				filled[argument.Name] = promptArguments[argument.Name]
-				if argument.Required {
-					required[argument.Name] = promptArguments[argument.Name]
+			list, err := session.ListPrompts(t.Context(), nil)
+			require.NoError(t, err)
+			require.NotEmpty(t, list.Prompts)
+			for _, prompt := range list.Prompts {
+				filled := map[string]string{}
+				required := map[string]string{}
+				for _, argument := range prompt.Arguments {
+					filled[argument.Name] = promptArguments[argument.Name]
+					if mongodb && argument.Name == "engine" {
+						filled[argument.Name] = "mongodb"
+					}
+					if argument.Required {
+						required[argument.Name] = promptArguments[argument.Name]
+					}
 				}
-			}
-			for _, arguments := range []map[string]string{filled, required} {
-				got, err := session.GetPrompt(t.Context(), &sdk.GetPromptParams{Name: prompt.Name, Arguments: arguments})
-				require.NoError(t, err)
-				for _, message := range got.Messages {
-					content, ok := message.Content.(*sdk.TextContent)
-					require.True(t, ok, prompt.Name)
-					out = append(out, promptCopy(prompt, content.Text)...)
+				for _, arguments := range []map[string]string{filled, required} {
+					got, err := session.GetPrompt(t.Context(), &sdk.GetPromptParams{Name: prompt.Name, Arguments: arguments})
+					require.NoError(t, err)
+					for _, message := range got.Messages {
+						content, ok := message.Content.(*sdk.TextContent)
+						require.True(t, ok, prompt.Name)
+						out = append(out, promptCopy(prompt, content.Text)...)
+					}
 				}
 			}
 		}

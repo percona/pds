@@ -38,4 +38,13 @@ describe("buildTicketContext", () => {
       errorMessage: "Pod orders-dev-0 restarted 5 times",
     });
   });
+
+  it.each(["mysql", "postgresql", "mongodb"] as const)(
+    "passes the %s engine through to the ticket",
+    (engine) => {
+      expect(
+        buildTicketContext(createMockDatabase({ engine, version: "8.0.4", members: 3 })),
+      ).toMatchObject({ engine, engineVersion: "8.0.4", members: 3 });
+    },
+  );
 });

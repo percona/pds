@@ -194,11 +194,27 @@ func TestCreateTicketPostsPostgreSQLAsTheTechnology(t *testing.T) {
 	assert.Equal(t, "PostgreSQL", got.Body["u_main_technology"])
 }
 
+func TestCreateTicketSendsMongoDBAsTheMainTechnology(t *testing.T) {
+	client, got := newFakeServiceNow(t, http.StatusOK, fixture(t, "create.json"))
+
+	_, err := client.CreateTicket(context.Background(), servicenow.CreateTicketInput{
+		ShortDescription: "Cannot create database orders",
+		Description:      "Profile: dev",
+		MainTechnology:   servicenow.TechnologyFor("mongodb"),
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, "MongoDB", got.Body["u_main_technology"])
+}
+
 func TestTechnologyForMapsTheEngine(t *testing.T) {
 	assert.Equal(t, "MySQL", servicenow.TechnologyFor(""))
 	assert.Equal(t, "MySQL", servicenow.TechnologyFor("mysql"))
 	assert.Equal(t, "PostgreSQL", servicenow.TechnologyFor("postgresql"))
 	assert.Equal(t, "PostgreSQL", servicenow.TechnologyFor("Postgres"))
+	assert.Equal(t, "MongoDB", servicenow.TechnologyFor("mongodb"))
+	assert.Equal(t, "MongoDB", servicenow.TechnologyFor(" MongoDB "))
+	assert.Equal(t, "MySQL", servicenow.TechnologyFor("oracle"), "an engine PDS does not know routes as MySQL")
 }
 
 func TestCreateTicketReadsTheNumberWhenTheAnswerCarriesOne(t *testing.T) {

@@ -505,7 +505,14 @@ such mark. The hub also refuses, before it writes anything, a MongoDB name over
 22 characters, which the provider would only refuse later with a Failed phase
 and no message, and any access or allowed addresses, because a MongoDB
 database has no access from outside the Kubernetes cluster yet. The API accepts
-the engine, while the engine picker and the MCP engine list leave it out.
+the engine, while the engine picker and the MCP engine list leave it out. The
+console's picker reads `enabled` in `apps/ui/src/features/databases/engines.ts`
+and the MCP registry reads `MongoDBEnabled` in `adapter/internal/mcp/engines.go`:
+both are off, and one list in the registry feeds the create tool's engine enum,
+its name limits, the prompt argument check and the guidance about MongoDB. The
+tools that work on a database that exists answer for a MongoDB one with the
+switch off. A support ticket names the engine as support reads it, so one about
+a MongoDB database says MongoDB and is filed under that technology.
 
 A MongoDB connection is built by PDS and never taken from the provider's `uri`,
 which names no replica set and leaves the password unescaped. The provider's

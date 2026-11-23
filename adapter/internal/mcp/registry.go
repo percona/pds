@@ -47,6 +47,10 @@ type Registry struct {
 	// consoleURL is where a person opens the console, for the tools that send
 	// them there. It may be empty.
 	consoleURL string
+	// mongodb is the engine switch. It decides what create_database and the
+	// prompts accept and what the guidance says. The tools that work on an
+	// existing database answer for a MongoDB one either way.
+	mongodb bool
 }
 
 // Option changes how a Registry is built.
@@ -68,6 +72,12 @@ func WithConsoleURL(address string) Option {
 	return func(r *Registry) { r.consoleURL = strings.TrimRight(strings.TrimSpace(address), "/") }
 }
 
+// WithMongoDB sets the engine switch for one registry, which otherwise follows
+// MongoDBEnabled. A test turns it on this way.
+func WithMongoDB(enabled bool) Option {
+	return func(r *Registry) { r.mongodb = enabled }
+}
+
 // New returns a registry whose tools call api, the adapter's router. version is
 // the control plane release the MCP clients are told they are talking to.
 func New(api http.Handler, logger *slog.Logger, version string, opts ...Option) *Registry {
@@ -77,19 +87,20 @@ func New(api http.Handler, logger *slog.Logger, version string, opts ...Option) 
 		version: version,
 		timeout: defaultTimeout,
 		clock:   systemClock{},
-		tools:   newTools(),
-		guide:   loadGuidance(),
+		mongodb: MongoDBEnabled,
 	}
 	for _, opt := range opts {
 		opt(r)
 	}
+	r.tools = newTools(r.mongodb)
+	r.guide = loadGuidance(r.mongodb)
 
 	return r
 }
 
 // newTools is every tool of the registry. The SDK lists them by name, so the
 // order here does not reach a client.
-func newTools() []tool {
+func newTools(mongodb bool) []tool {
 	var tools []tool
 	tools = append(tools, databaseReads()...)
 	tools = append(tools, observabilityReads()...)
@@ -98,7 +109,7 @@ func newTools() []tool {
 	tools = append(tools, alertReads()...)
 	tools = append(tools, supportReads()...)
 	tools = append(tools, waitTools()...)
-	tools = append(tools, databaseChanges()...)
+	tools = append(tools, databaseChanges(mongodb)...)
 	tools = append(tools, supportChanges()...)
 	tools = append(tools, environmentChanges()...)
 

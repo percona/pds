@@ -121,7 +121,7 @@ func TestCreateTicketReturnsTheNumberAndThePortalLink(t *testing.T) {
 	require.True(t, ok)
 	assert.Contains(t, description, "The create stopped at Starting database.")
 	assert.Contains(t, description, "Database: orders-prod")
-	assert.Contains(t, description, "Engine: mysql 8.0.36")
+	assert.Contains(t, description, "Engine: MySQL 8.0.36")
 	assert.NotContains(t, description, "Environment type:")
 	assert.Contains(t, description, "Members: 3")
 	assert.Contains(t, description, "Error: 0/3 nodes are available: insufficient cpu")
@@ -146,6 +146,35 @@ func TestCreateTicketSetsPostgreSQLAsTheTechnology(t *testing.T) {
 	seen := fake.seen()
 	require.Len(t, seen, 1)
 	assert.Equal(t, "PostgreSQL", seen[0].Body["u_main_technology"])
+}
+
+func TestCreateTicketAboutAMongoDBDatabaseSaysMongoDBAndCarriesItsFacts(t *testing.T) {
+	fake := newFakeServiceNow(t)
+	srv := newSupportServer(t, fake)
+
+	rec := do(t, srv, http.MethodPost, "/api/support/tickets", strings.NewReader(`{
+		"subject": "Cannot connect to orders",
+		"description": "It times out.",
+		"context": {
+			"database": "orders",
+			"profile": "dev",
+			"engine": "mongodb",
+			"engineVersion": "8.0.4",
+			"namespace": "pds",
+			"members": 3,
+			"status": "ready"
+		}
+	}`))
+
+	require.Equal(t, http.StatusCreated, rec.Code, "body: %s", rec.Body.String())
+	seen := fake.seen()
+	require.Len(t, seen, 1)
+	assert.Equal(t, "MongoDB", seen[0].Body["u_main_technology"])
+	description, ok := seen[0].Body["description"].(string)
+	require.True(t, ok)
+	for _, fact := range []string{"Database: orders", "Profile: dev", "Engine: MongoDB 8.0.4", "Namespace: pds", "Members: 3", "Status: ready"} {
+		assert.Contains(t, description, fact)
+	}
 }
 
 // The documented create response carries the record id and no number, so the

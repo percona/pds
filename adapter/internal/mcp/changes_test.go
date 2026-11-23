@@ -639,6 +639,20 @@ func TestASupportTicketAboutADatabaseCarriesWhatTheConsoleSends(t *testing.T) {
 		"namespace":"pds","members":3,"status":"ready","errorMessage":"A member is not ready."}}`, sent[1].Body)
 }
 
+func TestASupportTicketAboutAMongoDBDatabaseCarriesItsEngine(t *testing.T) {
+	api := changeAPI()
+	database := databaseFixture()
+	database["engine"] = "mongodb"
+	database["version"] = "8.0.4"
+	api.then(databasePath, ok(database))
+	session := connectAt(t, api, auth.AccessChange)
+
+	res := callTool(t, session, "create_support_ticket", map[string]any{"subject": "a", "description": "b", "databaseId": orders})
+
+	require.False(t, res.IsError, text(t, res))
+	assert.Contains(t, api.sent()[1].Body, `"engine":"mongodb","engineVersion":"8.0.4"`)
+}
+
 func TestASupportTicketAboutAStandaloneDatabaseSaysSo(t *testing.T) {
 	api := changeAPI()
 	session := connectAt(t, api, auth.AccessChange)
