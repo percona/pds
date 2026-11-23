@@ -310,6 +310,6 @@ var adminCommands = map[string]bool{
 	"compact": true, "reIndex": true, "shutdown": true, "replSetReconfig": true, "replSetStepDown": true,
 	"replSetInitiate": true, "killOp": true, "killAllSessions": true, "killSessions": true, "fsync": true,
 	"fsyncUnlock": true, "setParameter": true, "getParameter": true, "setFeatureCompatibilityVersion": true,
-	"setClusterParameter": true, "profile": true, "currentOp": true, "serverStatus": true, "logRotate": true,
+	"profile": true, "currentOp": true, "serverStatus": true, "logRotate": true,
 	"enableSharding": true, "shardCollection": true, "moveChunk": true, "applyOps": true,
 }

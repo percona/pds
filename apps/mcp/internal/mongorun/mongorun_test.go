@@ -158,7 +158,7 @@ func raw(t *testing.T, text string) bson.Raw {
 }
 
 func TestACursorAnswerBecomesOneRowForEachDocumentAndIsCutAtTheRowLimit(t *testing.T) {
-	reply := raw(t, `{"cursor": {"firstBatch": [{"a": 1}, {"a": 2}, {"a": 3}, {"a": 4}], "id": {"$numberLong": "77"}, "ns": "app.orders"}, "ok": 1, "$clusterTime": {"x": 1}, "operationTime": {"$timestamp": {"t": 1, "i": 1}}}`)
+	reply := raw(t, `{"cursor": {"firstBatch": [{"a": 1}, {"a": 2}, {"a": 3}, {"a": 4}], "id": {"$numberLong": "77"}, "ns": "app.orders"}, "ok": 1, "$audit": {"x": 1}, "operationTime": {"$timestamp": {"t": 1, "i": 1}}}`)
 
 	got, cursor, err := shape(reply, limits)
 	if err != nil {
@@ -190,8 +190,8 @@ func TestACursorThatHasMoreThanItReturnedIsTruncatedAndOnePastItsEndIsNot(t *tes
 	}
 }
 
-func TestAnAnswerWithoutACursorIsOneDocumentWithoutTheClusterBookkeeping(t *testing.T) {
-	reply := raw(t, `{"n": 4, "ok": 1, "$clusterTime": {"clusterTime": {"$timestamp": {"t": 1, "i": 1}}}, "operationTime": {"$timestamp": {"t": 1, "i": 1}}}`)
+func TestAnAnswerWithoutACursorIsOneDocumentWithoutTheServerBookkeeping(t *testing.T) {
+	reply := raw(t, `{"n": 4, "ok": 1, "$audit": {"t": {"$timestamp": {"t": 1, "i": 1}}}, "operationTime": {"$timestamp": {"t": 1, "i": 1}}}`)
 	got, cursor, err := shape(reply, limits)
 	if err != nil || cursor.id != 0 || len(got.Rows) != 1 {
 		t.Fatalf("result %+v %+v %v", got, cursor, err)

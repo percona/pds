@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -146,12 +147,25 @@ func Run(ctx context.Context, t sqlrun.Target, password string, cmd mongoguard.C
 	}
 	defer disconnect(ctx, client)
 
-	ctx, cancel := context.WithTimeout(ctx, lim.Timeout+backstop)
+	// The driver adds its own maxTimeMS to a command whose context has a deadline, and the server
+	// refuses a command that carries two. The command's own maxTimeMS is the server's limit, so
+	// the client side one is a cancel, which the driver does not read as a deadline.
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	var gaveUp atomic.Bool
+	timer := time.AfterFunc(lim.Timeout+backstop, func() {
+		gaveUp.Store(true)
+		cancel()
+	})
+	defer timer.Stop()
 	db := client.Database(cmd.Database)
 
 	reply, err := db.RunCommand(ctx, doc).Raw()
 	if err != nil {
+		if gaveUp.Load() {
+			return sqlrun.Result{}, sqlrun.ErrTimeout
+		}
+
 		return sqlrun.Result{}, classify(err, password)
 	}
 	res, open, err := shape(reply, lim)
@@ -266,7 +280,7 @@ func shape(reply bson.Raw, lim sqlrun.Limits) (sqlrun.Result, openCursor, error)
 		}
 		kept := doc[:0]
 		for _, e := range doc {
-			if e.Key != "$clusterTime" && e.Key != "operationTime" {
+			if !strings.HasPrefix(e.Key, "$") && e.Key != "operationTime" {
 				kept = append(kept, e)
 			}
 		}

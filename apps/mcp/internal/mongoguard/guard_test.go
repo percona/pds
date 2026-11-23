@@ -273,7 +273,7 @@ func TestAFieldThatChangesHowTheCommandRunsIsRefused(t *testing.T) {
 		"readConcern":            `{"find": "c", "readConcern": {"level": "snapshot"}}`,
 		"writeConcern":           `{"insert": "c", "documents": [], "writeConcern": {"w": 0}}`,
 		"$readPreference":        `{"find": "c", "$readPreference": {"mode": "secondary"}}`,
-		"$clusterTime":           `{"find": "c", "$clusterTime": {}}`,
+		"$audit":                 `{"find": "c", "$audit": {}}`,
 		"explain field":          `{"aggregate": "c", "pipeline": [{"$match": {}}], "explain": true}`,
 		"explain command":        `{"explain": {"aggregate": "c", "pipeline": [{"$out": "z"}], "cursor": {}}, "verbosity": "executionStats"}`,
 		"tailable":               `{"find": "c", "tailable": true, "awaitData": true}`,
