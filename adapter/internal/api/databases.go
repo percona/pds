@@ -192,6 +192,9 @@ type connectionResponse struct {
 	Host     string `json:"host"`
 	Port     int    `json:"port"`
 	Username string `json:"username"`
+	// Members is every address of a replica set, as host:port. Absent for an
+	// engine with one address.
+	Members []string `json:"members,omitempty"`
 	// MaskedURI is the connection string with the password replaced. It is
 	// what the card renders, so the shape is visible and the credential is not.
 	MaskedURI string `json:"maskedUri,omitempty"`
@@ -753,6 +756,7 @@ func toDatabaseResponse(in engine.Instance) databaseResponse {
 			Host:        in.Connection.Host,
 			Port:        in.Connection.Port,
 			Username:    in.Connection.Username,
+			Members:     in.Connection.Members,
 			MaskedURI:   maskURI(in.Connection.URI),
 			SecretName:  in.Connection.SecretName,
 			ServiceName: in.Connection.ServiceName,
