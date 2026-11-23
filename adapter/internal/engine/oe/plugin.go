@@ -93,6 +93,9 @@ type Flavor struct {
 	BackupClass string
 	DefaultPort int
 	URIScheme   string
+	// ReplicaSet is the name of the replica set the connection string names.
+	// It is empty for an engine whose clients reach one address.
+	ReplicaSet string
 	// DropsIdleBackupStorage is whether the provider removes a backup storage
 	// with no schedule entry, turning backups off when none is left. A storage
 	// whose only schedule is turned off is kept and runs nothing, which is how
@@ -142,6 +145,7 @@ var MongoDB = Flavor{
 	BackupClass: everest.BackupClassMongoDB,
 	DefaultPort: 27017,
 	URIScheme:   "mongodb",
+	ReplicaSet:  "rs0",
 
 	EngineOnly:             true,
 	ProvisioningIsUpdating: true,

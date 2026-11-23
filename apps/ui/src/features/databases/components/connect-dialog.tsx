@@ -15,6 +15,7 @@ import {
   cliCommand,
   forwardedCliCommand,
   maskedConnectionUri,
+  mongodbAccountNote,
   passwordFromUri,
   passwordMask,
   portForwardCommand,
@@ -91,7 +92,11 @@ export function ConnectDialog({ database, open, onOpenChange, onCopied }: Connec
                 value={maskedConnectionUri(database)}
                 empty="The connection string cannot be shown here. Copy it to get the real one."
                 copyWhenEmpty
-                note="The password is hidden. Copy the string to get the real one."
+                note={
+                  database.engine === "mongodb"
+                    ? `The password is hidden. Copy the string to get the real one. ${mongodbAccountNote}`
+                    : "The password is hidden. Copy the string to get the real one."
+                }
                 copyLabel="Copy connection string"
                 onCopy={() =>
                   copy(
@@ -292,7 +297,20 @@ function SpokeSteps({ database, environment, onCopied }: SpokeStepsProps) {
           onCopy={() => copy(step.value)}
         />
       ))}
-      {direct ? null : (
+      {direct ? null : database.engine === "mongodb" ? (
+        <div className="space-y-1.5">
+          <p className="text-sm text-muted-foreground">
+            Connection string for a workload on {environment}
+          </p>
+          <p className="break-all rounded-md bg-muted px-3 py-2 font-mono text-xs">
+            {maskedConnectionUri(database)}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Put the password from step 2 in place of the dots, and write characters such as @ : / ?
+            # as %40 %3A %2F %3F %23. {mongodbAccountNote}
+          </p>
+        </div>
+      ) : (
         <p className="text-xs text-muted-foreground">
           Address inside the Kubernetes cluster:{" "}
           <span className="font-mono">

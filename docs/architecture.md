@@ -528,6 +528,21 @@ nothing else. Scaling down leaves the volumes of the removed members until the
 database is deleted, and scaling up again reuses them, which the scale dialog
 says.
 
+A MongoDB connection is built by PDS and never taken from the provider's `uri`,
+which names no replica set and leaves the password unescaped. The provider's
+Secret holds `host`, a comma separated list of every member with its port, and
+a constant `port`, with `databaseAdmin` as the username. The adapter builds
+`mongodb://<user>:<password>@<member>,<member>/admin?replicaSet=rs0&ssl=false`
+from them, percent-escaping the user and the password. The connection carries
+the member list (`members` in the database payload), `host` and `port` are the
+first member, and `serviceName` is that member's Service, which is what a
+port-forward targets. The string is plain: the members refuse a TLS connection
+that presents no client certificate, so the console says the connection inside
+the Kubernetes cluster is not encrypted. The port-forward command's `mongosh`
+adds `directConnection=true`, because the members advertise names a laptop
+cannot resolve. `databaseAdmin` reads and writes every database and can manage
+users, and the console says so beside the string.
+
 The agent calls OpenEverest with the hand written client in
 `adapter/internal/client/everest`. It scopes calls to cluster `main`
 (`EVEREST_CLUSTER`) and namespace `pds` (`EVEREST_NAMESPACE`):
