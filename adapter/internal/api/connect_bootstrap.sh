@@ -3759,8 +3759,10 @@ update_refuse() {
 # move. python3 is the only parser the customer's machine is sure to have, so
 # the pin is read here rather than with a YAML library.
 #
-# A floor is a ">= version" in support.update.from, keyed openeverest, pxc or
-# postgresql. A component the release does not run is not checked.
+# A floor is a ">= version" in support.update.from, keyed openeverest, pxc,
+# postgresql or mongodb. A component the release does not run is not checked,
+# which is how an environment that joined before a provider was pinned is
+# updated: the chart's upgrade installs that provider.
 update_check() {
   python3 - "$1" "$2" "$3" <<'PY'
 import re
@@ -3848,6 +3850,8 @@ components = [
      walk(pin, "providers", "pxc", "version")),
     ("provider-postgresql", "postgresql", first(r"helm\.sh/chart:\s*[\"']?provider-postgresql-([^\"'\s]+)"),
      walk(pin, "providers", "postgresql", "version")),
+    ("provider-mongodb", "mongodb", first(r"helm\.sh/chart:\s*[\"']?provider-mongodb-([^\"'\s]+)"),
+     walk(pin, "providers", "mongodb", "version")),
 ]
 floors = walk(pin, "support", "update", "from") or {}
 

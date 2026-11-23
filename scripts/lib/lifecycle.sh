@@ -595,7 +595,7 @@ lifecycle_dump() {
   while IFS= read -r deploy; do
     [[ -z "${deploy}" ]] && continue
     case "${deploy}" in
-      *pxc*|*xtradb*|*postgresql*|*pg-operator*)
+      *pxc*|*xtradb*|*postgresql*|*pg-operator*|*mongodb*|*psmdb*)
         lifecycle_dump_cmd logs -n "${everest_ns}" "deployment/${deploy}" --tail=200
         ;;
     esac

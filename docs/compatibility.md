@@ -83,11 +83,14 @@ must match.
 | PXC operator | 1.20.0 | Installed by the PXC provider chart |
 | PostgreSQL provider | 0.6.0 | `provider-percona-postgresql` (`provider-postgresql`) |
 | PostgreSQL operator | 3.0.0 | Installed by the PostgreSQL provider chart |
+| MongoDB provider | 0.4.0 | `provider-percona-server-mongodb` (`provider-mongodb`). See [the MongoDB provider pin](#the-mongodb-provider-pin) |
+| MongoDB operator | 1.22.0 | Installed by the MongoDB provider chart |
 | PMM chart | 1.9.1 | Optional; app 3.9.1 |
 | Instance CRD | core.openeverest.io/v1alpha1 | Adapter client constant |
 | Backup and Restore CRDs | backup.openeverest.io/v1alpha1 | Adapter client constant |
 | MySQL (Percona XtraDB Cluster) | operator-default | The adapter does not set an engine image |
 | PostgreSQL (Percona PostgreSQL) | operator-default | The adapter does not set an engine image |
+| MongoDB (Percona Server for MongoDB) | operator-default | The adapter does not set an engine image. The provider's default is mongod 8.0.12-4 |
 
 PMM is optional. It is not part of the create path. The OpenEverest,
 provider, and operator rows are one unit even when PMM is off.
@@ -118,6 +121,23 @@ chart rather than the pin.
   `read-connection` RBAC action. PDS runs OpenEverest with RBAC off, so no
   action is checked. An installation that turns RBAC on must grant that action
   to the account the adapter signs in as.
+
+## The MongoDB provider pin
+
+The MongoDB provider is pinned at 0.4.0, not at 0.5.0 or later. OpenEverest
+2.0.0-dev.4 rejects the newer provider charts: their BackupClass declares
+`.spec.supportsImport`, a field dev.4 does not have in its schema, so the
+provider never registers. The pin moves to 0.5.0 when OpenEverest ships that
+field. Provider 0.4.0 installs the operator 1.22.0 as its own dependency.
+
+MongoDB runs as a replica set only. A three member replica set needs three
+schedulable nodes, and each member also reserves a backup sidecar of 300m CPU and 1G of memory on top of the
+engine's own requests.
+
+An environment that joined before this pin gets the provider with the join
+script's `--update`, which installs everything the chart carries. MongoDB has
+no entry in `support.update.from`, since no earlier version exists. An
+environment without the provider can still run MySQL and PostgreSQL.
 
 ## MCP server releases
 
@@ -186,7 +206,7 @@ with the pin using kubectl.
    N+1 Percona Database Service chart, and connect one environment. Confirm the API serves Instance, Backup, and Restore
    on the CRD versions in the pin. Confirm the adapter still talks to that
    API.
-2. **Provider.** Confirm the N+1 PXC and PostgreSQL provider charts install
+2. **Provider.** Confirm the N+1 PXC, PostgreSQL and MongoDB provider charts install
    on the connected environment and reconcile Instance objects in `pds`.
 3. **Operator.** Point kubectl at the connected environment and confirm the operator versions the
    providers deploy match the pin:

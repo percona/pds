@@ -77,7 +77,7 @@ or their CRDs are unsupported.
 
 {{- if .Values.stack.enabled }}
 This release includes databases on this cluster:
-  Percona Database Service InstancePresets for Dev, Staging, and Prod (MySQL and PostgreSQL) in {{ include "pds.dbNamespace" . }}
+  Percona Database Service InstancePresets for Dev, Staging, and Prod (MySQL, PostgreSQL and MongoDB) in {{ include "pds.dbNamespace" . }}
 {{- if include "pds.stackPMM" . }}
   monitoring {{ .Values.platform.pmm.appVersion }} in {{ include "pds.pmmNamespace" . }}
 {{- else }}

@@ -754,6 +754,15 @@ provider-postgresql:
     watchAllNamespaces: true
     priorityClassName: pds-operator
 
+# MongoDB provider. The operator watches every namespace so Instances in
+# stack.dbNamespace are reconciled from everest-system.
+# Its operator subchart is aliased operator, like the PXC provider's, so both
+# would otherwise be named <release>-operator and collide on install.
+provider-mongodb:
+  operator:
+    fullnameOverride: pds-psmdb-operator
+    watchAllNamespaces: true
+
 # Percona PostgreSQL operator for the adapter's own database, used when
 # adapter.database.operator.enabled is true. A stack install gets the same
 # operator through provider-postgresql instead. It watches only the release
@@ -829,6 +838,12 @@ platform:
     repository: https://percona.github.io/percona-helm-charts/
     chart: pg-operator
     version: 3.0.0
+  mongodbOperator:
+    # -- The MongoDB provider chart installs the operator.
+    install: false
+    repository: https://percona.github.io/percona-helm-charts/
+    chart: psmdb-operator
+    version: 1.22.0
   pmm:
     # -- Helm repository that serves PMM 3.
     repository: https://percona.github.io/percona-helm-charts/

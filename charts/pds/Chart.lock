@@ -8,11 +8,14 @@ dependencies:
 - name: provider-percona-postgresql
   repository: oci://ghcr.io/openeverest/charts
   version: 0.6.0
+- name: provider-percona-server-mongodb
+  repository: oci://ghcr.io/openeverest/charts
+  version: 0.4.0
 - name: pg-operator
   repository: https://percona.github.io/percona-helm-charts/
   version: 3.0.0
 - name: pmm
   repository: https://percona.github.io/percona-helm-charts/
   version: 1.9.1
-digest: sha256:dfde145ae99824b16b117a83c81d2e1a41f0c057ffc172891278da39ba32268e
-generated: "2026-11-18T15:30:25.208407-03:00"
+digest: sha256:c4d6ccfd1d22a5a6f69df51bd109e28d6d0ffba8629ecd9269584e203597cd41
+generated: "2026-11-23T13:15:45.814584-03:00"

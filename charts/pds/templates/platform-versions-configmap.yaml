@@ -26,6 +26,10 @@ data:
   postgresqlOperator.chart: {{ .Values.platform.postgresqlOperator.chart | quote }}
   postgresqlOperator.repository: {{ .Values.platform.postgresqlOperator.repository | quote }}
   postgresqlOperator.version: {{ .Values.platform.postgresqlOperator.version | quote }}
+  mongodbOperator.install: {{ .Values.platform.mongodbOperator.install | quote }}
+  mongodbOperator.chart: {{ .Values.platform.mongodbOperator.chart | quote }}
+  mongodbOperator.repository: {{ .Values.platform.mongodbOperator.repository | quote }}
+  mongodbOperator.version: {{ .Values.platform.mongodbOperator.version | quote }}
   pmm.chart: {{ .Values.platform.pmm.chart | quote }}
   pmm.repository: {{ .Values.platform.pmm.repository | quote }}
   pmm.version: {{ .Values.platform.pmm.version | quote }}
