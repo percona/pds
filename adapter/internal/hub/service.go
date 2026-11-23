@@ -486,11 +486,11 @@ const maxRestoreCopyName = (63 - len("restore-job-") - len("-datasource") - 1) /
 // Kubernetes refuses a label over 63.
 const maxPostgreSQLName = 63 - len("-instance1-xxxx-xxxxxxxxxx")
 
-// maxMongoDBName is the longest name a MongoDB database may carry. The provider
+// MaxMongoDBName is the longest name a MongoDB database may carry. The provider
 // derives the replica set's object names from it and refuses a longer one with
 // a Failed phase and no message, so the limit is enforced before a manifest is
 // written.
-const maxMongoDBName = 22
+const MaxMongoDBName = 22
 
 // createNameLimit is the longest name a create may carry for an engine, with
 // the words that name the limit in the refusal. Zero means only the DNS label
@@ -500,7 +500,7 @@ func createNameLimit(flavor oe.Flavor) (field string, limit int) {
 	case oe.PostgreSQL.ID:
 		return "A PostgreSQL database name", maxPostgreSQLName
 	case oe.MongoDB.ID:
-		return "A MongoDB database name", maxMongoDBName
+		return "A MongoDB database name", MaxMongoDBName
 	}
 
 	return "", 0

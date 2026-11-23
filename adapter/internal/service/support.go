@@ -634,8 +634,13 @@ func (s *Support) merge(created, resolved Ticket) Ticket {
 	return resolved
 }
 
+// engineLine names the engine as support reads it, so a ticket about a MongoDB
+// database says MongoDB. An engine id PDS does not know is written as given.
 func engineLine(facts TicketContext) string {
 	engine := strings.TrimSpace(facts.Engine)
+	if technology, known := servicenow.KnownTechnology(engine); known {
+		engine = technology
+	}
 	version := strings.TrimSpace(facts.EngineVersion)
 
 	switch {

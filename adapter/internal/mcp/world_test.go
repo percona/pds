@@ -113,7 +113,7 @@ func newTeamWorld(t *testing.T, with ...func(*api.Deps)) *teamWorld {
 		now := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
 		inv := hub.NewInventory(time.Minute)
 		inv.Register(environments[team], namespace)
-		inv.ApplyHeartbeat(hub.Heartbeat{Environment: environments[team], Namespace: namespace, At: now})
+		inv.ApplyHeartbeat(hub.Heartbeat{Environment: environments[team], Namespace: namespace, Engines: []string{"mongodb"}, At: now})
 
 		return hub.NewService(hub.NewMemoryStore(), inv, hub.Options{
 			Namespace:     namespace,
@@ -370,6 +370,12 @@ const (
 	agentSentinel    = "AGENT-SENTINEL-5d2a"
 )
 
+// mongoMembers are the members of the MongoDB database in the secret world.
+var mongoMembers = []string{
+	"orders-mongo-rs0-0.orders-mongo-rs0.pds.svc.cluster.local:27017",
+	"orders-mongo-rs0-1.orders-mongo-rs0.pds.svc.cluster.local:27017",
+}
+
 func newSecretWorld(t *testing.T) (*api.Server, *logBuffer) {
 	t.Helper()
 
@@ -405,6 +411,14 @@ func newSecretWorld(t *testing.T) (*api.Server, *logBuffer) {
 				"Host": "198.51.100.20", "Port": 3306, "Username": "root",
 				"URI": "mysql://root:" + passwordSentinel + "@198.51.100.20:3306",
 			},
+		}, {
+			"Name": "orders-mongo", "Namespace": namespace, "Engine": "mongodb", "ID": "spoke-a/pds.orders-mongo",
+			"Environment": "spoke-a", "Status": map[string]any{"Phase": "ready"},
+			"Exposure": map[string]any{"External": true, "Address": "198.51.100.21"},
+			"Connection": map[string]any{
+				"Host": mongoMembers[0], "Port": 27017, "Members": mongoMembers, "Username": "databaseAdmin",
+				"URI": "mongodb://databaseAdmin:" + passwordSentinel + "@" + strings.Join(mongoMembers, ",") + "/admin?replicaSet=rs0&ssl=false",
+			},
 		}},
 	})
 	require.NoError(t, err)
@@ -437,6 +451,7 @@ func TestNoResultErrorOrLogLineCarriesASecret(t *testing.T) {
 		{"list_environments", nil},
 		{"list_databases", nil},
 		{"get_database", map[string]any{"id": id}},
+		{"get_database", map[string]any{"id": "spoke-a/pds.orders-mongo"}},
 		{"list_backups", map[string]any{"id": id}},
 		{"get_metrics", map[string]any{"id": id, "includePoints": true}},
 		{"list_activity", nil},

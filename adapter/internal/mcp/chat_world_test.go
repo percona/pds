@@ -89,3 +89,16 @@ func TestTheChatReadsThroughTheRegistryAsThePersonAndSeesOnlyTheirTeam(t *testin
 	assert.Contains(t, model.results[1], "pay-env/pds.ledger")
 	assert.NotContains(t, model.results[1], "orders-dev")
 }
+
+func TestTheChatListsAMongoDBDatabaseThroughTheRegistry(t *testing.T) {
+	model := &modelScript{}
+	world := chatWorld(t, model)
+	world.createMongoDB(t, ann, "acme-env", "orders")
+
+	reply := world.chat(t, ann, "what is running?")
+
+	require.Equal(t, http.StatusOK, reply.Code, reply.Body.String())
+	require.Len(t, model.results, 1)
+	assert.Contains(t, model.results[0], "acme-env/pds.orders")
+	assert.Contains(t, model.results[0], `"engine":"mongodb"`)
+}

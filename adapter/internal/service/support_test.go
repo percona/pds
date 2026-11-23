@@ -229,7 +229,7 @@ func TestCreateAssemblesTheDescriptionFromTheContext(t *testing.T) {
 	assert.Contains(t, body, "The create stopped at Starting database.")
 	assert.Contains(t, body, "Database: orders-prod")
 	assert.Contains(t, body, "Profile: prod")
-	assert.Contains(t, body, "Engine: mysql 8.0.36")
+	assert.Contains(t, body, "Engine: MySQL 8.0.36")
 	assert.NotContains(t, body, "Environment type:")
 	assert.Contains(t, body, "Namespace: pds")
 	assert.Contains(t, body, "Members: 3")
@@ -461,6 +461,46 @@ func TestSanitizeStripsSecrets(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCreateNamesTheEngineAndFilesTheTicketUnderItsTechnology(t *testing.T) {
+	for _, tt := range []struct{ engine, line, technology string }{
+		{"mysql", "Engine: MySQL 8.4", servicenow.MainTechnology},
+		{"postgresql", "Engine: PostgreSQL 8.4", servicenow.MainTechnologyPostgreSQL},
+		{"mongodb", "Engine: MongoDB 8.4", servicenow.MainTechnologyMongoDB},
+		{"oracle", "Engine: oracle 8.4", servicenow.MainTechnology},
+	} {
+		t.Run(tt.engine, func(t *testing.T) {
+			client := &fakeTickets{createOut: &servicenow.Ticket{Number: "CS0061234", SysID: "sys-1", TableName: "sn_customerservice_case"}}
+
+			_, err := newSupport(t, client).Create(context.Background(), service.TicketDraft{
+				Subject: "Cannot create database orders",
+				Context: service.TicketContext{
+					Database: "orders", Profile: "dev", Engine: tt.engine, EngineVersion: "8.4", Namespace: "pds", Members: 3, Status: "failed",
+				},
+			})
+			require.NoError(t, err)
+
+			require.Len(t, client.created, 1)
+			assert.Contains(t, client.created[0].Description, tt.line)
+			assert.Equal(t, tt.technology, client.created[0].MainTechnology)
+		})
+	}
+}
+
+func TestCreateKeepsAMongoDBConnectionStringOutOfTheTicket(t *testing.T) {
+	client := &fakeTickets{createOut: &servicenow.Ticket{Number: "CS0061234", SysID: "sys-1", TableName: "sn_customerservice_case"}}
+
+	_, err := newSupport(t, client).Create(context.Background(), service.TicketDraft{
+		Subject:     "Cannot connect to orders",
+		Description: "I used mongodb://databaseAdmin:hunter2@orders-rs0-0:27017,orders-rs0-1:27017/admin?replicaSet=rs0&ssl=false and it timed out.",
+		Context:     service.TicketContext{Database: "orders", Engine: "mongodb"},
+	})
+	require.NoError(t, err)
+
+	require.Len(t, client.created, 1)
+	assert.NotContains(t, client.created[0].Description, "hunter2")
+	assert.Contains(t, client.created[0].Description, "it timed out")
 }
 
 func TestSanitizeKeepsOrdinaryContext(t *testing.T) {

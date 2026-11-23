@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/percona/pds/adapter/internal/auth"
+	"github.com/percona/pds/adapter/internal/engine/oe"
 	"github.com/percona/pds/adapter/internal/hub"
 )
 
@@ -40,6 +41,9 @@ type guidance struct {
 	nudge        string
 	instructions *template.Template
 	prompts      []prompt
+	// engines are the engines a person may ask for, which the prompt check
+	// and the words about engines follow.
+	engines []offered
 }
 
 // A prompt is a workflow a person starts from a client's prompt list.
@@ -56,6 +60,7 @@ type promptArgument struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Required    bool   `json:"required"`
+	text        *template.Template
 }
 
 // maxDatabaseIDLength is the longest id that can hold two names of 63
@@ -67,16 +72,19 @@ var accessTiers = []auth.Access{auth.AccessRead, auth.AccessChange, auth.AccessC
 // promptChecks is what each prompt argument may hold. A value is placed in
 // text an agent follows, so a value that is not the shape of a name or an id
 // is refused rather than passed on.
-var promptChecks = map[string]func(string) bool{
-	"database":    func(value string) bool { return len(value) <= maxDatabaseIDLength && databaseID.MatchString(value) },
-	"engine":      func(value string) bool { return value == "mysql" || value == "postgresql" },
-	"environment": hub.ValidEnvironmentName,
-	"name":        hub.ValidName,
+func promptChecks(engines []offered) map[string]func(string) bool {
+	return map[string]func(string) bool{
+		"database":    func(value string) bool { return len(value) <= maxDatabaseIDLength && databaseID.MatchString(value) },
+		"engine":      func(value string) bool { return isOffered(engines, value) },
+		"environment": hub.ValidEnvironmentName,
+		"name":        hub.ValidName,
+	}
 }
 
 // loadGuidance reads and checks every file. It panics on a mistake in one,
-// like a tool's schema does, which shows on the first test run.
-func loadGuidance() guidance {
+// like a tool's schema does, which shows on the first test run. mongodb is the
+// engine switch.
+func loadGuidance(mongodb bool) guidance {
 	read := func(name string) string {
 		body, err := fs.ReadFile(guidanceFiles, path.Join("guidance", name))
 		if err != nil {
@@ -87,6 +95,7 @@ func loadGuidance() guidance {
 	}
 
 	g := guidance{
+		engines:      offeredEngines(mongodb),
 		nudge:        strings.TrimSpace(read("nudge.md")),
 		instructions: template.Must(template.New("instructions").Option("missingkey=zero").Parse(read("instructions.md"))),
 	}
@@ -96,14 +105,14 @@ func loadGuidance() guidance {
 		panic("mcp: no prompt files")
 	}
 	for _, file := range files {
-		g.prompts = append(g.prompts, parsePrompt(file, read(strings.TrimPrefix(file, "guidance/"))))
+		g.prompts = append(g.prompts, parsePrompt(file, read(strings.TrimPrefix(file, "guidance/")), promptChecks(g.engines)))
 	}
 
 	return g
 }
 
 // parsePrompt splits a prompt file into its front matter and its text.
-func parsePrompt(file, content string) prompt {
+func parsePrompt(file, content string, checks map[string]func(string) bool) prompt {
 	front, body, found := strings.Cut(strings.TrimPrefix(content, "---\n"), "\n---\n")
 	if !found || !strings.HasPrefix(content, "---\n") {
 		panic("mcp: " + file + " has no front matter")
@@ -116,13 +125,16 @@ func parsePrompt(file, content string) prompt {
 	if p.Name == "" || p.Title == "" || p.Description == "" || !slices.Contains(accessTiers, p.Access) || path.Base(file) != p.Name+".md" {
 		panic("mcp: " + file + " needs a name that matches the file, a title, a description and an access tier")
 	}
-	for _, argument := range p.Arguments {
-		if promptChecks[argument.Name] == nil || argument.Description == "" {
+	var err error
+	for i, argument := range p.Arguments {
+		if checks[argument.Name] == nil || argument.Description == "" {
 			panic("mcp: " + file + ": argument " + argument.Name + " needs a check and a description")
+		}
+		if p.Arguments[i].text, err = template.New(argument.Name).Option("missingkey=zero").Parse(argument.Description); err != nil {
+			panic("mcp: " + file + ": " + err.Error())
 		}
 	}
 
-	var err error
 	if p.text, err = template.New(p.Name).Option("missingkey=zero").Parse(strings.TrimSpace(body)); err != nil {
 		panic("mcp: " + file + ": " + err.Error())
 	}
@@ -142,10 +154,17 @@ func render(t *template.Template, values map[string]string) string {
 	return strings.TrimSpace(out.String())
 }
 
-// tierFacts are what the text may promise at a tier: a tool above it is not
+// facts are what the text may promise at a tier: a tool above it is not
 // listed, so no text names one.
-func tierFacts(access auth.Access) map[string]string {
-	facts := map[string]string{}
+func (g guidance) facts(access auth.Access) map[string]string {
+	facts := map[string]string{
+		"EngineList":   joinWords(engineLabels(g.engines), "and"),
+		"EngineChoice": joinWords(engineLabels(g.engines), "or"),
+		"EngineIDs":    joinWords(engineIDs(g.engines), "or"),
+	}
+	if isOffered(g.engines, oe.MongoDB.ID) {
+		facts["MongoDB"] = "yes"
+	}
 	if access.Allows(auth.AccessChange) {
 		facts["Changes"] = "yes"
 	}
@@ -159,7 +178,7 @@ func tierFacts(access auth.Access) map[string]string {
 // instructionsFor is what a client reads when it connects, for a caller with
 // this access.
 func (g guidance) instructionsFor(access auth.Access) string {
-	facts := tierFacts(access)
+	facts := g.facts(access)
 	facts["Nudge"] = g.nudge
 
 	return render(g.instructions, facts)
@@ -167,6 +186,7 @@ func (g guidance) instructionsFor(access auth.Access) string {
 
 // addPrompts registers the prompts the access includes.
 func (g guidance) addPrompts(server *sdk.Server, access auth.Access) {
+	checks := promptChecks(g.engines)
 	for _, p := range g.prompts {
 		if !access.Allows(p.Access) {
 			continue
@@ -174,16 +194,16 @@ func (g guidance) addPrompts(server *sdk.Server, access auth.Access) {
 
 		arguments := make([]*sdk.PromptArgument, 0, len(p.Arguments))
 		for _, argument := range p.Arguments {
-			arguments = append(arguments, &sdk.PromptArgument{Name: argument.Name, Description: argument.Description, Required: argument.Required})
+			arguments = append(arguments, &sdk.PromptArgument{Name: argument.Name, Description: render(argument.text, g.facts(access)), Required: argument.Required})
 		}
 		listed := &sdk.Prompt{Name: p.Name, Title: p.Title, Description: p.Description, Arguments: arguments}
 
 		server.AddPrompt(listed, func(_ context.Context, req *sdk.GetPromptRequest) (*sdk.GetPromptResult, error) {
-			values, err := p.values(req.Params.Arguments)
+			values, err := p.values(req.Params.Arguments, checks)
 			if err != nil {
 				return nil, err
 			}
-			facts := tierFacts(access)
+			facts := g.facts(access)
 			for name, value := range values {
 				facts[name] = value
 			}
@@ -199,7 +219,7 @@ func (g guidance) addPrompts(server *sdk.Server, access auth.Access) {
 // values checks the arguments a client sent against the prompt's own. An
 // argument the prompt does not name is ignored, as a tool ignores a field it
 // does not name.
-func (p prompt) values(sent map[string]string) (map[string]string, error) {
+func (p prompt) values(sent map[string]string, checks map[string]func(string) bool) (map[string]string, error) {
 	values := map[string]string{}
 	for _, argument := range p.Arguments {
 		value := sent[argument.Name]
@@ -210,7 +230,7 @@ func (p prompt) values(sent map[string]string) (map[string]string, error) {
 
 			continue
 		}
-		if !promptChecks[argument.Name](value) {
+		if !checks[argument.Name](value) {
 			return nil, promptRefusal(msgPromptArgumentInvalid, argument.Name)
 		}
 		values[argument.Name] = value
