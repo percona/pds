@@ -62,6 +62,10 @@ type Options struct {
 	Logger  *slog.Logger
 	// Collect reads events and usage for the beat. Nil skips both.
 	Collect func(ctx context.Context, namespace string, items []engine.Instance) ([]hub.HeartbeatEvent, []hub.HeartbeatUsage)
+	// Volumes replaces the storage size of the databases whose provider does
+	// not report the size their volumes really have, in place. Nil leaves the
+	// sizes the instances list carries.
+	Volumes func(ctx context.Context, items []engine.Instance)
 	// Monitor reads the local PMM for one database. It runs only for the
 	// databases whose usage sample is due, so PMM is queried once per sample
 	// rather than once per beat. Nil means this environment has no PMM.
@@ -494,6 +498,9 @@ func beat(ctx context.Context, opts Options, pending []hub.WorkResult) ([]hub.Wo
 				instances = append(instances, item)
 			}
 			sweepDeleted(ctx, opts, instances)
+			if opts.Volumes != nil {
+				opts.Volumes(ctx, instances)
+			}
 		}
 	}
 

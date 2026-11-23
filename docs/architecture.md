@@ -507,6 +507,27 @@ and no message, and any access or allowed addresses, because a MongoDB
 database has no access from outside the Kubernetes cluster yet. The API accepts
 the engine, while the engine picker and the MCP engine list leave it out.
 
+Scale takes the same member counts (1, 3 or 5), bounds and busy rule as the
+other engines, and writes no proxy component for MongoDB. The provider reports
+Provisioning, with a message that says the database is being created, for every
+change it makes, so the plugin reads the phase against what it has seen: a
+database it has listed as Ready reads Updating while the provider says
+Provisioning, and one that was never Ready keeps Provisioning. The memory is
+per process, so a database already changing when the agent starts reads
+Provisioning until it is Ready once. The rule is the `ProvisioningIsUpdating`
+field of the MongoDB flavor and goes when the provider reports the state
+itself.
+
+A storage class that refuses to expand a volume does not stop the provider from
+accepting the new size on the Instance and staying Ready, and nothing on the
+Instance says otherwise. The operator puts its own `PerconaServerMongoDB` back
+to the size the volumes have, so each beat the agent reads that object by name
+(`mongodb.ReportVolumeSizes`) and reports its size in place of the Instance's.
+Its Role in the database namespace grants `get` on `perconaservermongodbs` and
+nothing else. Scaling down leaves the volumes of the removed members until the
+database is deleted, and scaling up again reuses them, which the scale dialog
+says.
+
 The agent calls OpenEverest with the hand written client in
 `adapter/internal/client/everest`. It scopes calls to cluster `main`
 (`EVEREST_CLUSTER`) and namespace `pds` (`EVEREST_NAMESPACE`):

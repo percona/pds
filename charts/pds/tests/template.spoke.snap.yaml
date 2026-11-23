@@ -362,6 +362,29 @@ rules:
     verbs: ["get"]
 ---
 # Source: pds/templates/adapter-rbac.yaml
+# The size a MongoDB database's volumes really have. When a storage class
+# refuses to expand a volume the provider keeps reporting the size that was
+# asked for and stays Ready, while the operator puts its own object back. The
+# agent reads that object by name, so get is all it takes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pds-adapter-database-volumes
+  namespace: pds
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    app.kubernetes.io/component: adapter
+rules:
+  - apiGroups: ["psmdb.percona.com"]
+    resources: ["perconaservermongodbs"]
+    verbs: ["get"]
+---
+# Source: pds/templates/adapter-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
@@ -425,6 +448,29 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: pds-adapter-database-seeds
+subjects:
+  - kind: ServiceAccount
+    name: pds
+    namespace: everest-system
+---
+# Source: pds/templates/adapter-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pds-adapter-database-volumes
+  namespace: pds
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    app.kubernetes.io/component: adapter
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pds-adapter-database-volumes
 subjects:
   - kind: ServiceAccount
     name: pds

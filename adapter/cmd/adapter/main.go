@@ -171,6 +171,11 @@ func run() error {
 			opts.Seed = func(ctx context.Context, namespace, source, backupID, name string) error {
 				return postgresql.Seed(ctx, environment, namespace, source, backupID, name)
 			}
+			opts.Volumes = func(ctx context.Context, items []engine.Instance) {
+				if err := mongodb.ReportVolumeSizes(ctx, environment, items); err != nil {
+					logger.WarnContext(ctx, "volume size read failed", slog.String("cause", err.Error()))
+				}
+			}
 			opts.Credentials = newUsersSecrets(environment)
 			opts.Support = environment
 			opts.Cleanup = func(ctx context.Context, namespace, name string) (int, error) {

@@ -19,7 +19,7 @@ import { Label } from "@/components/ui/label";
 import { resourceBounds } from "@/features/profiles";
 import { cn } from "@/lib/utils";
 import { useScaleDatabase } from "../hooks/use-scale-database";
-import { memberChoices, memberConsequence, scaleChanges } from "../scale";
+import { memberChoices, memberConsequence, removedMembersNote, scaleChanges } from "../scale";
 import type { ScaleField, ScaleValues } from "../scale";
 import type { Database } from "../types";
 
@@ -84,6 +84,7 @@ export function ScaleDialog({
   }, [open, defaultValues, reset, scale.reset]);
 
   const members = Number(watch("replicas"));
+  const removedNote = removedMembersNote(database.engine, current.replicas, members);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -171,6 +172,7 @@ export function ScaleDialog({
           <fieldset className="space-y-1.5">
             <legend className="text-sm font-medium">Members</legend>
             <p className="text-sm text-muted-foreground">{memberConsequence(members)}</p>
+            {removedNote ? <p className="text-sm text-muted-foreground">{removedNote}</p> : null}
             <div className="flex gap-2">
               {memberChoices.map((count) => (
                 <Label

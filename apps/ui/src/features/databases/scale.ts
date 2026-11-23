@@ -1,4 +1,4 @@
-import type { ScaleDatabaseInput } from "./types";
+import type { DatabaseEngine, ScaleDatabaseInput } from "./types";
 
 /** The fields a scale can change, in the order the dialog shows them. */
 export const scaleFields = ["cpu", "memory", "storage", "replicas"] as const;
@@ -42,4 +42,20 @@ export function memberConsequence(members: number): string {
     default:
       return "Five members with HA. The database stays up while two restart.";
   }
+}
+
+/**
+ * A MongoDB database keeps the volumes of members it loses, because scaling up
+ * again reuses them. The note says so before the scale down is asked for.
+ */
+export function removedMembersNote(
+  engine: DatabaseEngine,
+  current: number,
+  next: number,
+): string | null {
+  if (engine !== "mongodb" || next >= current) {
+    return null;
+  }
+
+  return "Storage of the removed members stays until the database is deleted.";
 }
