@@ -16,7 +16,7 @@ another module needs to import something. Tests sit next to the code.
 | `internal/api` | HTTP: the chi router in `server.go`, handlers, `AppError` and `Respond`, the session guard, and the embedded join scripts |
 | `internal/service` | Business logic. Services decide, call clients and return domain errors |
 | `internal/client/*` | One package per downstream: `everest`, `pmm`, `servicenow`, `github`, `claude`, `cursor`, `ses`, and `kube`, the only package that talks to the Kubernetes API, and `clientmeta`, which fetches an OAuth client's metadata document |
-| `internal/engine` | The engine plugin contract, the registry, and engine errors. `oe` is the shared OpenEverest implementation; `mysql` and `postgresql` are its two flavors |
+| `internal/engine` | The engine plugin contract, the registry, and engine errors. `oe` is the shared OpenEverest implementation; `mysql`, `postgresql` and `mongodb` are its flavors |
 | `internal/hub` | Hub state: environment inventory, join tokens, the work queue, and the two Git stores (GitHub, or a local directory) |
 | `internal/agent` | The `agent` role: the heartbeat loop and the work it runs locally |
 | `internal/store` | The adapter's own PostgreSQL: GORM models, migration, sealing |
@@ -209,10 +209,11 @@ Rules that are easy to break:
 ## Engine plugins
 
 The registry maps an engine name to a plugin. The agent builds it. `oe`
-implements the contract once against the OpenEverest Instance API; `mysql`
-and `postgresql` select a flavor. The agent registers both. The create form
-offers PostgreSQL only when `apps/ui/src/features/databases/engines.ts`
-enables it. The HTTP role does not call the registry: create, scale, schedule
+implements the contract once against the OpenEverest Instance API; `mysql`,
+`postgresql` and `mongodb` select a flavor. The agent registers all three and
+names them on every heartbeat. The create form offers an engine only when
+`apps/ui/src/features/databases/engines.ts` enables it, and MongoDB is not
+enabled yet. The HTTP role does not call the registry: create, scale, schedule
 and delete are Git commits, and backup is work the agent runs. Restore is a
 Git commit that creates a second database. For PostgreSQL the provider refuses
 that, so the hub queues a `seed` work item carrying the Instance manifest and

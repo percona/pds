@@ -221,9 +221,16 @@ func toStatus(in everest.InstanceStatus) engine.Status {
 	if message == "" {
 		message = stageMessage(in)
 	}
+	// A provider that refuses an Instance reports Failed with no message, and
+	// its reason is only in its own log.
+	if message == "" && in.Phase == everest.PhaseFailed {
+		message = failedFallbackMessage
+	}
 
 	return engine.Status{Phase: toPhase(in), Message: message}
 }
+
+const failedFallbackMessage = "The database could not be started. Contact Percona support."
 
 func stageMessage(in everest.InstanceStatus) string {
 	ready, total := in.ReadyCounts()

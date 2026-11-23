@@ -51,6 +51,25 @@ func ParsePresetName(name string) (engineID, profile string, ok bool) {
 // install for one engine and profile.
 func CatalogPreset(flavor Flavor, profile engine.Profile) *everest.InstancePreset {
 	replicas := int32(profile.Members)
+	components := map[string]everest.ComponentSpec{
+		everest.ComponentEngine: {
+			Type:     flavor.EngineType,
+			Replicas: everest.Ptr(replicas),
+			Storage:  &everest.Storage{Size: formatGi(profile.StorageGB)},
+			Resources: &everest.ResourceRequirements{
+				Limits: &everest.ResourceList{
+					CPU:    formatCores(profile.CPUCores),
+					Memory: formatGi(profile.MemoryGB),
+				},
+			},
+		},
+	}
+	if !flavor.EngineOnly {
+		components[everest.ComponentProxy] = everest.ComponentSpec{
+			Type:     flavor.ProxyType,
+			Replicas: everest.Ptr(proxyReplicasFor(replicas)),
+		}
+	}
 
 	return &everest.InstancePreset{
 		APIVersion: everest.APIVersion,
@@ -68,23 +87,7 @@ func CatalogPreset(flavor Flavor, profile engine.Profile) *everest.InstancePrese
 		Spec: everest.InstanceSpec{
 			ProviderRef: everest.ObjectRef{Name: flavor.Provider},
 			Topology:    &everest.TopologySpec{Type: flavor.Topology},
-			Components: map[string]everest.ComponentSpec{
-				everest.ComponentEngine: {
-					Type:     flavor.EngineType,
-					Replicas: everest.Ptr(replicas),
-					Storage:  &everest.Storage{Size: formatGi(profile.StorageGB)},
-					Resources: &everest.ResourceRequirements{
-						Limits: &everest.ResourceList{
-							CPU:    formatCores(profile.CPUCores),
-							Memory: formatGi(profile.MemoryGB),
-						},
-					},
-				},
-				everest.ComponentProxy: {
-					Type:     flavor.ProxyType,
-					Replicas: everest.Ptr(proxyReplicasFor(replicas)),
-				},
-			},
+			Components:  components,
 		},
 	}
 }

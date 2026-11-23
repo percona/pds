@@ -183,8 +183,6 @@ func buildInstanceYAML(
 ) ([]byte, profile, error) {
 	backupStorage := targets.BackupStorage
 
-	proxy := oe.ProxyReplicasFor(p.members)
-
 	spec := everest.InstanceSpec{
 		ProviderRef: everest.ObjectRef{Name: p.flavor.Provider},
 		Topology:    &everest.TopologySpec{Type: p.flavor.Topology},
@@ -200,13 +198,15 @@ func buildInstanceYAML(
 					},
 				},
 			},
-			everest.ComponentProxy: {
-				Type:     p.flavor.ProxyType,
-				Replicas: everest.Ptr(proxy),
-			},
 		},
 	}
-	if targets.MonitoringConfig != "" {
+	if !p.flavor.EngineOnly {
+		spec.Components[everest.ComponentProxy] = everest.ComponentSpec{
+			Type:     p.flavor.ProxyType,
+			Replicas: everest.Ptr(oe.ProxyReplicasFor(p.members)),
+		}
+	}
+	if targets.MonitoringConfig != "" && !p.flavor.EngineOnly {
 		monitoring, err := monitoringComponent(targets.MonitoringConfig)
 		if err != nil {
 			return nil, profile{}, err
@@ -224,7 +224,7 @@ func buildInstanceYAML(
 			Backup: &everest.DataSourceBackup{BackupRef: everest.ObjectRef{Name: restoreFrom}},
 		}
 	}
-	if backupStorage != "" {
+	if backupStorage != "" && !p.flavor.EngineOnly {
 		storage := everest.InstanceBackupStorage{
 			StorageRef: everest.ObjectRef{Name: backupStorage},
 		}
@@ -394,9 +394,10 @@ func applyScale(spec *everest.InstanceSpec, in engine.ScaleInput) error {
 	if in.Replicas != nil {
 		replicas := int32(*in.Replicas)
 		comp.Replicas = everest.Ptr(replicas)
-		proxy := spec.Components[everest.ComponentProxy]
-		proxy.Replicas = everest.Ptr(oe.ProxyReplicasFor(replicas))
-		spec.Components[everest.ComponentProxy] = proxy
+		if proxy, ok := spec.Components[everest.ComponentProxy]; ok {
+			proxy.Replicas = everest.Ptr(oe.ProxyReplicasFor(replicas))
+			spec.Components[everest.ComponentProxy] = proxy
+		}
 	}
 	spec.Components[everest.ComponentEngine] = comp
 

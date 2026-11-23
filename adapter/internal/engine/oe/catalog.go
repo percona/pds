@@ -43,6 +43,8 @@ func LookupFlavor(id string) (Flavor, bool) {
 		return MySQL, true
 	case PostgreSQL.ID:
 		return PostgreSQL, true
+	case MongoDB.ID:
+		return MongoDB, true
 	}
 
 	return Flavor{}, false

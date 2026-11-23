@@ -1,6 +1,6 @@
 import type { ProfileId } from "@/features/profiles";
 
-export type DatabaseEngine = "mysql" | "postgresql";
+export type DatabaseEngine = "mysql" | "postgresql" | "mongodb";
 
 /**
  * Normalized lifecycle phases the adapter reports. Every engine maps its own

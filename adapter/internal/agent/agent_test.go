@@ -95,6 +95,7 @@ func TestBeatPostsJSON(t *testing.T) {
 		Environment: "spoke-a",
 		Namespace:   "pds",
 		Interval:    time.Hour,
+		Engines:     []string{"mongodb", "mysql"},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "Bearer secret", gotAuth)
@@ -103,6 +104,7 @@ func TestBeatPostsJSON(t *testing.T) {
 	require.NoError(t, json.Unmarshal(body, &beat))
 	assert.Equal(t, "spoke-a", beat.Environment)
 	assert.True(t, beat.PrivateAccess, "the hub keeps a public password only from an agent that tells private apart")
+	assert.Equal(t, []string{"mongodb", "mysql"}, beat.Engines, "the hub refuses an engine the environment has not reported")
 	assert.True(t, beat.AlertRules, "the hub writes the alert rules only for an agent whose join gave Flux the ConfigMap grant")
 }
 

@@ -464,14 +464,18 @@ func TestNewOIDCClientFallsBackWithoutAPublicURL(t *testing.T) {
 	assert.Nil(t, got, "the redirect address must come from configuration, not from a request")
 }
 
-func TestEngineRegistryServesBothEngines(t *testing.T) {
+func TestEngineRegistryServesEveryEngine(t *testing.T) {
 	registry := engineRegistry(config.Config{}, nil)
 
-	for _, id := range []string{"mysql", "postgresql"} {
+	for _, id := range []string{"mongodb", "mysql", "postgresql"} {
 		plugin, err := registry.Get(id)
 		require.NoError(t, err, id)
 		assert.Equal(t, id, plugin.Engine())
 	}
+}
+
+func TestEngineIDsNamesEveryRegisteredEngine(t *testing.T) {
+	assert.Equal(t, []string{"mongodb", "mysql", "postgresql"}, engineIDs(engineRegistry(config.Config{}, nil)))
 }
 
 type recordingQuerier struct{ queries []string }

@@ -13,10 +13,10 @@ import { productName } from "@/lib/product";
 import { cn } from "@/lib/utils";
 import { allowsAnyAddress, defaultSourceRange, parseSourceRanges } from "../access";
 import {
+  createNameLimits,
   engineChoicePhrase,
   engines,
-  postgresqlNameLimit,
-  postgresqlNameReason,
+  hasAccessChoice,
   visibleEngines,
 } from "../engines";
 import type { CreateDatabaseInput, DatabaseAccessChoice, DatabaseEngine } from "../types";
@@ -36,7 +36,7 @@ const accessChoices: ReadonlyArray<{ value: DatabaseAccessChoice; label: string 
 
 const schema = z
   .object({
-    engine: z.enum(["mysql", "postgresql"]),
+    engine: z.enum(["mysql", "postgresql", "mongodb"]),
     profile: z.enum(["dev", "staging", "prod"]),
     name: z
       .string()
@@ -56,14 +56,15 @@ const schema = z
     sourceRanges: z.string(),
   })
   .superRefine((values, ctx) => {
-    if (values.engine === "postgresql" && values.name.length > postgresqlNameLimit) {
+    const nameLimit = createNameLimits[values.engine];
+    if (nameLimit && values.name.length > nameLimit.limit) {
       ctx.addIssue({
         code: "custom",
         path: ["name"],
-        message: `Use ${postgresqlNameLimit} characters or fewer for PostgreSQL. ${postgresqlNameReason}`,
+        message: `Use ${nameLimit.limit} characters or fewer for ${nameLimit.label}. ${nameLimit.reason}`,
       });
     }
-    if (values.access !== "public") {
+    if (!hasAccessChoice(values.engine) || values.access !== "public") {
       return;
     }
 
@@ -237,92 +238,94 @@ export function CreateDatabaseForm({
           )}
         </Field>
 
-        <fieldset className="space-y-3">
-          <legend id={`${accessId}-legend`} className="text-base font-semibold">
-            Access
-          </legend>
-          <div className="space-y-1.5">
-            <div
-              role="radiogroup"
-              aria-labelledby={`${accessId}-legend`}
-              aria-describedby={`${accessId}-help ${accessId}-choice`}
-              className="inline-flex gap-1 rounded-md border border-input bg-muted p-0.5"
-            >
-              {accessChoices.map((choice) => (
-                <label
-                  key={choice.value}
-                  className={cn(
-                    "cursor-pointer rounded-md px-4 py-1.5 text-sm font-medium text-muted-foreground transition-colors",
-                    "has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-primary",
-                    "has-[:checked]:bg-primary has-[:checked]:text-primary-foreground",
-                    submitting && "cursor-not-allowed opacity-50",
-                  )}
-                >
-                  <input
-                    type="radio"
-                    value={choice.value}
-                    {...register("access", {
-                      onChange: (event) => {
-                        if (event.target.value === "public" && sourceRanges.trim() === "") {
-                          setValue("sourceRanges", defaultSourceRange, {
-                            shouldDirty: true,
-                            shouldValidate: true,
-                          });
-                        }
-                      },
-                    })}
-                    disabled={submitting}
-                    className="sr-only"
-                  />
-                  {choice.label}
-                </label>
-              ))}
-            </div>
-            <p id={`${accessId}-choice`} className="text-sm">
-              {access === "public"
-                ? "Reachable from the internet."
-                : "Reachable from your VPC and the networks connected to it."}
-            </p>
-            <p id={`${accessId}-help`} className="text-sm text-muted-foreground">
-              Adds a load balancer in your cloud account, billed by your cloud provider.
-            </p>
-          </div>
-
-          {access === "public" ? (
-            <div className="space-y-3">
-              <Field
-                id="database-source-ranges"
-                label="Allowed addresses"
-                help="IP addresses or CIDR ranges, separated by commas. 0.0.0.0/0 allows any address."
-                error={errors.sourceRanges?.message}
+        {hasAccessChoice(engine) ? (
+          <fieldset className="space-y-3">
+            <legend id={`${accessId}-legend`} className="text-base font-semibold">
+              Access
+            </legend>
+            <div className="space-y-1.5">
+              <div
+                role="radiogroup"
+                aria-labelledby={`${accessId}-legend`}
+                aria-describedby={`${accessId}-help ${accessId}-choice`}
+                className="inline-flex gap-1 rounded-md border border-input bg-muted p-0.5"
               >
-                {(props) => (
-                  <Input
-                    {...register("sourceRanges")}
-                    {...props}
-                    autoComplete="off"
-                    spellCheck={false}
-                    className="font-mono"
-                    disabled={submitting}
-                  />
-                )}
-              </Field>
-
-              {openToAnyAddress ? (
-                <p className="flex items-start gap-2 text-sm">
-                  <TriangleAlert
-                    className="mt-0.5 size-4 shrink-0 text-warning"
-                    strokeWidth={1.5}
-                    aria-hidden="true"
-                  />
-                  <span>
-                    Any address on the internet can connect. Replace 0.0.0.0/0 to limit who can.
-                  </span>
-                </p>
-              ) : null}
+                {accessChoices.map((choice) => (
+                  <label
+                    key={choice.value}
+                    className={cn(
+                      "cursor-pointer rounded-md px-4 py-1.5 text-sm font-medium text-muted-foreground transition-colors",
+                      "has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-primary",
+                      "has-[:checked]:bg-primary has-[:checked]:text-primary-foreground",
+                      submitting && "cursor-not-allowed opacity-50",
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      value={choice.value}
+                      {...register("access", {
+                        onChange: (event) => {
+                          if (event.target.value === "public" && sourceRanges.trim() === "") {
+                            setValue("sourceRanges", defaultSourceRange, {
+                              shouldDirty: true,
+                              shouldValidate: true,
+                            });
+                          }
+                        },
+                      })}
+                      disabled={submitting}
+                      className="sr-only"
+                    />
+                    {choice.label}
+                  </label>
+                ))}
+              </div>
+              <p id={`${accessId}-choice`} className="text-sm">
+                {access === "public"
+                  ? "Reachable from the internet."
+                  : "Reachable from your VPC and the networks connected to it."}
+              </p>
+              <p id={`${accessId}-help`} className="text-sm text-muted-foreground">
+                Adds a load balancer in your cloud account, billed by your cloud provider.
+              </p>
             </div>
-          ) : null}
-        </fieldset>
+
+            {access === "public" ? (
+              <div className="space-y-3">
+                <Field
+                  id="database-source-ranges"
+                  label="Allowed addresses"
+                  help="IP addresses or CIDR ranges, separated by commas. 0.0.0.0/0 allows any address."
+                  error={errors.sourceRanges?.message}
+                >
+                  {(props) => (
+                    <Input
+                      {...register("sourceRanges")}
+                      {...props}
+                      autoComplete="off"
+                      spellCheck={false}
+                      className="font-mono"
+                      disabled={submitting}
+                    />
+                  )}
+                </Field>
+
+                {openToAnyAddress ? (
+                  <p className="flex items-start gap-2 text-sm">
+                    <TriangleAlert
+                      className="mt-0.5 size-4 shrink-0 text-warning"
+                      strokeWidth={1.5}
+                      aria-hidden="true"
+                    />
+                    <span>
+                      Any address on the internet can connect. Replace 0.0.0.0/0 to limit who can.
+                    </span>
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </fieldset>
+        ) : null}
 
         <div className="space-y-4">
           <button
@@ -448,9 +451,11 @@ function toCreateInput(values: CreateDatabaseFormValues, environment: string): C
   if (values.memory !== "") input.memory = Number(values.memory);
   if (values.storage !== "") input.storage = Number(values.storage);
 
-  input.access = values.access;
-  if (values.access === "public") {
-    input.sourceRanges = parseSourceRanges(values.sourceRanges).ranges;
+  if (hasAccessChoice(values.engine)) {
+    input.access = values.access;
+    if (values.access === "public") {
+      input.sourceRanges = parseSourceRanges(values.sourceRanges).ranges;
+    }
   }
 
   return input;

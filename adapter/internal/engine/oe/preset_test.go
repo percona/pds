@@ -49,6 +49,36 @@ func TestCatalogPresetMatchesTheProfileTable(t *testing.T) {
 	assert.Equal(t, everest.ComponentTypeHAProxy, got.ProxyComponent().Type)
 }
 
+func TestLookupFlavorServesMongoDB(t *testing.T) {
+	t.Parallel()
+
+	got, ok := LookupFlavor("mongodb")
+	require.True(t, ok)
+	assert.Equal(t, "percona-server-mongodb", got.Provider)
+	assert.Equal(t, "replicaSet", got.Topology)
+	assert.Empty(t, got.ProxyType)
+	assert.Equal(t, "percona-backup-mongodb", got.BackupClass)
+	assert.Equal(t, 27017, got.DefaultPort)
+	assert.Equal(t, "mongodb", got.URIScheme)
+}
+
+func TestBackupClassForFollowsTheProvider(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "percona-backup-mongodb", BackupClassFor(everest.ProviderMongoDB))
+	assert.Equal(t, "pg", BackupClassFor(everest.ProviderPostgreSQL))
+	assert.Equal(t, "pxc", BackupClassFor(everest.ProviderPXC))
+}
+
+func TestMongoDBCatalogPresetHasNoProxy(t *testing.T) {
+	t.Parallel()
+
+	got, ok := LookupCatalogPreset("pds-mongodb-staging")
+	require.True(t, ok)
+	assert.Equal(t, int32(3), got.EngineComponent().ReplicaCount())
+	assert.NotContains(t, got.Spec.Components, everest.ComponentProxy)
+}
+
 func TestHelmSnapshotMatchesCatalog(t *testing.T) {
 	t.Parallel()
 
@@ -60,6 +90,7 @@ func TestHelmSnapshotMatchesCatalog(t *testing.T) {
 	for _, name := range []string{
 		"pds-mysql-dev", "pds-mysql-staging", "pds-mysql-prod",
 		"pds-postgresql-dev", "pds-postgresql-staging", "pds-postgresql-prod",
+		"pds-mongodb-dev", "pds-mongodb-staging", "pds-mongodb-prod",
 	} {
 		catalog, ok := LookupCatalogPreset(name)
 		require.True(t, ok, name)

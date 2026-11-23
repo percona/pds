@@ -1,5 +1,10 @@
 import { formatBackupSize } from "./backups";
-import { postgresqlNameLimit, postgresqlNameReason } from "./engines";
+import {
+  mongodbNameLimit,
+  mongodbNameReason,
+  postgresqlNameLimit,
+  postgresqlNameReason,
+} from "./engines";
 import type { Backup, DatabaseEngine } from "./types";
 
 /**
@@ -41,6 +46,7 @@ const restoreNameRules: Record<DatabaseEngine, RestoreNameRule> = {
       "The provider builds its restore job name from this one twice over, and a longer one is refused.",
   },
   postgresql: { limit: postgresqlNameLimit, reason: postgresqlNameReason },
+  mongodb: { limit: mongodbNameLimit, reason: mongodbNameReason },
 };
 
 export function restoreNameRule(engine: DatabaseEngine): RestoreNameRule {

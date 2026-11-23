@@ -9,8 +9,11 @@ import (
 // provider this package does not serve gets the MySQL class, which is what
 // every instance got before PostgreSQL was a choice.
 func BackupClassFor(provider string) string {
-	if provider == PostgreSQL.Provider {
+	switch provider {
+	case PostgreSQL.Provider:
 		return PostgreSQL.BackupClass
+	case MongoDB.Provider:
+		return MongoDB.BackupClass
 	}
 
 	return MySQL.BackupClass

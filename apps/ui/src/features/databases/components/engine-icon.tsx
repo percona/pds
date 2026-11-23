@@ -5,6 +5,7 @@ import type { DatabaseEngine } from "../types";
 const engineLabels: Record<DatabaseEngine, string> = {
   mysql: "MySQL",
   postgresql: "PostgreSQL",
+  mongodb: "MongoDB",
 };
 
 /** The engine as a person names it, with the version when the adapter has one. */

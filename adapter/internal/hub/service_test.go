@@ -170,10 +170,136 @@ func TestCreateTakesTheLongestPostgreSQLNameItsMembersCarry(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// newMongoHub is a hub whose environment has reported the MongoDB provider.
+func newMongoHub(t *testing.T) (*hub.Service, *hub.MemoryStore) {
+	t.Helper()
+	svc, store, inv := newHub(t)
+	inv.ApplyHeartbeat(hub.Heartbeat{
+		Environment: "spoke-a", Namespace: "pds", Engines: []string{"mongodb", "mysql", "postgresql"},
+		At: time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC),
+	})
+
+	return svc, store
+}
+
+func createMongoDB(svc *hub.Service, in engine.CreateInput) (*engine.Instance, error) {
+	in.Name, in.Engine, in.Environment = "orders", "mongodb", "spoke-a"
+	if in.Profile == "" {
+		in.Profile = "dev"
+	}
+
+	return svc.Create(context.Background(), in)
+}
+
+func requireNothingWritten(t *testing.T, store *hub.MemoryStore, name string) {
+	t.Helper()
+	_, err := store.Get(context.Background(), "clusters/spoke-a/instances/"+name+".yaml")
+	require.ErrorIs(t, err, hub.ErrNotFound)
+}
+
+func TestCreateWritesAMongoDBInstance(t *testing.T) {
+	for profile, members := range map[string]int{"dev": 1, "staging": 3, "prod": 3} {
+		t.Run(profile, func(t *testing.T) {
+			svc, store := newMongoHub(t)
+
+			got, err := createMongoDB(svc, engine.CreateInput{Profile: profile})
+			require.NoError(t, err)
+			assert.Equal(t, "mongodb", got.Engine)
+			assert.Equal(t, profile, got.Profile)
+			assert.Equal(t, members, got.Sizing.Members)
+			assert.False(t, got.Exposure.External)
+
+			body, err := store.Get(context.Background(), "clusters/spoke-a/instances/orders.yaml")
+			require.NoError(t, err)
+			assert.Contains(t, string(body), "pds.percona.com/engine: mongodb")
+			assert.NotContains(t, string(body), "proxy:")
+
+			read, err := svc.Get(context.Background(), "spoke-a/pds.orders")
+			require.NoError(t, err)
+			assert.Equal(t, "mongodb", read.Engine)
+		})
+	}
+}
+
+func TestCreateRefusesAMongoDBNameOver22Characters(t *testing.T) {
+	svc, store := newMongoHub(t)
+	long := strings.Repeat("a", 23)
+
+	_, err := svc.Create(context.Background(), engine.CreateInput{
+		Name: long, Engine: "mongodb", Profile: "dev", Environment: "spoke-a",
+	})
+
+	var bounds *engine.BoundsError
+	require.ErrorAs(t, err, &bounds)
+	assert.Equal(t, 22, bounds.Max)
+	assert.Equal(t, "A MongoDB database name must be between 1 and 22 characters.", bounds.UserMessage())
+	requireNothingWritten(t, store, long)
+}
+
+func TestCreateTakesAMongoDBNameOf22Characters(t *testing.T) {
+	svc, _ := newMongoHub(t)
+
+	_, err := svc.Create(context.Background(), engine.CreateInput{
+		Name: strings.Repeat("a", 22), Engine: "mongodb", Profile: "dev", Environment: "spoke-a",
+	})
+
+	require.NoError(t, err)
+}
+
+func TestCreateRefusesAccessFromOutsideForMongoDB(t *testing.T) {
+	tests := map[string]engine.CreateInput{
+		"private": {Access: engine.AccessPrivate},
+		"public":  {Access: engine.AccessPublic, SourceRanges: []string{"203.0.113.0/24"}},
+		"ranges":  {SourceRanges: []string{"203.0.113.0/24"}},
+	}
+	for name, in := range tests {
+		t.Run(name, func(t *testing.T) {
+			svc, store := newMongoHub(t)
+
+			_, err := createMongoDB(svc, in)
+
+			require.ErrorIs(t, err, hub.ErrAccessNotAvailable)
+			requireNothingWritten(t, store, "orders")
+		})
+	}
+}
+
+func TestCreateRefusesMongoDBOnAnEnvironmentThatHasNotReportedTheProvider(t *testing.T) {
+	tests := map[string][]string{
+		"an agent that predates the field": nil,
+		"an agent without the engine":      {"mysql", "postgresql"},
+	}
+	for name, engines := range tests {
+		t.Run(name, func(t *testing.T) {
+			svc, store, inv := newHub(t)
+			inv.ApplyHeartbeat(hub.Heartbeat{
+				Environment: "spoke-a", Namespace: "pds", Engines: engines,
+				At: time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC),
+			})
+
+			_, err := createMongoDB(svc, engine.CreateInput{})
+
+			require.ErrorIs(t, err, hub.ErrEngineNotOnEnvironment)
+			requireNothingWritten(t, store, "orders")
+		})
+	}
+}
+
+func TestCreateOfMySQLAndPostgreSQLNeedsNoReportedEngine(t *testing.T) {
+	svc, _, _ := newHub(t)
+
+	_, err := svc.Create(context.Background(), engine.CreateInput{
+		Name: "orders", Engine: "mysql", Profile: "dev", Environment: "spoke-a",
+	})
+	require.NoError(t, err)
+	_, err = createPostgreSQL(t, svc, engine.CreateInput{})
+	require.NoError(t, err)
+}
+
 func TestCreateRefusesAnUnknownEngine(t *testing.T) {
 	svc, _, _ := newHub(t)
 	_, err := svc.Create(context.Background(), engine.CreateInput{
-		Name: "orders", Engine: "mongodb", Profile: "dev", Environment: "spoke-a",
+		Name: "orders", Engine: "redis", Profile: "dev", Environment: "spoke-a",
 	})
 
 	require.ErrorIs(t, err, hub.ErrEngineNotSupported)
@@ -1026,7 +1152,7 @@ func TestRestoreRefusesAnUnknownEngineBeforeLookingAtTheBackup(t *testing.T) {
 	inv.ApplyHeartbeat(hub.Heartbeat{
 		Environment: "spoke-a", Namespace: "pds", At: time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC),
 		Instances: []engine.Instance{{
-			ID: "spoke-a/pds.reporting", Name: "reporting", Engine: "mongodb",
+			ID: "spoke-a/pds.reporting", Name: "reporting", Engine: "redis",
 			Namespace: "pds", Environment: "spoke-a", Profile: "dev",
 			Status: engine.Status{Phase: engine.PhaseReady},
 		}},
