@@ -362,6 +362,30 @@ rules:
     verbs: ["get"]
 ---
 # Source: pds/templates/adapter-rbac.yaml
+# Pruning MongoDB backups. The provider's own retention deletes a backup and
+# then recreates it, so the agent deletes the Backup objects a schedule no
+# longer keeps. Deleting one removes the data it wrote to the backup storage.
+# The agent lists and reads backups through the OpenEverest API, so delete is
+# all it needs here.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pds-adapter-backup-retention
+  namespace: pds
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    app.kubernetes.io/component: adapter
+rules:
+  - apiGroups: ["backup.openeverest.io"]
+    resources: ["backups"]
+    verbs: ["delete"]
+---
+# Source: pds/templates/adapter-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
@@ -425,6 +449,29 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: pds-adapter-database-seeds
+subjects:
+  - kind: ServiceAccount
+    name: pds
+    namespace: everest-system
+---
+# Source: pds/templates/adapter-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pds-adapter-backup-retention
+  namespace: pds
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    app.kubernetes.io/component: adapter
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pds-adapter-backup-retention
 subjects:
   - kind: ServiceAccount
     name: pds

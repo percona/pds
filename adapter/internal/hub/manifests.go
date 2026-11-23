@@ -224,14 +224,26 @@ func buildInstanceYAML(
 			Backup: &everest.DataSourceBackup{BackupRef: everest.ObjectRef{Name: restoreFrom}},
 		}
 	}
-	if backupStorage != "" && !p.flavor.EngineOnly {
+	meta := everest.ObjectMeta{
+		Name:      name,
+		Namespace: namespace,
+		Labels: map[string]string{
+			"app.kubernetes.io/managed-by": "pds",
+			"pds.percona.com/profile":      p.name,
+			oe.LabelEngine:                 p.flavor.ID,
+			labelEnvironment:               environment,
+		},
+		Annotations: presetAnnotation(p),
+	}
+	if backupStorage != "" {
 		storage := everest.InstanceBackupStorage{
 			StorageRef: everest.ObjectRef{Name: backupStorage},
 		}
-		schedule := oe.ScheduleSpec(engine.DefaultSchedule())
+		schedule := oe.ScheduleSpec(spec.ProviderRef.Name, engine.DefaultSchedule())
 		switch {
 		case p.daily:
 			storage.Schedules = []everest.InstanceBackupSchedule{schedule}
+			oe.StampCopies(&meta, spec.ProviderRef.Name, engine.DefaultSchedule())
 		case p.flavor.DropsIdleBackupStorage:
 			// The provider drops a storage with no schedule entry, and the
 			// operator refuses backups enabled with no storage, so the
@@ -249,18 +261,8 @@ func buildInstanceYAML(
 	doc := objectDoc{
 		APIVersion: everest.APIVersion,
 		Kind:       everest.KindInstance,
-		Metadata: everest.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-			Labels: map[string]string{
-				"app.kubernetes.io/managed-by": "pds",
-				"pds.percona.com/profile":      p.name,
-				oe.LabelEngine:                 p.flavor.ID,
-				labelEnvironment:               environment,
-			},
-			Annotations: presetAnnotation(p),
-		},
-		Spec: spec,
+		Metadata:   meta,
+		Spec:       spec,
 	}
 
 	body, err := yaml.Marshal(doc)
@@ -329,7 +331,7 @@ func restoredFromYAML(body []byte) bool {
 // gives back the rewritten document. Editing the parsed spec rather than
 // rebuilding it keeps whatever the manifest already carries: the labels, the
 // preset annotation, and any backup schedule already on it.
-func mutateInstanceYAML(body []byte, fn func(*everest.InstanceSpec) error) ([]byte, error) {
+func mutateInstanceYAML(body []byte, fn func(*everest.InstanceSpec, *everest.ObjectMeta) error) ([]byte, error) {
 	var doc struct {
 		APIVersion string               `json:"apiVersion"`
 		Kind       string               `json:"kind"`
@@ -339,7 +341,7 @@ func mutateInstanceYAML(body []byte, fn func(*everest.InstanceSpec) error) ([]by
 	if err := yaml.Unmarshal(body, &doc); err != nil {
 		return nil, err
 	}
-	if err := fn(&doc.Spec); err != nil {
+	if err := fn(&doc.Spec, &doc.Metadata); err != nil {
 		return nil, err
 	}
 	renameLegacyEnvironmentLabel(doc.Metadata.Labels)
@@ -406,12 +408,14 @@ func applyScale(spec *everest.InstanceSpec, in engine.ScaleInput) error {
 
 // applySchedule writes in as the manifest's one schedule, replacing the one
 // it has. The backup class follows the provider the manifest names, so a
-// PostgreSQL instance gets the PostgreSQL class.
-func applySchedule(spec *everest.InstanceSpec, storage string, in engine.ScheduleInput) error {
+// PostgreSQL instance gets the PostgreSQL class. A provider whose backups the
+// control plane prunes keeps the count on the Instance's annotations.
+func applySchedule(spec *everest.InstanceSpec, meta *everest.ObjectMeta, storage string, in engine.ScheduleInput) error {
 	if (spec.Backup == nil || len(spec.Backup.Storages) == 0) && strings.TrimSpace(storage) == "" {
 		return fmt.Errorf("%w: the environment has reported no backup storage", engine.ErrBackupsUnavailable)
 	}
-	spec.Backup = oe.ApplySchedule(spec.Backup, storage, oe.BackupClassFor(spec.ProviderRef.Name), in)
+	spec.Backup = oe.ApplySchedule(spec.Backup, storage, spec.ProviderRef.Name, in)
+	oe.StampCopies(meta, spec.ProviderRef.Name, in)
 
 	return nil
 }

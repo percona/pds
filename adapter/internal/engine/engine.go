@@ -239,6 +239,11 @@ type Backup struct {
 	// database's backups together, and matching them back by name prefix makes
 	// two databases share a backup when one name is a prefix of the other.
 	Instance string
+
+	// FinishOnly means FinishedAt is the only time to show. CreatedAt then
+	// only orders the list: it is not when the backup started, and no
+	// duration comes from it.
+	FinishOnly bool
 }
 
 // Normalized restore states. They mirror the backup states because both

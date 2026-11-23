@@ -1,7 +1,7 @@
 import { Clock, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { POSTGRESQL_BACKUPS_STAY } from "../confirm";
+import { MONGODB_BACKUPS_DELETED, POSTGRESQL_BACKUPS_STAY } from "../confirm";
 import type { Database } from "../types";
 
 type SettingsTabProps = {
@@ -44,6 +44,7 @@ export function SettingsTab({ database, onDelete }: SettingsTabProps) {
             Deleting <span className="font-mono">{database.name}</span> takes its data
             {database.engine === "postgresql" ? "" : " and its backups"} with it.
             {database.engine === "postgresql" ? ` ${POSTGRESQL_BACKUPS_STAY}` : ""}
+            {database.engine === "mongodb" ? ` ${MONGODB_BACKUPS_DELETED}` : ""}
           </p>
           <Button
             variant="outline"

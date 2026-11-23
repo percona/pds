@@ -1457,7 +1457,7 @@ func (s *Service) Scale(ctx context.Context, id string, in engine.ScaleInput) er
 	// A hub-created instance lives in Git, so scaling it means rewriting
 	// the manifest and letting Flux apply it. This used to answer 501 for
 	// the only kind of instance the hub itself produces.
-	updated, err := mutateInstanceYAML(body, func(spec *everest.InstanceSpec) error {
+	updated, err := mutateInstanceYAML(body, func(spec *everest.InstanceSpec, _ *everest.ObjectMeta) error {
 		return applyScale(spec, in)
 	})
 	if err != nil {
@@ -1559,8 +1559,8 @@ func (s *Service) SetBackupSchedule(ctx context.Context, id string, in *engine.S
 		result  *engine.BackupSchedule
 		changed bool
 	)
-	updated, err := mutateInstanceYAML(body, func(spec *everest.InstanceSpec) error {
-		existing := oe.ScheduleOf(spec.Backup)
+	updated, err := mutateInstanceYAML(body, func(spec *everest.InstanceSpec, meta *everest.ObjectMeta) error {
+		existing := oe.ScheduleOfInstance(*spec, *meta)
 		switch {
 		case in == nil && existing != nil && !existing.Disabled:
 			result = existing
@@ -1581,12 +1581,12 @@ func (s *Service) SetBackupSchedule(ctx context.Context, id string, in *engine.S
 			if in != nil {
 				want = *in
 			}
-			if err := applySchedule(spec, storage, want); err != nil {
+			if err := applySchedule(spec, meta, storage, want); err != nil {
 				return err
 			}
 		}
 		changed = true
-		result = oe.ScheduleOf(spec.Backup)
+		result = oe.ScheduleOfInstance(*spec, *meta)
 
 		return nil
 	})

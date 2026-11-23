@@ -91,6 +91,11 @@ type Options struct {
 	// database that is gone, and returns how many it removed. Nil means this
 	// agent cannot, and leaves them.
 	Cleanup func(ctx context.Context, namespace, name string) (int, error)
+	// Retain deletes the scheduled backups beyond the count each listed
+	// database's schedule keeps, for an engine whose provider does not prune
+	// them, and returns how many it deleted. Nil means this agent cannot, and
+	// leaves them.
+	Retain func(ctx context.Context, items []engine.Instance) (int, error)
 	// Credentials writes a new MySQL database's users Secret before the
 	// operator generates one, so its passwords hold nothing the monitoring
 	// exporter misreads. Nil means this agent cannot, and says so: the hub
@@ -494,6 +499,7 @@ func beat(ctx context.Context, opts Options, pending []hub.WorkResult) ([]hub.Wo
 				instances = append(instances, item)
 			}
 			sweepDeleted(ctx, opts, instances)
+			retainBackups(ctx, opts, instances)
 		}
 	}
 

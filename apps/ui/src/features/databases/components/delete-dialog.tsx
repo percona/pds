@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { isNameConfirmed, POSTGRESQL_BACKUPS_STAY } from "../confirm";
+import { isNameConfirmed, MONGODB_BACKUPS_DELETED, POSTGRESQL_BACKUPS_STAY } from "../confirm";
 import { useDeleteDatabase } from "../hooks/use-delete-database";
 import type { Database } from "../types";
 
@@ -81,6 +81,7 @@ export function DeleteDialog({ database, open, onOpenChange, onDeleted }: Delete
             This deletes <span className="font-mono">{database.name}</span> with its data
             {database.engine === "postgresql" ? "" : " and its backups"}, and there is no undo.
             {database.engine === "postgresql" ? ` ${POSTGRESQL_BACKUPS_STAY}` : ""}
+            {database.engine === "mongodb" ? ` ${MONGODB_BACKUPS_DELETED}` : ""}
           </DialogDescription>
         </DialogHeader>
 

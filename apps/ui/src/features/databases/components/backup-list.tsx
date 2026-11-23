@@ -11,7 +11,13 @@ import {
 } from "@/components/ui/table";
 import { formatRelativeTime, formatTimestamp } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { backupStatus, canRestore, emptyBackups, formatBackupSize } from "../backups";
+import {
+  backupStatus,
+  canRestore,
+  emptyBackups,
+  formatBackupSize,
+  isBackupActive,
+} from "../backups";
 import type { Backup, BackupSchedule } from "../types";
 import { StatusPill } from "./status-pill";
 
@@ -27,6 +33,11 @@ type BackupListProps = {
   backUpEnabled?: boolean;
   /** Opens the restore dialog on one row. */
   onRestore?: (backup: Backup) => void;
+  /**
+   * True when the engine reports only when a backup finished, so the list
+   * shows that and never a start.
+   */
+  finishOnly?: boolean;
   className?: string;
 };
 
@@ -42,6 +53,7 @@ export function BackupList({
   backingUp = false,
   backUpEnabled = true,
   onRestore,
+  finishOnly = false,
   className,
 }: BackupListProps) {
   if (backups.length === 0) {
@@ -73,7 +85,7 @@ export function BackupList({
       <Table data-testid="backup-list">
         <TableHeader>
           <TableRow className="hover:bg-transparent">
-            <TableHead>Started</TableHead>
+            <TableHead>{finishOnly ? "Finished" : "Started"}</TableHead>
             <TableHead>Size</TableHead>
             <TableHead>Type</TableHead>
             <TableHead>Status</TableHead>
@@ -84,7 +96,12 @@ export function BackupList({
         </TableHeader>
         <TableBody>
           {backups.map((backup) => (
-            <BackupRow key={backup.id} backup={backup} onRestore={onRestore} />
+            <BackupRow
+              key={backup.id}
+              backup={backup}
+              onRestore={onRestore}
+              finishOnly={finishOnly}
+            />
           ))}
         </TableBody>
       </Table>
@@ -95,18 +112,19 @@ export function BackupList({
 type BackupRowProps = {
   backup: Backup;
   onRestore?: (backup: Backup) => void;
+  finishOnly: boolean;
 };
 
-function BackupRow({ backup, onRestore }: BackupRowProps) {
+function BackupRow({ backup, onRestore, finishOnly }: BackupRowProps) {
   const status = backupStatus(backup);
-  const started = formatRelativeTime(backup.createdAt);
+  const when = finishOnly ? backup.finishedAt : backup.createdAt;
+  const started = formatRelativeTime(when);
+  const missing = finishOnly && isBackupActive(backup) ? "In progress" : "Not reported";
   const size = formatBackupSize(backup.sizeBytes);
 
   return (
     <TableRow data-testid={`backup-row-${backup.id}`}>
-      <TableCell title={formatTimestamp(backup.createdAt) ?? undefined}>
-        {started ?? "Not reported"}
-      </TableCell>
+      <TableCell title={formatTimestamp(when) ?? undefined}>{started ?? missing}</TableCell>
       <TableCell className={cn(size ? "font-mono" : "text-muted-foreground")}>
         {size ?? "Not reported"}
       </TableCell>

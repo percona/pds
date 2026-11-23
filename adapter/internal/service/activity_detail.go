@@ -250,7 +250,7 @@ func (a *ActivityDetails) backupResource(
 			namespace = ""
 		}
 
-		return &ActivityResource{
+		resource := &ActivityResource{
 			Kind:      ResourceBackup,
 			Name:      backup.ID,
 			Namespace: namespace,
@@ -260,6 +260,11 @@ func (a *ActivityDetails) backupResource(
 			EndedAt:   backup.FinishedAt,
 			SizeBytes: backup.SizeBytes,
 		}
+		if backup.FinishOnly {
+			resource.StartedAt = time.Time{}
+		}
+
+		return resource
 	}
 
 	if e.ResourceName != "" {
