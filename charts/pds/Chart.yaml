@@ -19,6 +19,7 @@ keywords:
   - percona
   - mysql
   - postgresql
+  - mongodb
   - kubernetes
   - openeverest
   - pmm
@@ -48,6 +49,11 @@ dependencies:
     repository: oci://ghcr.io/openeverest/charts
     alias: provider-postgresql
     condition: stack.enabled
+  - name: provider-percona-server-mongodb
+    version: 0.4.0
+    repository: oci://ghcr.io/openeverest/charts
+    alias: provider-mongodb
+    condition: stack.enabled
   # The adapter's own database needs the PostgreSQL operator on a release
   # where the stack is off, which is what a hub is. A stack install gets the
   # same operator through provider-postgresql, so only one of the two is ever
@@ -68,5 +74,6 @@ annotations:
     openeverest/openeverest 2.0.0-dev.4
     oci://ghcr.io/openeverest/charts/provider-percona-xtradb-cluster 0.3.1
     oci://ghcr.io/openeverest/charts/provider-percona-postgresql 0.6.0
+    oci://ghcr.io/openeverest/charts/provider-percona-server-mongodb 0.4.0
     percona/pg-operator 3.0.0
     percona/pmm 1.9.1 (PMM 3.9.1)

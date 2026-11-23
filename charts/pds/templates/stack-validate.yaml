@@ -4,6 +4,7 @@
 {{- include "pds.mustPin" (dict "name" "platform.openeverest.repository" "got" .Values.platform.openeverest.repository "want" (index $pin "openeverest" "repository")) -}}
 {{- include "pds.mustPin" (dict "name" "platform.pxcOperator.version" "got" .Values.platform.pxcOperator.version "want" (index $pin "providers" "pxc" "operator")) -}}
 {{- include "pds.mustPin" (dict "name" "platform.postgresqlOperator.version" "got" .Values.platform.postgresqlOperator.version "want" (index $pin "providers" "postgresql" "operator")) -}}
+{{- include "pds.mustPin" (dict "name" "platform.mongodbOperator.version" "got" .Values.platform.mongodbOperator.version "want" (index $pin "providers" "mongodb" "operator")) -}}
 {{- include "pds.mustPin" (dict "name" "platform.pmm.version" "got" .Values.platform.pmm.version "want" (index $pin "pmm" "version")) -}}
 {{- include "pds.mustPin" (dict "name" "platform.pmm.appVersion" "got" .Values.platform.pmm.appVersion "want" (index $pin "pmm" "app")) -}}
 {{- include "pds.mustPin" (dict "name" "platform.pmm.repository" "got" .Values.platform.pmm.repository "want" (index $pin "pmm" "repository")) -}}
@@ -16,6 +17,9 @@
 {{- end -}}
 {{- with index .Subcharts "provider-postgresql" -}}
 {{- include "pds.mustPin" (dict "name" "PostgreSQL provider subchart version" "got" .Chart.Version "want" (index $pin "providers" "postgresql" "version")) -}}
+{{- end -}}
+{{- with index .Subcharts "provider-mongodb" -}}
+{{- include "pds.mustPin" (dict "name" "MongoDB provider subchart version" "got" .Chart.Version "want" (index $pin "providers" "mongodb" "version")) -}}
 {{- end -}}
 {{- with index .Subcharts "pmm-server" -}}
 {{- include "pds.mustPin" (dict "name" "PMM subchart version" "got" .Chart.Version "want" (index $pin "pmm" "version")) -}}

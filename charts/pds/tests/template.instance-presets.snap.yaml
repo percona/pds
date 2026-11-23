@@ -313,4 +313,87 @@ spec:
                     replicas: 3
 
 
+
+              ---
+              apiVersion: core.openeverest.io/v1alpha1
+              kind: InstancePreset
+              metadata:
+                name: pds-mongodb-dev
+                labels:
+                  app.kubernetes.io/component: instance-preset
+                  pds.percona.com/engine: mongodb
+                  pds.percona.com/profile: dev
+                annotations:
+                  pds.percona.com/preset-version: "1"
+              spec:
+                providerRef:
+                  name: percona-server-mongodb
+                topology:
+                  type: replicaSet
+                components:
+                  engine:
+
+                    replicas: 1
+                    resources:
+                      limits:
+                        cpu: "1"
+                        memory: 2Gi
+                    storage:
+                      size: 20Gi
+
+              ---
+              apiVersion: core.openeverest.io/v1alpha1
+              kind: InstancePreset
+              metadata:
+                name: pds-mongodb-staging
+                labels:
+                  app.kubernetes.io/component: instance-preset
+                  pds.percona.com/engine: mongodb
+                  pds.percona.com/profile: staging
+                annotations:
+                  pds.percona.com/preset-version: "1"
+              spec:
+                providerRef:
+                  name: percona-server-mongodb
+                topology:
+                  type: replicaSet
+                components:
+                  engine:
+
+                    replicas: 3
+                    resources:
+                      limits:
+                        cpu: "2"
+                        memory: 8Gi
+                    storage:
+                      size: 100Gi
+
+              ---
+              apiVersion: core.openeverest.io/v1alpha1
+              kind: InstancePreset
+              metadata:
+                name: pds-mongodb-prod
+                labels:
+                  app.kubernetes.io/component: instance-preset
+                  pds.percona.com/engine: mongodb
+                  pds.percona.com/profile: prod
+                annotations:
+                  pds.percona.com/preset-version: "1"
+              spec:
+                providerRef:
+                  name: percona-server-mongodb
+                topology:
+                  type: replicaSet
+                components:
+                  engine:
+
+                    replicas: 3
+                    resources:
+                      limits:
+                        cpu: "4"
+                        memory: 16Gi
+                    storage:
+                      size: 250Gi
+
+
               EOF

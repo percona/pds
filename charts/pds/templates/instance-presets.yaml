@@ -8,8 +8,9 @@
 {{- $name := include "pds.fullname" . }}
 {{- $version := "1" }}
 {{- $engines := list
-  (dict "id" "mysql" "provider" "percona-xtradb-cluster" "engineType" "" "proxyType" "haproxy")
-  (dict "id" "postgresql" "provider" "provider-percona-postgresql" "engineType" "postgresql" "proxyType" "pgbouncer")
+  (dict "id" "mysql" "provider" "percona-xtradb-cluster" "topology" "cluster" "engineType" "" "proxyType" "haproxy")
+  (dict "id" "postgresql" "provider" "provider-percona-postgresql" "topology" "cluster" "engineType" "postgresql" "proxyType" "pgbouncer")
+  (dict "id" "mongodb" "provider" "percona-server-mongodb" "topology" "replicaSet" "engineType" "" "proxyType" "")
 }}
 {{- $profiles := list
   (dict "name" "dev" "replicas" 1 "cpu" "1" "memory" "2Gi" "storage" "20Gi")
@@ -139,7 +140,7 @@ spec:
                 providerRef:
                   name: {{ $engine.provider }}
                 topology:
-                  type: cluster
+                  type: {{ $engine.topology }}
                 components:
                   engine:
 {{ if $engine.engineType }}
@@ -152,9 +153,11 @@ spec:
                         memory: {{ $profile.memory }}
                     storage:
                       size: {{ $profile.storage }}
+{{- if $engine.proxyType }}
                   proxy:
                     type: {{ $engine.proxyType }}
                     replicas: {{ $profile.replicas }}
+{{- end }}
 {{ end }}
 {{ end }}
               EOF

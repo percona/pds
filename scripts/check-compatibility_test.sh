@@ -49,6 +49,12 @@ providers:
     repository: oci://ghcr.io/openeverest/charts
     version: "0.1.0"
     operator: "3.0.0"
+  mongodb:
+    name: provider-percona-server-mongodb
+    alias: provider-mongodb
+    repository: oci://ghcr.io/openeverest/charts
+    version: "0.4.0"
+    operator: "1.22.0"
 
 pmm:
   name: pmm
@@ -66,6 +72,9 @@ databases:
     versionSource: operator-default
   postgresql:
     engine: Percona PostgreSQL
+    versionSource: operator-default
+  mongodb:
+    engine: Percona Server for MongoDB
     versionSource: operator-default
 EOF
 }
@@ -90,6 +99,10 @@ dependencies:
     version: 0.1.0
     repository: oci://ghcr.io/openeverest/charts
     alias: provider-postgresql
+  - name: provider-percona-server-mongodb
+    version: 0.4.0
+    repository: oci://ghcr.io/openeverest/charts
+    alias: provider-mongodb
   - name: pmm
     version: 1.9.1
     repository: https://percona.github.io/percona-helm-charts/
@@ -98,6 +111,7 @@ annotations:
     openeverest/openeverest 2.0.0-dev.2
     oci://ghcr.io/openeverest/charts/provider-percona-xtradb-cluster 0.1.0
     oci://ghcr.io/openeverest/charts/provider-percona-postgresql 0.1.0
+    oci://ghcr.io/openeverest/charts/provider-percona-server-mongodb 0.4.0
     percona/pmm 1.9.1 (PMM 3.9.1)
 EOF
 }
@@ -114,6 +128,8 @@ platform:
     version: 1.20.0
   postgresqlOperator:
     version: 3.0.0
+  mongodbOperator:
+    version: 1.22.0
   pmm:
     repository: https://percona.github.io/percona-helm-charts/
     chart: pmm
@@ -133,6 +149,7 @@ Upgrade support: unsupported.
 Supported matrix: Percona Database Service 0.1.0, OpenEverest 2.0.0-dev.2,
 provider-percona-xtradb-cluster 0.1.0 with PXC operator 1.20.0,
 provider-percona-postgresql 0.1.0 with PostgreSQL operator 3.0.0,
+provider-percona-server-mongodb 0.4.0 with MongoDB operator 1.22.0,
 PMM 1.9.1 (3.9.1). CRDs core.openeverest.io/v1alpha1 and
 backup.openeverest.io/v1alpha1. Databases use the operator default.
 
@@ -216,8 +233,32 @@ sed -i.bak 's/1.20.0/1.19.0/' \
 expect_fail values-operator-drift "${FIXTURE}" "1.20.0"
 write_values "${FIXTURE}/charts/pds/values.yaml"
 
+sed -i.bak 's/1.22.0/1.21.0/' \
+  "${FIXTURE}/charts/pds/values.yaml"
+expect_fail values-mongodb-operator-drift "${FIXTURE}" "platform.mongodbOperator.version"
+write_values "${FIXTURE}/charts/pds/values.yaml"
+
+sed -i.bak '/provider-percona-server-mongodb/{n;s/version: 0.4.0/version: 0.9.0/;}' \
+  "${FIXTURE}/charts/pds/Chart.yaml"
+expect_fail chart-mongodb-provider-drift "${FIXTURE}" "provider-percona-server-mongodb"
+write_chart "${FIXTURE}/charts/pds/Chart.yaml"
+
+sed -i.bak 's/alias: provider-mongodb/alias: provider-mongo/' \
+  "${FIXTURE}/charts/pds/Chart.yaml"
+expect_fail chart-mongodb-alias-drift "${FIXTURE}" "alias"
+write_chart "${FIXTURE}/charts/pds/Chart.yaml"
+
+sed -i.bak '/charts\/provider-percona-server-mongodb 0.4.0/d' \
+  "${FIXTURE}/charts/pds/Chart.yaml"
+expect_fail chart-annotation-missing-mongodb "${FIXTURE}" "platform-charts annotation"
+write_chart "${FIXTURE}/charts/pds/Chart.yaml"
+
 sed -i.bak 's/2.0.0-dev.2/9.9.9/' "${FIXTURE}/docs/compatibility.md"
 expect_fail docs-matrix-drift "${FIXTURE}" "2.0.0-dev.2"
+write_docs "${FIXTURE}/docs/compatibility.md"
+
+sed -i.bak 's/MongoDB operator 1.22.0/MongoDB operator 1.21.0/' "${FIXTURE}/docs/compatibility.md"
+expect_fail docs-mongodb-operator-drift "${FIXTURE}" "1.22.0"
 write_docs "${FIXTURE}/docs/compatibility.md"
 
 python3 - "${FIXTURE}/docs/compatibility.md" <<'PY'

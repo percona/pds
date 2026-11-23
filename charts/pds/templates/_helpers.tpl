@@ -771,6 +771,9 @@ them.
 {{- if not (kindIs "map" (index $pin "providers" "postgresql")) -}}
 {{- fail "compatibility.yaml is missing the providers.postgresql key. It is the supported version pin." -}}
 {{- end -}}
+{{- if not (kindIs "map" (index $pin "providers" "mongodb")) -}}
+{{- fail "compatibility.yaml is missing the providers.mongodb key. It is the supported version pin." -}}
+{{- end -}}
 {{- if not (kindIs "map" (index $pin "pmm")) -}}
 {{- fail "compatibility.yaml is missing the pmm key. It is the supported version pin." -}}
 {{- end -}}

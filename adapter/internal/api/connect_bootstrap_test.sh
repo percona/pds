@@ -4173,9 +4173,13 @@ sed -e 's#__HUB_URL__#http://localhost:9#' \
   -e 's#__DEFAULT_REGION__#us-west-2#' "${SCRIPT}" >"${UPD}/bootstrap.sh"
 
 write_update_chart() {
-  local floor="${1:->= 2.0.0-dev.4}" pxc_floor="${2:-}" pxc_line=""
+  local floor="${1:->= 2.0.0-dev.4}" pxc_floor="${2:-}" mongodb_floor="${3:-}" pxc_line=""
   if [[ -n "$pxc_floor" ]]; then
     pxc_line="      pxc: \"${pxc_floor}\""
+  fi
+  if [[ -n "$mongodb_floor" ]]; then
+    pxc_line="${pxc_line}
+      mongodb: \"${mongodb_floor}\""
   fi
   cat >"${UPD}/chart/Chart.yaml" <<EOF
 apiVersion: v2
@@ -4201,13 +4205,18 @@ providers:
   postgresql:
     name: provider-percona-postgresql
     version: "0.5.0"
+  mongodb:
+    name: provider-percona-server-mongodb
+    version: "0.4.0"
 EOF
 }
 
 # write_update_manifest renders the part of a release manifest the script reads:
-# the version ConfigMap and the provider chart labels.
+# the version ConfigMap and the provider chart labels. The MongoDB provider is
+# only there when a fourth version is given: an environment that joined before
+# it was pinned does not run it.
 write_update_manifest() {
-  local openeverest="$1" pxc="$2" postgresql="$3"
+  local openeverest="$1" pxc="$2" postgresql="$3" mongodb="${4:-}"
   cat >"${UPD}/manifest.yaml" <<EOF
 ---
 apiVersion: v1
@@ -4232,6 +4241,17 @@ metadata:
   labels:
     helm.sh/chart: provider-postgresql-${postgresql}
 EOF
+  if [[ -n "$mongodb" ]]; then
+    cat >>"${UPD}/manifest.yaml" <<EOF
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: provider-mongodb
+  labels:
+    helm.sh/chart: provider-mongodb-${mongodb}
+EOF
+  fi
 }
 
 echo '{"items":[]}' >"${UPD}/empty.json"
@@ -4480,6 +4500,36 @@ run_update --update --token t
 [[ "$UPDATE_RC" -eq 0 ]] \
   || fail "an environment already on the target was refused (${UPDATE_RC}): $(cat "${UPD}/out")"
 pass "an installed version equal to the chart's is not a downgrade"
+
+# An environment that joined before the MongoDB provider was pinned does not run
+# it. The update does not refuse for that, names no MongoDB version, and
+# upgrades the release, whose chart installs the provider.
+write_update_manifest "2.0.0-dev.4" "0.3.1" "0.5.0"
+run_update --update --token t
+[[ "$UPDATE_RC" -eq 0 ]] \
+  || fail "an environment with no MongoDB provider was refused (${UPDATE_RC}): $(cat "${UPD}/out")"
+grep -q "provider-mongodb" "${UPD}/out" \
+  && fail "an environment with no MongoDB provider names one: $(cat "${UPD}/out")"
+grep -q '^helm upgrade' "${UPD}/calls" \
+  || fail "an environment with no MongoDB provider was not upgraded: $(cat "${UPD}/calls")"
+pass "an environment without the MongoDB provider is updated and is not refused for it"
+
+# Once the provider is installed it is read like the others.
+write_update_manifest "2.0.0-dev.4" "0.3.1" "0.5.0" "0.4.0"
+run_update --update --token t
+[[ "$UPDATE_RC" -eq 0 ]] \
+  || fail "an environment on the pinned MongoDB provider was refused (${UPDATE_RC}): $(cat "${UPD}/out")"
+grep -q "provider-postgresql 0.5.0, provider-mongodb 0.4.0 to .*provider-postgresql 0.5.0, provider-mongodb 0.4.0" "${UPD}/out" \
+  || fail "the versions line does not name the MongoDB provider: $(cat "${UPD}/out")"
+write_update_manifest "2.0.0-dev.4" "0.3.1" "0.5.0" "0.9.0"
+run_update --update --token t
+expect_refused "newer MongoDB provider" "provider-mongodb 0.9.0"
+write_update_chart ">= 2.0.0-dev.4" "" ">= 0.5.0"
+write_update_manifest "2.0.0-dev.4" "0.3.1" "0.5.0" "0.4.0"
+run_update --update --token t
+expect_refused "MongoDB provider floor" ">= 0.5.0"
+write_update_chart
+pass "an installed MongoDB provider is named, never downgraded, and held to its floor"
 
 write_update_manifest "2.0.0-dev.4" "0.3.1" "0.5.0"
 cat >"${UPD}/instances-busy.json" <<'EOF'

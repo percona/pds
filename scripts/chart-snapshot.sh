@@ -219,7 +219,8 @@ fi
 
 if [[ "${UPDATE}" != true ]] && [[ -f "${presets_golden}" ]]; then
   for name in pds-mysql-dev pds-mysql-staging pds-mysql-prod \
-    pds-postgresql-dev pds-postgresql-staging pds-postgresql-prod; do
+    pds-postgresql-dev pds-postgresql-staging pds-postgresql-prod \
+    pds-mongodb-dev pds-mongodb-staging pds-mongodb-prod; do
     if ! grep -q "name: ${name}" "${presets_golden}"; then
       echo "instance presets snapshot is missing ${name}" >&2
       status=1
@@ -1750,6 +1751,7 @@ else
   spoke_renders "OpenEverest" "# Source: pds/charts/openeverest/templates/everest-server/deployment.yaml"
   spoke_renders "the PXC provider" "# Source: pds/charts/provider-pxc/templates/deployment.yaml"
   spoke_renders "the PostgreSQL provider" "# Source: pds/charts/provider-postgresql/templates/deployment.yaml"
+  spoke_renders "the MongoDB provider" "# Source: pds/charts/provider-mongodb/templates/deployment.yaml"
   spoke_renders "MinIO" "# Source: pds/templates/minio.yaml"
   spoke_renders "monitoring" "# Source: pds/charts/pmm-server/templates/statefulset.yaml"
   if grep -qF '# Source: pds/templates/ui-deployment.yaml' "${spoke_full}"; then

@@ -9,7 +9,7 @@ support:
   freshInstall: supported
   upgrade: unsupported
   # The oldest installed version an in-place update (the join script's
-  # --update) starts from, per component: openeverest, pxc or postgresql.
+  # --update) starts from, per component: openeverest, pxc, postgresql or mongodb.
   # OpenEverest 2.0.0-dev.3 has no upgrade path. A later pin bump adds a floor
   # only when it knows a transition breaks.
   update:
@@ -41,6 +41,16 @@ providers:
     repository: oci://ghcr.io/openeverest/charts
     version: "0.6.0"
     operator: "3.0.0"
+  # 0.4.0 is the newest provider chart that installs on OpenEverest
+  # 2.0.0-dev.4. Later ones declare BackupClass .spec.supportsImport, a field
+  # dev.4 does not have, so the provider cannot register. The pin moves to
+  # 0.5.0 when OpenEverest ships that field.
+  mongodb:
+    name: provider-percona-server-mongodb
+    alias: provider-mongodb
+    repository: oci://ghcr.io/openeverest/charts
+    version: "0.4.0"
+    operator: "1.22.0"
 
 pmm:
   name: pmm
@@ -58,4 +68,7 @@ databases:
     versionSource: operator-default
   postgresql:
     engine: Percona PostgreSQL
+    versionSource: operator-default
+  mongodb:
+    engine: Percona Server for MongoDB
     versionSource: operator-default

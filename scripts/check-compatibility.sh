@@ -110,6 +110,7 @@ deps = Array(chart["dependencies"])
   "openeverest" => ["openeverest", "version"],
   "provider-percona-xtradb-cluster" => ["providers", "pxc", "version"],
   "provider-percona-postgresql" => ["providers", "postgresql", "version"],
+  "provider-percona-server-mongodb" => ["providers", "mongodb", "version"],
   "pmm" => ["pmm", "version"]
 }.each do |name, keys|
   dep = deps.find { |d| d.is_a?(Hash) && d["name"] == name }
@@ -121,9 +122,15 @@ deps = Array(chart["dependencies"])
     when "openeverest" then ["openeverest", "repository"]
     when "provider-percona-xtradb-cluster" then ["providers", "pxc", "repository"]
     when "provider-percona-postgresql" then ["providers", "postgresql", "repository"]
+    when "provider-percona-server-mongodb" then ["providers", "mongodb", "repository"]
     when "pmm" then ["pmm", "repository"]
     end
   must_eq(dep["repository"], walk(pin, *repo_keys), "#{chart_rel} dependency #{name} repository")
+  # The chart's templates and the join script find a provider by its alias.
+  alias_keys = repo_keys[0..-2] + ["alias"]
+  next if name == "openeverest" || name == "pmm"
+
+  must_eq(dep["alias"], walk(pin, *alias_keys), "#{chart_rel} dependency #{name} alias")
 end
 
 ann = ((chart["annotations"] || {})["pds.percona.com/platform-charts"] || "").to_s
@@ -131,6 +138,7 @@ ann = ((chart["annotations"] || {})["pds.percona.com/platform-charts"] || "").to
   walk(pin, "openeverest", "version"),
   walk(pin, "providers", "pxc", "version"),
   walk(pin, "providers", "postgresql", "version"),
+  walk(pin, "providers", "mongodb", "version"),
   walk(pin, "pmm", "version"),
   walk(pin, "pmm", "app")
 ].each do |ver|
@@ -156,6 +164,11 @@ must_eq(
   walk(values, "platform", "postgresqlOperator", "version"),
   walk(pin, "providers", "postgresql", "operator"),
   "#{values_rel} platform.postgresqlOperator.version"
+)
+must_eq(
+  walk(values, "platform", "mongodbOperator", "version"),
+  walk(pin, "providers", "mongodb", "operator"),
+  "#{values_rel} platform.mongodbOperator.version"
 )
 must_eq(
   walk(values, "platform", "pmm", "version"),
@@ -204,6 +217,8 @@ docs = File.read(docs_path)
   walk(pin, "providers", "pxc", "operator"),
   walk(pin, "providers", "postgresql", "version"),
   walk(pin, "providers", "postgresql", "operator"),
+  walk(pin, "providers", "mongodb", "version"),
+  walk(pin, "providers", "mongodb", "operator"),
   walk(pin, "pmm", "version"),
   walk(pin, "pmm", "app"),
   walk(pin, "crds", "instance"),
