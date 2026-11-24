@@ -507,7 +507,12 @@ set of one member has no such series, and its chart is empty rather than
 failing), `mongodb_up` or node_exporter for the probe, and the volume at
 `/data/db` for disk. The series and label names are one table in
 `adapter/internal/hub/mongodb_metrics.go`. An engine the metrics service has
-no queries for charts CPU and memory only. The heartbeat names the engines the agent serves (`engines`), and the hub refuses a
+no queries for charts CPU and memory only. The alert rules read the same table: a
+MongoDB database has service down (`mongodb_up`), data volume, replication lag
+and connections, with the ids, severities and hold times of the other engines,
+and the shared node down rule covers its member pods. A replica set of one
+member has no lag series, so replication behind reads no data there and stays
+quiet. The heartbeat names the engines the agent serves (`engines`), and the hub refuses a
 MongoDB create on an environment whose last beat does not name it, because that
 environment needs an update to get the provider. MySQL and PostgreSQL need no
 such mark. The hub also refuses, before it writes anything, a MongoDB name over
@@ -1019,10 +1024,10 @@ applies it with cluster-admin. GitHub's host key is pinned in `known_hosts`.
 
 The monitoring definition sits beside it in `clusters/<environment>/platform/pmm`:
 the PMM HelmRelease, its HelmRepository, and a ConfigMap, `pds-alert-rules`,
-that holds the curated alert rules, for MySQL and PostgreSQL, as a Grafana alerting provisioning
+that holds the curated alert rules, for MySQL, PostgreSQL and MongoDB, as a Grafana alerting provisioning
 file. Each engine has service down, data volume over 85%, replication lag
 over 30 seconds and connections over 90% of `max_connections`, and one node
-down rule covers both. Each is labelled
+down rule covers every engine. Each is labelled
 with `pds_rule` and `severity` and keeping the `cluster` and `namespace`
 labels so an alert maps to a database. PMM loads them at start into a
 read-only folder named PDS. The HelmRelease mounts the ConfigMap at Grafana's

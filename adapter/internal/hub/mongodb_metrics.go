@@ -15,6 +15,8 @@ const (
 	MongoDBConnectionsStateLabel = "state"
 	// MongoDBConnectionsOpen is the state of the connections open now.
 	MongoDBConnectionsOpen = "current"
+	// MongoDBConnectionsAvailable is the state of the connections still free.
+	MongoDBConnectionsAvailable = "available"
 	// MongoDBReplicationLagMetric is the lag of a secondary in seconds. The
 	// exporter emits one sample per secondary, so a replica set of one member
 	// has no series.

@@ -86,7 +86,7 @@ func TestPMMFilesIncludeTheAlertRulesInTheKustomization(t *testing.T) {
 	assert.Contains(t, index.Resources, "alert-rules.yaml")
 }
 
-func TestAlertRulesCoverBothEngines(t *testing.T) {
+func TestAlertRulesCoverEveryEngine(t *testing.T) {
 	rules := allRules(t)
 
 	want := map[string]string{
@@ -98,6 +98,10 @@ func TestAlertRulesCoverBothEngines(t *testing.T) {
 		"PostgreSQL/disk_used":        "warning",
 		"PostgreSQL/replication_lag":  "warning",
 		"PostgreSQL/connections_used": "warning",
+		"MongoDB/service_down":        "critical",
+		"MongoDB/disk_used":           "warning",
+		"MongoDB/replication_lag":     "warning",
+		"MongoDB/connections_used":    "warning",
 		"Nodes/node_down":             "critical",
 	}
 	assert.Len(t, rules, len(want))
@@ -178,6 +182,7 @@ func TestEveryAlertRuleCanBeMappedToADatabase(t *testing.T) {
 	members := map[string]string{
 		"MySQL":      "db-orders-pxc-0",
 		"PostgreSQL": "db-orders-instance1-x7k2-0",
+		"MongoDB":    "db-orders-rs0-0",
 		"Nodes":      "db-orders-instance1-x7k2-0",
 	}
 	for id, rule := range allRules(t) {
@@ -197,7 +202,7 @@ func TestEveryAlertRuleCanBeMappedToADatabase(t *testing.T) {
 			assert.Equal(t, "orders", got["cluster"], "%s derives the database", id)
 			assert.Equal(t, "db", got["namespace"], "%s derives the namespace", id)
 		}
-		if strings.HasPrefix(id, "PostgreSQL/") {
+		if strings.HasPrefix(id, "PostgreSQL/") || strings.HasPrefix(id, "MongoDB/") {
 			assert.Contains(t, query, "node_name", "%s derives its labels from the node name", id)
 		}
 	}
@@ -247,6 +252,10 @@ func TestAlertRuleThresholdsMatchTheCatalog(t *testing.T) {
 	assert.EqualValues(t, 85, threshold("PostgreSQL/disk_used"))
 	assert.EqualValues(t, 30, threshold("PostgreSQL/replication_lag"))
 	assert.EqualValues(t, 90, threshold("PostgreSQL/connections_used"))
+	assert.EqualValues(t, 1, threshold("MongoDB/service_down"))
+	assert.EqualValues(t, 85, threshold("MongoDB/disk_used"))
+	assert.EqualValues(t, 30, threshold("MongoDB/replication_lag"))
+	assert.EqualValues(t, 90, threshold("MongoDB/connections_used"))
 	assert.Contains(t, rules["MySQL/connections_used"].Data[0].Model["expr"], "max_connections")
 	assert.Contains(t, rules["MySQL/disk_used"].Data[0].Model["expr"], "/var/lib/mysql")
 }
@@ -343,6 +352,10 @@ func TestOriginalAlertRuleUIDsAreKept(t *testing.T) {
 		"PostgreSQL/disk_used":        "pds-postgresql-disk_used",
 		"PostgreSQL/replication_lag":  "pds-postgresql-replication_lag",
 		"PostgreSQL/connections_used": "pds-postgresql-connections_used",
+		"MongoDB/service_down":        "pds-mongodb-service_down",
+		"MongoDB/disk_used":           "pds-mongodb-disk_used",
+		"MongoDB/replication_lag":     "pds-mongodb-replication_lag",
+		"MongoDB/connections_used":    "pds-mongodb-connections_used",
 	}
 	rules := allRules(t)
 	for id, uid := range want {
@@ -440,5 +453,43 @@ func TestByDatabaseLeavesNonMembersAlone(t *testing.T) {
 		got := outputLabels(t, byDatabase("up"), node)
 		assert.NotContains(t, got, "cluster", node)
 		assert.NotContains(t, got, "namespace", node)
+	}
+}
+
+// MongoDB's expressions are pinned whole for the same reason as PostgreSQL's:
+// a mistyped series reads as no data, which reads as healthy. The replication
+// rule has no series on a replica set of one member, so it stays quiet there.
+func TestMongoDBRuleExpressionsArePinned(t *testing.T) {
+	rules := allRules(t)
+	expr := func(id string) string { return rules[id].Data[0].Model["expr"].(string) }
+	derive := func(selector string) string {
+		return `label_replace(label_replace(` + selector +
+			`, "namespace", "$1", "node_name", "([^-]+)-.+-(?:pxc-[0-9]+|instance[0-9]*-[a-z0-9]{4}-[0-9]+|rs0-[0-9]+)")` +
+			`, "cluster", "$1", "node_name", "[^-]+-(.+)-(?:pxc-[0-9]+|instance[0-9]*-[a-z0-9]{4}-[0-9]+|rs0-[0-9]+)")`
+	}
+
+	assert.Equal(t, `min by (cluster, namespace, service_name) (`+derive(`mongodb_up`)+`)`,
+		expr("MongoDB/service_down"))
+	assert.Equal(t, `max by (cluster, namespace, service_name) (`+
+		derive(`mongodb_mongod_replset_member_replication_lag`)+`)`,
+		expr("MongoDB/replication_lag"))
+	assert.Equal(t, `max by (cluster, namespace, service_name) (100 * `+
+		`sum by (cluster, namespace, service_name) (`+derive(`mongodb_connections{state="current"}`)+`) / `+
+		`sum by (cluster, namespace, service_name) (`+derive(`mongodb_connections{state=~"current|available"}`)+`))`,
+		expr("MongoDB/connections_used"))
+	assert.Equal(t, `max by (cluster, namespace, node_name) (`+derive(`100 * (1 - `+
+		`node_filesystem_avail_bytes{mountpoint="/data/db"} / `+
+		`node_filesystem_size_bytes{mountpoint="/data/db"})`)+`)`,
+		expr("MongoDB/disk_used"))
+}
+
+func TestMongoDBRulesAreTheSameAsTheOtherEnginesApartFromTheirSeries(t *testing.T) {
+	rules := allRules(t)
+	for _, id := range []string{"service_down", "disk_used", "replication_lag", "connections_used"} {
+		mongo, pg := rules["MongoDB/"+id], rules["PostgreSQL/"+id]
+		assert.Equal(t, pg.Labels, mongo.Labels, id)
+		assert.Equal(t, pg.For, mongo.For, id)
+		assert.Equal(t, pg.Data[2].Model, mongo.Data[2].Model, id)
+		assert.Equal(t, pg.NoDataState, mongo.NoDataState, id)
 	}
 }
