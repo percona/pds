@@ -708,7 +708,9 @@ kubeconfig is stored, only what makes the next assume possible.
   The writes that build an environment live on the service role, split over three
   managed policies to stay under the 6144 character limit of one: tag-scoped on
   `percona.com/pds`, tagging allowed only at creation (`ec2:CreateTags` with
-  `ec2:CreateAction`), service-linked roles named by `iam:AWSServiceName`, and
+  `ec2:CreateAction`; `eks:TagResource` only on what already carries the tag,
+  because CloudFormation applies the stack's tags to a cluster after creating
+  it; no untagging), service-linked roles named by `iam:AWSServiceName`, and
   every regional write limited to the connection's regions. A fourth managed
   policy sits on the control plane role, because the sweep and the backup bucket
   are the control plane's own calls: it deletes volumes, snapshots, network
