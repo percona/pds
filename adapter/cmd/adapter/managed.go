@@ -43,12 +43,15 @@ const (
 func managedSettings(cfg config.Config) (managed.Settings, managed.CreatorSettings) {
 	repository, tag := splitImage(cfg.HubAgentImage)
 
-	return managed.Settings{
+	settings := managed.Settings{
 		OutgoingCIDRs: cfg.ManagedOutgoingCIDRs, FluxVersion: managed.FluxVersion, ChartVersion: cfg.ManagedChartVersion,
 		HubURL: cfg.HubPublicURL, ImageRepository: repository, ImageTag: tag,
-	}, managed.CreatorSettings{
+	}
+	creator := managed.CreatorSettings{
 		OutgoingCIDRs: cfg.ManagedOutgoingCIDRs, ChartVersion: cfg.ManagedChartVersion, ImageRepository: repository,
 	}
+
+	return settings, creator
 }
 
 // splitImage separates an image reference's repository from its tag. A colon
