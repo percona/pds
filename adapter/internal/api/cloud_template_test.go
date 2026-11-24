@@ -232,7 +232,6 @@ func TestTaggingIsAllowedOnlyWhileCreatingAndNeverOnWhatExists(t *testing.T) {
 			actions := asList(statement["Action"])
 			if statement["Effect"] == "Allow" {
 				assert.NotContains(t, actions, "ec2:DeleteTags", name)
-				assert.NotContains(t, actions, "eks:TagResource", name)
 				assert.NotContains(t, actions, "eks:UntagResource", name)
 			}
 			if contains(actions, "ec2:CreateTags") && statement["Effect"] == "Allow" {
@@ -242,6 +241,34 @@ func TestTaggingIsAllowedOnlyWhileCreatingAndNeverOnWhatExists(t *testing.T) {
 			}
 		}
 	}
+}
+
+// CloudFormation applies a stack's tags to an EKS resource with TagResource
+// after creating it, so tagging is allowed, but only on a resource that already
+// carries the ownership tag: nothing the customer made can be claimed.
+func TestEksTagsGoOnlyOnWhatAlreadyCarriesTheOwnershipTag(t *testing.T) {
+	policy := loadCloudTemplate(t).Resources["EksPolicy"]
+	owned := map[string]any{"aws:ResourceTag/percona.com/pds": "false"}
+	unowned := map[string]any{"aws:ResourceTag/percona.com/pds": "true"}
+
+	var allowed, denied bool
+	for _, statement := range statements(t, policy.Properties["PolicyDocument"]) {
+		if !contains(asList(statement["Action"]), "eks:TagResource") {
+			continue
+		}
+		condition, _ := statement["Condition"].(map[string]any)
+		require.NotNil(t, condition, "%v: TagResource always carries a condition", statement["Sid"])
+		switch statement["Effect"] {
+		case "Allow":
+			allowed = true
+			assert.Equal(t, owned, condition["Null"], "TagResource is allowed only on owned resources")
+		case "Deny":
+			denied = true
+			assert.Equal(t, unowned, condition["Null"], "TagResource is denied on what is not owned")
+		}
+	}
+	assert.True(t, allowed, "CloudFormation can tag the resources it made")
+	assert.True(t, denied, "an unowned resource is denied explicitly")
 }
 
 func TestTheServiceLinkedRolesItMayCreateAreNamedNotOpen(t *testing.T) {

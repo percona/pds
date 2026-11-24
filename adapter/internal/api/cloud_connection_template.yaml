@@ -353,11 +353,29 @@ Resources:
               StringEquals:
                 "aws:RequestedRegion":
                   Ref: AllowedRegions
-          - Sid: NeverRetagWhatExists
+          # CloudFormation applies the stack's tags with TagResource after it
+          # creates a cluster, a node group or an add-on. Only what already
+          # carries the ownership tag may be tagged, so nothing else is claimed.
+          - Sid: TagOwnedEksResources
+            Effect: Allow
+            Action: "eks:TagResource"
+            Resource: "*"
+            Condition:
+              "Null":
+                "aws:ResourceTag/percona.com/pds": "false"
+              StringEquals:
+                "aws:RequestedRegion":
+                  Ref: AllowedRegions
+          - Sid: NeverTagWhatIsNotOwned
             Effect: Deny
-            Action:
-              - "eks:TagResource"
-              - "eks:UntagResource"
+            Action: "eks:TagResource"
+            Resource: "*"
+            Condition:
+              "Null":
+                "aws:ResourceTag/percona.com/pds": "true"
+          - Sid: NeverUntag
+            Effect: Deny
+            Action: "eks:UntagResource"
             Resource: "*"
           - Sid: ReadEks
             Effect: Allow
