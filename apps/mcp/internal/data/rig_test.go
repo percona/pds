@@ -18,6 +18,7 @@ import (
 	"github.com/percona/pds/apps/mcp/internal/connections"
 	"github.com/percona/pds/apps/mcp/internal/data"
 	"github.com/percona/pds/apps/mcp/internal/fakecp"
+	"github.com/percona/pds/apps/mcp/internal/mongoguard"
 	"github.com/percona/pds/apps/mcp/internal/oauth"
 	"github.com/percona/pds/apps/mcp/internal/sqlrun"
 	"github.com/percona/pds/apps/mcp/internal/tokenstore"
@@ -86,6 +87,12 @@ func (f *fakeRunner) Write(_ context.Context, t sqlrun.Target, password, stateme
 
 func (f *fakeRunner) WriteRows(_ context.Context, t sqlrun.Target, password, statement string, lim sqlrun.Limits) (sqlrun.Result, error) {
 	f.record("writeRows", t, password, statement, lim)
+
+	return f.result, f.err
+}
+
+func (f *fakeRunner) Command(_ context.Context, t sqlrun.Target, password string, cmd mongoguard.Command, lim sqlrun.Limits) (sqlrun.Result, error) {
+	f.record("command:"+cmd.Database, t, password, cmd.JSON, lim)
 
 	return f.result, f.err
 }

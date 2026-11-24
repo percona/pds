@@ -37,8 +37,8 @@ jobs:
       run:
         working-directory: apps/mcp
     # The data server's tests prove what a database does with a write inside a read only
-    # transaction, so they need a real MySQL and a real PostgreSQL. The passwords belong to
-    # throwaway containers that live for this job only.
+    # transaction, so they need a real MySQL and a real PostgreSQL, and the MongoDB tests send commands
+    # to a real MongoDB. The passwords belong to throwaway containers that live for this job only.
     services:
       mysql:
         image: mysql:8.4
@@ -60,11 +60,23 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 5s --health-timeout 5s --health-retries 20
+      mongodb:
+        image: mongo:7
+        env:
+          MONGO_INITDB_ROOT_USERNAME: root
+          MONGO_INITDB_ROOT_PASSWORD: ci-throwaway-mongodb
+        ports:
+          - 37017:27017
+        options: >-
+          --health-cmd "mongosh --quiet -u root -p ci-throwaway-mongodb --authenticationDatabase admin --eval 'db.adminCommand({ping: 1}).ok'"
+          --health-interval 5s --health-timeout 10s --health-retries 20
     env:
       PDS_TEST_MYSQL_ADDR: 127.0.0.1:33306
       PDS_TEST_MYSQL_PASSWORD: ci-throwaway-mysql
       PDS_TEST_POSTGRES_ADDR: 127.0.0.1:35432
       PDS_TEST_POSTGRES_PASSWORD: ci-throwaway-postgres
+      PDS_TEST_MONGODB_ADDR: 127.0.0.1:37017
+      PDS_TEST_MONGODB_PASSWORD: ci-throwaway-mongodb
     steps:
       - uses: actions/checkout@v4
 

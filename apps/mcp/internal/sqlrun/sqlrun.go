@@ -1,4 +1,5 @@
 // Package sqlrun runs one SQL statement against a MySQL or PostgreSQL database for the data server.
+// It also holds the Target, Limits, Result and errors the MongoDB runner shares with it.
 // A read runs in a read only transaction that the database itself enforces, on a connection of its
 // own, and is always rolled back. A write runs in a transaction that is committed when it
 // succeeds. Results are bounded by rows, bytes and time.
@@ -33,6 +34,7 @@ type Engine string
 const (
 	MySQL      Engine = "mysql"
 	PostgreSQL Engine = "postgresql"
+	MongoDB    Engine = "mongodb"
 )
 
 // TLSMode is how the connection is protected.
@@ -56,6 +58,14 @@ type Target struct {
 	User     string  `json:"user"`
 	Database string  `json:"database"`
 	TLS      TLSMode `json:"tls"`
+
+	// The rest is for MongoDB. Host and Port are the first member, so every engine has them to show.
+	// Members lists every member as host:port, ReplicaSet is the set's name, Direct talks to one
+	// member without discovering the others, and AuthSource is the database the user lives in.
+	Members    []string `json:"members,omitempty"`
+	ReplicaSet string   `json:"replicaSet,omitempty"`
+	Direct     bool     `json:"directConnection,omitempty"`
+	AuthSource string   `json:"authSource,omitempty"`
 }
 
 // Limits bound one statement.
@@ -413,21 +423,21 @@ func classifyQuery(err error, password string) error {
 			return ErrTimeout
 		}
 
-		return &QueryError{Message: scrub(mysqlErr.Message, password)}
+		return &QueryError{Message: Scrub(mysqlErr.Message, password)}
 	case errors.As(err, &pgErr):
 		if pgErr.Code == "57014" {
 			return ErrTimeout
 		}
 
-		return &QueryError{Message: scrub(pgErr.Message, password)}
+		return &QueryError{Message: Scrub(pgErr.Message, password)}
 	default:
 		return &QueryError{Message: "The database did not complete the statement."}
 	}
 }
 
-// scrub takes the password out of a message the database wrote, in case the statement or an error
+// Scrub takes the password out of a message the database wrote, in case the statement or an error
 // path put it there.
-func scrub(message, password string) string {
+func Scrub(message, password string) string {
 	if password != "" {
 		message = strings.ReplaceAll(message, password, "[removed]")
 	}

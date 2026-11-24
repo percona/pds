@@ -67,6 +67,62 @@ const (
 	SQLTooLong   = "The statement is too long. Send a shorter one."
 )
 
+// What an agent is told when the data server refuses a MongoDB command before it reaches the database.
+const (
+	MongoEmpty               = "Send one MongoDB command as a JSON document, such as {\"find\": \"orders\", \"filter\": {}}."
+	MongoNotJSON             = "The command is not one JSON document. Send one JSON object whose first key is the command name, with nothing around it."
+	MongoDuplicateKey        = "The command repeats a key, so it could be read two ways. Send each key once."
+	MongoTooLong             = "The command is too long. Send a shorter one."
+	MongoTooDeep             = "The command nests documents too deeply. Send a flatter one."
+	MongoNotRead             = "This command is not a read. run_read_query takes find, aggregate, count, distinct, listCollections, listIndexes, listDatabases, collStats and dbStats. run_query also takes insert, update, delete, findAndModify, createIndexes, create and drop, when the sign in allows writes."
+	MongoWriteStage          = "This aggregate has a $out or $merge stage, which writes data, so run_read_query does not run it. run_query runs it when the sign in allows writes."
+	MongoWriteStageMisplaced = "$out and $merge are accepted only as the last stage of the top level pipeline."
+	MongoJavaScript          = "This command runs JavaScript on the database ($where, $function, $accumulator, $code, mapReduce or eval), and the data server never runs that. Rewrite it with query and aggregation operators."
+	MongoAdmin               = "This command manages users, roles, databases, indexes or the server, and the data server never runs it."
+	MongoSystemCollection    = "Collections whose names start with system. hold the database's own users, roles and settings, and the data server never reads or changes them."
+	MongoOtherDatabase       = "The command names a database other than the one this connection uses. Connect with that database and run it there."
+)
+
+// MongoUnknownCommand is what an agent is told when a command is on no list.
+func MongoUnknownCommand(name string) string {
+	return "The data server does not run the command " + cleanName(name) + ". It runs find, aggregate, count, distinct, listCollections, listIndexes, listDatabases, collStats and dbStats, and with the SQL write grant insert, update, delete, findAndModify, createIndexes, create and drop."
+}
+
+// MongoFieldNotAccepted is what an agent is told when a command carries a field the data server does not pass on.
+func MongoFieldNotAccepted(command, field string) string {
+	return "The field " + cleanName(field) + " is not accepted in " + cleanName(command) + ". Send only the fields the command documents for reading or changing data."
+}
+
+// MongoStageNotAccepted is what an agent is told when an aggregation stage is on no list.
+func MongoStageNotAccepted(stage string) string {
+	return "The aggregation stage " + cleanName(stage) + " is not one the data server runs. Use the stages that read and reshape documents, such as $match, $project, $group, $sort, $limit, $lookup and $facet."
+}
+
+// MongoBadShape is what an agent is told when a command is not built the way MongoDB expects.
+func MongoBadShape(command, what string) string {
+	return "The command " + cleanName(command) + " is not built correctly: " + what + "."
+}
+
+// cleanName keeps a name the agent sent to the characters one can hold, because it is repeated
+// back to the agent in a sentence.
+func cleanName(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '$', r == '_', r == '.', r == '-':
+			b.WriteRune(r)
+		}
+		if b.Len() >= 64 {
+			break
+		}
+	}
+	if b.Len() == 0 {
+		return "(unnamed)"
+	}
+
+	return b.String()
+}
+
 // What an agent is told by the data server. Each one says what to do next.
 const (
 	DataNeedsLogin       = "This computer is not signed in to the control plane. Ask the user to run pds-mcp login --passwords in a terminal, then try again."
@@ -85,7 +141,7 @@ const (
 	NoPublicAddress      = "This computer's public address could not be found. Look it up another way and use it as address/32."
 	NameTheDatabase      = "The credential does not name a database. Pass database with the name to use."
 	BadCredential        = "The control plane gave a credential the data server could not use."
-	UnknownEngine        = "Only MySQL and PostgreSQL databases are supported."
+	UnknownEngine        = "Only MySQL, PostgreSQL and MongoDB databases are supported."
 	BadInput             = "The input is not valid. Check the database id, which looks like environment/namespace.name, and the other values."
 	EnvBadPath           = "The path has to be an env file inside the working directory, such as .env or .env.local."
 	EnvSymlink           = "That path is a symbolic link, and the data server does not write through links."
@@ -190,5 +246,9 @@ func All() []string {
 		EnvNotWritten, EnvNeedsConfirmation, EnvConfirm(".env", "DB_PASSWORD", true), EnvNotConfirmed, EnvNote, DataUnreadable, QueryFailed, DatabaseMissing("shop"), AccessAdvice, DataUsage, LoginNarrower(true, true), LoginNarrower(true, false),
 		LoginNarrower(false, true),
 		SQLEmpty, SQLMultiple, SQLNotRead, SQLForbidden, SQLTooLong,
+		MongoEmpty, MongoNotJSON, MongoDuplicateKey, MongoTooLong, MongoTooDeep, MongoNotRead, MongoWriteStage,
+		MongoWriteStageMisplaced, MongoJavaScript, MongoAdmin, MongoSystemCollection, MongoOtherDatabase,
+		MongoUnknownCommand("createUser"), MongoFieldNotAccepted("find", "tailable"), MongoStageNotAccepted("$currentOp"),
+		MongoBadShape("find", "filter has to be a document"),
 	}
 }
