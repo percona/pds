@@ -113,6 +113,31 @@ describe("ScaleDialog", () => {
     ).toBeInTheDocument();
   });
 
+  it("tells a MongoDB database that loses members that their storage stays", async () => {
+    renderDialog({
+      database: createMockDatabase({ ...database, engine: "mongodb", members: 3 }),
+    });
+
+    expect(screen.queryByText(/Storage of the removed members/)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("radio", { name: "1 member" }));
+
+    expect(
+      await screen.findByText(
+        "Storage of the removed members stays until the database is deleted.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says nothing about removed storage for a MySQL database", async () => {
+    renderDialog({ database: createMockDatabase({ ...database, members: 3 }) });
+
+    await userEvent.click(screen.getByRole("radio", { name: "1 member" }));
+
+    await screen.findByText("One member. A restart is downtime.");
+    expect(screen.queryByText(/Storage of the removed members/)).not.toBeInTheDocument();
+  });
+
   it("sends only the fields that moved", async () => {
     const fetchMock = stubScale(jsonResponse({ ...database, members: 3 }));
     renderDialog();

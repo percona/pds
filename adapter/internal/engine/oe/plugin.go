@@ -105,6 +105,10 @@ type Flavor struct {
 	// and its backup section alone: no proxy and no monitoring component. The
 	// hub writes nothing for a part of the Instance until PDS serves it.
 	EngineOnly bool
+	// ProvisioningIsUpdating is a provider that reports Provisioning for every
+	// change it makes, not only for the first start. A database it has
+	// reported Ready is then Updating while it reports Provisioning.
+	ProvisioningIsUpdating bool
 	// FinishOnly is a provider whose Backup reports only when it finished.
 	// Its creation time can precede the real start by minutes, so the start
 	// is never shown and no duration is worked out.
@@ -147,8 +151,9 @@ var MongoDB = Flavor{
 	URIScheme:   "mongodb",
 	ReplicaSet:  "rs0",
 
-	EngineOnly: true,
-	FinishOnly: true,
+	EngineOnly:             true,
+	ProvisioningIsUpdating: true,
+	FinishOnly:             true,
 }
 
 // EverestClient is the slice of the Everest API this plugin depends on.
@@ -166,6 +171,7 @@ type EverestClient interface {
 type Plugin struct {
 	everest EverestClient
 	flavor  Flavor
+	ready   readyMemory
 
 	namespace     string
 	backupStorage string
@@ -259,11 +265,13 @@ func (p *Plugin) List(ctx context.Context) ([]engine.Instance, error) {
 	}
 
 	out := make([]engine.Instance, 0, len(found))
+	listed := map[string]bool{}
 	for _, inst := range found {
 		if !p.owns(&inst) {
 			continue
 		}
 		item := p.toInstance(&inst, p.namespace)
+		listed[item.ID] = true
 		if err := p.attachConnection(ctx, &item, &inst); err != nil {
 			return nil, err
 		}
@@ -273,6 +281,9 @@ func (p *Plugin) List(ctx context.Context) ([]engine.Instance, error) {
 		out = append(out, item)
 	}
 
+	if p.flavor.ProvisioningIsUpdating {
+		p.ready.keepOnly(listed)
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 
 	return out, nil
@@ -320,7 +331,7 @@ func (p *Plugin) Scale(ctx context.Context, id string, in engine.ScaleInput) err
 	if in.Replicas != nil {
 		eng.Replicas = everest.Ptr(int32(*in.Replicas))
 		proxy := current.ProxyComponent()
-		if proxy.Type != "" || proxy.Replicas != nil {
+		if !p.flavor.EngineOnly && (proxy.Type != "" || proxy.Replicas != nil) {
 			proxy.Replicas = everest.Ptr(proxyReplicasFor(int32(*in.Replicas)))
 			current.SetProxyComponent(proxy)
 		}

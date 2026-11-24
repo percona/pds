@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { memberChoices, scaleChanges } from "./scale";
+import { memberChoices, removedMembersNote, scaleChanges } from "./scale";
 
 const current = { cpu: 1, memory: 2, storage: 20, replicas: 1 };
 
@@ -29,5 +29,24 @@ describe("memberChoices", () => {
   // odd number of them. The picker must not offer a count that is refused.
   it("offers one member and the odd counts that hold quorum", () => {
     expect(memberChoices).toEqual([1, 3, 5]);
+  });
+});
+
+describe("removedMembersNote", () => {
+  const sentence = "Storage of the removed members stays until the database is deleted.";
+
+  it("tells a MongoDB database that loses members that their storage stays", () => {
+    expect(removedMembersNote("mongodb", 3, 1)).toBe(sentence);
+    expect(removedMembersNote("mongodb", 5, 3)).toBe(sentence);
+  });
+
+  it("says nothing when no members are removed", () => {
+    expect(removedMembersNote("mongodb", 1, 3)).toBeNull();
+    expect(removedMembersNote("mongodb", 3, 3)).toBeNull();
+  });
+
+  it("says nothing for an engine that gives its storage back", () => {
+    expect(removedMembersNote("mysql", 3, 1)).toBeNull();
+    expect(removedMembersNote("postgresql", 3, 1)).toBeNull();
   });
 });

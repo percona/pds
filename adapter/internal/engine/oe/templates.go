@@ -61,13 +61,14 @@ func (p *Plugin) toInstance(in *everest.Instance, fallbackNamespace string) engi
 	}
 
 	eng := in.EngineComponent()
+	id := instanceID(namespace, in.Metadata.Name)
 	out := engine.Instance{
-		ID:        instanceID(namespace, in.Metadata.Name),
+		ID:        id,
 		Name:      in.Metadata.Name,
 		Engine:    p.flavor.ID,
 		Profile:   profile,
 		Namespace: namespace,
-		Status:    toStatus(in.Status),
+		Status:    p.settleUpdating(id, in.Status, toStatus(in.Status)),
 	}
 	if in.Metadata.CreationTimestamp != nil {
 		out.CreatedAt = in.Metadata.CreationTimestamp.UTC()

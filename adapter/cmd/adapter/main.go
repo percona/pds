@@ -173,6 +173,11 @@ func run() error {
 			opts.Seed = func(ctx context.Context, namespace, source, backupID, name string) error {
 				return postgresql.Seed(ctx, environment, namespace, source, backupID, name)
 			}
+			opts.Volumes = func(ctx context.Context, items []engine.Instance) {
+				if err := mongodb.ReportVolumeSizes(ctx, environment, items); err != nil {
+					logger.WarnContext(ctx, "volume size read failed", slog.String("cause", err.Error()))
+				}
+			}
 			opts.Retain = backupRetention(cfg, everestClient, environment)
 			opts.Credentials = newUsersSecrets(environment)
 			opts.Support = environment

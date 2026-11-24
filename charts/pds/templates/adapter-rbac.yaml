@@ -255,6 +255,48 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "pds.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
+---
+# The size a MongoDB database's volumes really have. When a storage class
+# refuses to expand a volume the provider keeps reporting the size that was
+# asked for and stays Ready, while the operator puts its own object back. The
+# agent reads that object by name, so get is all it takes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-database-volumes
+  namespace: {{ $dbns }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: adapter
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+  - apiGroups: ["psmdb.percona.com"]
+    resources: ["perconaservermongodbs"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-database-volumes
+  namespace: {{ $dbns }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: adapter
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-database-volumes
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "pds.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
 {{- end }}
 ---
 # CPU and memory for each database. metrics-server answers a namespaced
