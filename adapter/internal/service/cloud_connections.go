@@ -22,7 +22,7 @@ import (
 // CloudTemplateVersion is the version of the bootstrap template this release
 // ships, and the lowest version a connection's stack may report. A stack that
 // reports less is Out of date.
-const CloudTemplateVersion = 2
+const CloudTemplateVersion = 3
 
 // cloudTokenTTL is how long a connect token lives. A role chained session lasts
 // an hour at most, so the script's whole run fits in it.
