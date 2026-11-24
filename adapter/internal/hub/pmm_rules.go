@@ -25,13 +25,19 @@ const (
 	MySQLDataDir = "/var/lib/mysql"
 	// PostgreSQLDataDir is where the PostgreSQL provider mounts it.
 	PostgreSQLDataDir = "/pgdata"
+	// MongoDBDataDir is where the MongoDB provider mounts the data volume.
+	MongoDBDataDir = "/data/db"
+	// MongoDBReplicaSet is the replica set name the MongoDB provider gives a
+	// database, which its member pods carry: <database>-rs0-<n>.
+	MongoDBReplicaSet = "rs0"
 	// MemberNodeSuffix is what a member's node_name ends with after the
 	// database name, as a regex with no capture group: -pxc-<n> for a PXC
-	// member, -<instance set>-<suffix>-<n> for a PostgreSQL one. The suffix is
-	// the four random characters the PostgreSQL operator names the StatefulSet
-	// with. It is held to four so the pxc-0 and haproxy-0 pods of a database
-	// named orders-instance2 do not read as members of orders.
-	MemberNodeSuffix = `-(?:pxc-[0-9]+|instance[0-9]*-[a-z0-9]{4}-[0-9]+)`
+	// member, -<instance set>-<suffix>-<n> for a PostgreSQL one, -rs0-<n> for a
+	// MongoDB one. The suffix is the four random characters the PostgreSQL
+	// operator names the StatefulSet with. It is held to four so the pxc-0 and
+	// haproxy-0 pods of a database named orders-instance2 do not read as
+	// members of orders.
+	MemberNodeSuffix = `-(?:pxc-[0-9]+|instance[0-9]*-[a-z0-9]{4}-[0-9]+|` + MongoDBReplicaSet + `-[0-9]+)`
 )
 
 // byDatabase derives the namespace and cluster labels from node_name for a

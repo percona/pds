@@ -109,7 +109,7 @@ func (m *Metrics) Latest(ctx context.Context, database, namespace, engine string
 
 	reading := &MonitoringReading{}
 	for _, definition := range metricQueries {
-		series, err := m.query(ctx, window, expand(queries.exprFor(definition), namespace, cluster, rate, queries.dataDir), step)
+		series, err := m.queryChart(ctx, window, queries, definition, queryTarget{namespace, cluster, rate}, step)
 		if err != nil {
 			if code, ok := monitoringNotUp(err); ok {
 				return &MonitoringReading{Pending: code}, nil

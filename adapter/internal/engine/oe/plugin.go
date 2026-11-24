@@ -102,8 +102,9 @@ type Flavor struct {
 	// a database without a schedule keeps a storage its manifest can list.
 	DropsIdleBackupStorage bool
 	// EngineOnly is a provider whose Instance carries the engine component
-	// and its backup section alone: no proxy and no monitoring component. The
-	// hub writes nothing for a part of the Instance until PDS serves it.
+	// and its backup section, and a monitoring component where the environment
+	// has one: no proxy. The hub writes nothing for a part of the Instance
+	// until PDS serves it.
 	EngineOnly bool
 	// ProvisioningIsUpdating is a provider that reports Provisioning for every
 	// change it makes, not only for the first start. A database it has

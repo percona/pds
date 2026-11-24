@@ -174,10 +174,9 @@ func TestInstanceYAMLNeverEnablesBackupsWithoutAStorage(t *testing.T) {
 	}
 }
 
-// The MongoDB provider reconciles an engine component alone. A proxy or a pmm
-// component is a part of the Instance it has no use for, and makes it refuse
-// the Instance.
-func TestInstanceYAMLWritesAMongoDBReplicaSetWithTheEngineComponentOnly(t *testing.T) {
+// A MongoDB replica set has no proxy, and carries the pmm component only when
+// the environment has a monitoring config to point it at.
+func TestInstanceYAMLWritesAMongoDBReplicaSetWithEngineAndMonitoring(t *testing.T) {
 	targets := environmentTargets{BackupStorage: "s3", MonitoringConfig: "pmm"}
 	for profile, members := range map[string]int32{oe.ProfileDev: 1, oe.ProfileStaging: 3, oe.ProfileProd: 3} {
 		t.Run(profile, func(t *testing.T) {
@@ -194,7 +193,11 @@ func TestInstanceYAMLWritesAMongoDBReplicaSetWithTheEngineComponentOnly(t *testi
 			assert.Equal(t, "replicaSet", doc.Spec.Topology.Type)
 			assert.Equal(t, "mongodb", doc.Metadata.Labels[oe.LabelEngine])
 			assert.Equal(t, "pds-mongodb-"+profile, doc.Metadata.Annotations["openeverest.io/instance-preset"])
-			require.Len(t, doc.Spec.Components, 1)
+			require.Len(t, doc.Spec.Components, 2)
+			assert.NotContains(t, doc.Spec.Components, everest.ComponentProxy)
+			monitoring := doc.Spec.Components[everest.ComponentMonitoring]
+			assert.Equal(t, everest.ComponentTypePMM, monitoring.Type)
+			assert.JSONEq(t, `{"monitoringConfigName":"pmm"}`, string(monitoring.Parameters))
 			engineSpec := doc.Spec.Components[everest.ComponentEngine]
 			assert.Empty(t, engineSpec.Type)
 			assert.Equal(t, members, engineSpec.ReplicaCount())
@@ -344,4 +347,16 @@ func TestInstanceYAMLWritesTheDefaultSchedule(t *testing.T) {
 	require.NotNil(t, doc.Spec.Backup)
 	assert.Equal(t, everest.BackupClassPXC, doc.Spec.Backup.ClassRef.Name)
 	assert.Equal(t, []everest.InstanceBackupSchedule{oe.ScheduleSpec(everest.ProviderPXC, engine.DefaultSchedule())}, doc.Spec.Backup.Storages[0].Schedules)
+}
+
+func TestInstanceYAMLLeavesMongoDBMonitoringOffWithoutAConfig(t *testing.T) {
+	body, _, err := instanceYAML("orders", "pds", "spoke-a", oe.MongoDB, oe.ProfileDev, environmentTargets{BackupStorage: "s3"}, engine.ResourceOverrides{}, engine.Exposure{})
+	require.NoError(t, err)
+
+	var doc struct {
+		Spec everest.InstanceSpec `json:"spec"`
+	}
+	require.NoError(t, yaml.Unmarshal(body, &doc))
+	require.Len(t, doc.Spec.Components, 1)
+	assert.NotContains(t, doc.Spec.Components, everest.ComponentMonitoring)
 }
