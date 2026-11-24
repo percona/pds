@@ -2,7 +2,7 @@ import { Copy, Lock, Plug } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
 import { Button, Stage, Window } from "@/vendor/stageshow";
 import { usePageTheme } from "@/lib/page-theme";
-import { environmentName } from "@/lib/configurator";
+import { engineNames, environmentName } from "@/lib/configurator";
 import { Pill } from "./faux-console";
 
 export type OperationId = "scale" | "backups" | "connect" | "alerts" | "agents" | "support";
@@ -266,8 +266,8 @@ const stills: Record<OperationId, { label: string; height: number; render: () =>
               Claude Code plugin
             </p>
             <p className="fx-strong" style={{ fontSize: 12 }}>
-              Run this in a terminal. The plugin adds PDS and a local data server for MySQL and
-              PostgreSQL.
+              Run this in a terminal. The plugin adds PDS and a local data server for{" "}
+              {engineNames("and")}.
             </p>
             <p className="fx-pre">
               {"claude plugin marketplace add percona/pds\nclaude plugin install pds@percona-pds"}

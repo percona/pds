@@ -2,6 +2,7 @@ import { Bot, ExternalLink } from "lucide-react";
 import openeverestLogo from "@/assets/integrations/openeverest.png";
 import { SectionHeading } from "@/components/section-heading";
 import { Badge } from "@/components/ui/badge";
+import { engineNames } from "@/lib/configurator";
 import { sectionIds } from "@/lib/site";
 import { cn } from "@/lib/utils";
 import { AgentTerminal } from "./agent-terminal";
@@ -55,7 +56,7 @@ export function Proof() {
               <a href="https://www.percona.com/cloud-native/" rel="noreferrer" className={textLink}>
                 Percona Operators
               </a>{" "}
-              for MySQL and PostgreSQL, and{" "}
+              for {engineNames("and")}, and{" "}
               <a href="https://www.percona.com/monitoring/" rel="noreferrer" className={textLink}>
                 PMM
               </a>{" "}

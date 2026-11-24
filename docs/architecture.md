@@ -518,14 +518,14 @@ environment needs an update to get the provider. MySQL and PostgreSQL need no
 such mark. The hub also refuses, before it writes anything, a MongoDB name over
 22 characters, which the provider would only refuse later with a Failed phase
 and no message, and any access or allowed addresses, because a MongoDB
-database has no access from outside the Kubernetes cluster yet. The API accepts
-the engine, while the engine picker and the MCP engine list leave it out. The
-console's picker reads `enabled` in `apps/ui/src/features/databases/engines.ts`
-and the MCP registry reads `MongoDBEnabled` in `adapter/internal/mcp/engines.go`:
-both are off, and one list in the registry feeds the create tool's engine enum,
-its name limits, the prompt argument check and the guidance about MongoDB. The
-tools that work on a database that exists answer for a MongoDB one with the
-switch off. A support ticket names the engine as support reads it, so one about
+database has no access from outside the Kubernetes cluster yet. The engine
+picker and the MCP engine list offer it. The console's picker reads `enabled`
+in `apps/ui/src/features/databases/engines.ts` and the MCP registry reads
+`MongoDBEnabled` in `adapter/internal/mcp/engines.go`: both are on, and one list
+in the registry feeds the create tool's engine enum, its name limits, the prompt
+argument check, the Chat's role prompt and the guidance about MongoDB, which
+the `pds` plugin's skill is generated from. The tools that work on a database
+that exists answer for a MongoDB one whatever the switch says. A support ticket names the engine as support reads it, so one about
 a MongoDB database says MongoDB and is filed under that technology.
 
 Scale takes the same member counts (1, 3 or 5), bounds and busy rule as the
@@ -548,6 +548,13 @@ Its Role in the database namespace grants `get` on `perconaservermongodbs` and
 nothing else. Scaling down leaves the volumes of the removed members until the
 database is deleted, and scaling up again reuses them, which the scale dialog
 says.
+
+A MongoDB backup is logical only, and it is deleted with the database: deleting
+the database deletes its backups from the backup storage. The engine version is
+the provider's default, and the console shows what the provider reports. Each
+member with backup on reserves an extra 300m CPU and 1G of memory for the
+backup agent, so a Dev member needs about 1.3 CPU and 2Gi, and a 3 member set
+needs 3 schedulable nodes.
 
 A MongoDB Instance is created with backups on and a storage, because turning
 them on in a running database restarts every member. Staging and Prod carry the

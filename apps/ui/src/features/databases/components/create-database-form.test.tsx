@@ -108,11 +108,12 @@ describe("CreateDatabaseForm", () => {
     );
   });
 
-  it("offers MySQL and PostgreSQL and picks MySQL first", () => {
+  it("offers MySQL, PostgreSQL and MongoDB and picks MySQL first", () => {
     renderWithProviders(<CreateDatabaseForm environment="spoke-a" onSubmit={vi.fn()} />);
 
     expect(screen.getByRole("radio", { name: /MySQL/ })).toBeChecked();
     expect(screen.getByRole("radio", { name: /PostgreSQL/ })).not.toBeChecked();
+    expect(screen.getByRole("radio", { name: /MongoDB/ })).not.toBeChecked();
     expect(screen.getByText("Not sure which to pick?")).toBeInTheDocument();
   });
 
@@ -215,14 +216,14 @@ describe("CreateDatabaseForm", () => {
     expect(screen.getByText("A database named `orders-dev` already exists.")).toBeInTheDocument();
   });
 
-  it("describes both engines", () => {
+  it("describes the engines", () => {
     renderWithProviders(<CreateDatabaseForm environment="spoke-a" onSubmit={vi.fn()} />);
 
     expect(screen.getByText("The usual choice for existing MySQL apps.")).toBeInTheDocument();
     expect(screen.getByText("The usual choice for existing PostgreSQL apps.")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Percona Database Service can run either engine. Match the one your application already uses.",
+        "Percona Database Service can run any of these engines. Match the one your application already uses.",
       ),
     ).toBeInTheDocument();
   });

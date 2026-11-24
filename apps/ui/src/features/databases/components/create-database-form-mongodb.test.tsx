@@ -4,17 +4,6 @@ import { describe, expect, it, vi } from "vitest";
 import { CreateDatabaseForm } from "@/features/databases";
 import { renderWithProviders } from "@/test/utils";
 
-// MongoDB stays out of the picker until it is switched on, so these tests
-// switch it on the way the registry will.
-vi.mock("@/features/databases/engines", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@/features/databases/engines")>();
-
-  return {
-    ...original,
-    visibleEngines: original.engines.map((engine) => ({ ...engine, enabled: true })),
-  };
-});
-
 const mongodbNameError =
   "Use 22 characters or fewer for MongoDB. Its members' object names are built from it.";
 
@@ -30,6 +19,11 @@ describe("CreateDatabaseForm with MongoDB offered", () => {
     await userEvent.click(screen.getByRole("radio", { name: /MongoDB/ }));
     expect(screen.queryByRole("radiogroup", { name: "Access" })).not.toBeInTheDocument();
     expect(screen.queryByText("Allowed addresses")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Access from outside the Kubernetes cluster is not available for MongoDB yet.",
+      ),
+    ).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("radio", { name: /MySQL/ }));
     expect(screen.getByRole("radiogroup", { name: "Access" })).toBeInTheDocument();

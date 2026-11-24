@@ -148,12 +148,14 @@ test("a failed create names the step and offers support", async ({ page }) => {
   await expect(page.getByLabel("Description")).not.toContainText("mysql://");
 });
 
-test("create offers MySQL and PostgreSQL", async ({ page }) => {
+test("create offers MySQL, PostgreSQL and MongoDB", async ({ page }) => {
   await page.route("**/api/support/tickets", (route) => route.fulfill({ json: { tickets: [] } }));
   await page.goto("environments/spoke-a/new");
 
   await expect(page.getByTestId("engine-card-mysql")).toBeVisible();
   await expect(page.getByTestId("engine-card-postgresql")).toBeVisible();
+  await expect(page.getByTestId("engine-card-mongodb")).toBeVisible();
+  await expect(page.getByTestId(/^engine-card-/)).toHaveCount(3);
 
   await page.getByTestId("engine-card-postgresql").click();
   await page.getByLabel("Name").fill("reports-dev");

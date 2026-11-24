@@ -10,7 +10,7 @@ describe("index.html meta description", () => {
     expect(description).not.toBe("");
   });
 
-  it.each(["MySQL", "PostgreSQL"])("names %s, as the page does", (engine) => {
+  it.each(["MySQL", "PostgreSQL", "MongoDB"])("names %s, as the page does", (engine) => {
     expect(description).toContain(engine);
   });
 

@@ -72,7 +72,7 @@ describe("DatabasesPage", () => {
 
     expect(await screen.findByText("orders-dev")).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "Databases" })).toBeInTheDocument();
-    expect(screen.getByText("MySQL or PostgreSQL on spoke-a.")).toBeInTheDocument();
+    expect(screen.getByText("MySQL, PostgreSQL, or MongoDB on spoke-a.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Create database" })).toHaveAttribute(
       "href",
       "/environments/spoke-a/new",
@@ -96,7 +96,9 @@ describe("DatabasesPage", () => {
 
     expect(await screen.findByText("No databases yet")).toBeInTheDocument();
     expect(
-      screen.getByText("Create a MySQL or PostgreSQL database on this Kubernetes cluster."),
+      screen.getByText(
+        "Create a MySQL, PostgreSQL, or MongoDB database on this Kubernetes cluster.",
+      ),
     ).toBeInTheDocument();
 
     const create = screen.getAllByRole("link", { name: "Create database" });

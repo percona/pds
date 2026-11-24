@@ -1,6 +1,6 @@
 # Percona Database Service
 
-A customer-hosted control plane for MySQL and PostgreSQL on Kubernetes. People and programs reach it through its HTTP API.
+A customer-hosted control plane for MySQL, PostgreSQL and MongoDB on Kubernetes. People and programs reach it through its HTTP API.
 
 ## Language
 

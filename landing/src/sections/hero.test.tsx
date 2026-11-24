@@ -13,7 +13,7 @@ describe("Hero", () => {
 
     const title = screen.getByRole("heading", { level: 1 });
     expect(words(title.textContent)).toBeLessThanOrEqual(10);
-    expect(title).toHaveTextContent("MySQL and PostgreSQL");
+    expect(title).toHaveTextContent("MySQL, PostgreSQL, and MongoDB");
 
     const sentence = screen.getByText(/creates an Amazon EKS cluster in your AWS account/);
     expect(words(sentence.textContent)).toBeLessThanOrEqual(20);
@@ -36,11 +36,11 @@ describe("Hero", () => {
     expect(screen.getByText(/bootstrap\.sh/)).toBeInTheDocument();
   });
 
-  it("offers both engines and three profiles as radio groups, and fixes where it runs", () => {
+  it("offers three engines and three profiles as radio groups, and fixes where it runs", () => {
     render(<Hero />);
 
     for (const [group, names] of [
-      ["Engine", ["MySQL", "PostgreSQL"]],
+      ["Engine", ["MySQL", "PostgreSQL", "MongoDB"]],
       ["Profile", ["Dev", "Staging", "Prod"]],
     ] as const) {
       const radios = within(screen.getByRole("group", { name: group })).getAllByRole("radio");
@@ -98,6 +98,7 @@ describe("Hero", () => {
     for (const [name, mark] of [
       ["MySQL", /mysql-mark.*\.png/],
       ["PostgreSQL", /postgresql-mark.*\.png/],
+      ["MongoDB", /mongodb-mark.*\.svg|^data:image\/svg\+xml/],
     ] as const) {
       const label = group.getByRole("radio", { name }).closest("label")!;
       expect(label.textContent).toBe(name);
@@ -107,6 +108,6 @@ describe("Hero", () => {
       expect(logo).toHaveAttribute("width", "24");
       expect(logo).toHaveAttribute("height", "24");
     }
-    expect(container.querySelectorAll("fieldset img")).toHaveLength(2);
+    expect(container.querySelectorAll("fieldset img")).toHaveLength(3);
   });
 });

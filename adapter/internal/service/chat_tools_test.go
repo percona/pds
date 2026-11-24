@@ -268,6 +268,7 @@ func TestChatSystemPromptIsTheRegistrysInstructionsAndWhatOnlyTheChatNeeds(t *te
 	assert.Contains(t, system, "<actions>", "how to send a button is the Chat's own")
 	assert.Equal(t, system, completer.calls[1].System, "the prompt is the cached prefix, so no turn changes it")
 	assert.Contains(t, system, "reads only", "a read session is told what it cannot do")
+	assert.Contains(t, system, "operate MySQL, PostgreSQL and MongoDB databases on Kubernetes")
 }
 
 func TestChatCursorIsTaughtTheRegistrysToolsAndTheEmulatedProtocol(t *testing.T) {

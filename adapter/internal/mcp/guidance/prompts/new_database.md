@@ -1,7 +1,7 @@
 ---
 name: new_database
 title: Create a database for an app
-description: Create a MySQL or PostgreSQL database on one environment, decide who can connect, and wait until it is ready.
+description: Create a {{.EngineChoice}} database on one environment, decide who can connect, and wait until it is ready.
 access: change
 arguments:
   - name: engine

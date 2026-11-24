@@ -131,7 +131,7 @@ jobs:
         run: |
           set -euo pipefail
           # The landing page's description is in its index.html, the console's is not.
-          grep -q 'MySQL and PostgreSQL on Amazon EKS in your AWS account' <<<"$(curl -fsS http://127.0.0.1/)"
+          grep -q 'MySQL, PostgreSQL, and MongoDB on Amazon EKS in your AWS account' <<<"$(curl -fsS http://127.0.0.1/)"
           grep -q '<div id="root"' <<<"$(curl -fsS http://127.0.0.1/app/)"
           # Links from before the console moved keep their query.
           location="$(curl -s -o /dev/null -w '%{redirect_url}' 'http://127.0.0.1/claim?token=t')"

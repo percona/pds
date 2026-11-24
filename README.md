@@ -1,13 +1,14 @@
 # Percona Database Service
 
-Percona Database Service (PDS) is a control plane for running MySQL and PostgreSQL on your
+Percona Database Service (PDS) is a control plane for running MySQL, PostgreSQL and MongoDB on your
 own Kubernetes clusters. Platform engineers create, connect, scale, back up,
 restore, monitor and delete databases from one UI, and open Percona support
 cases from the same place. The data stays in your clusters and your backup
 buckets.
 
 PDS is in alpha. There is no backward compatibility yet. It provisions MySQL (Percona XtraDB Cluster) and
-PostgreSQL (Percona Operator for PostgreSQL, behind PgBouncer).
+PostgreSQL (Percona Operator for PostgreSQL, behind PgBouncer) and MongoDB (Percona Server for
+MongoDB, a replica set with no proxy).
 
 ## What it does
 
@@ -33,6 +34,20 @@ PostgreSQL (Percona Operator for PostgreSQL, behind PgBouncer).
 - **Get help**: open and follow Percona support cases (ServiceNow), and chat
   with an assistant using your own Claude or Cursor key.
 
+MongoDB differs from the other two engines in these ways:
+
+- The account is `databaseAdmin`. It reads and writes every database and can manage users and roles.
+- The connection string is plain: `mongodb://<user>:<password>@<every member>/admin?replicaSet=rs0&ssl=false`.
+  The members require a client certificate for TLS, so the connection inside the Kubernetes cluster is
+  not encrypted.
+- Access from outside the Kubernetes cluster is not available yet. The create form and the tools leave
+  access out for MongoDB.
+- A name is at most 22 characters.
+- Backups are logical only, and they are deleted with the database.
+- The engine version is the provider's default.
+- A 3 member set needs 3 schedulable nodes. Each member with backup reserves an extra 300m CPU and 1G of
+  memory, so a Dev member is about 1.3 CPU and 2Gi.
+
 ## How it works
 
 A hub and the environments connected to it. The hub does not run databases.
@@ -56,7 +71,7 @@ Hub and its connected environments
 |-----------|------|
 | UI (`apps/ui`) | React app served by nginx on the hub. It talks to nothing but `/api` on its own origin. |
 | Adapter (`adapter`) | One Go binary. The HTTP role is the hub API: it validates every request, writes desired state, and keeps login, sessions and sealed credentials in its own PostgreSQL. The agent role runs on a connected environment, heartbeats to the hub, and calls OpenEverest there. |
-| [OpenEverest](https://github.com/openeverest/openeverest) | On each connected environment, reconciles Instances into Percona Operator for MySQL and PostgreSQL clusters. The agent calls its REST API with a token it mints itself. |
+| [OpenEverest](https://github.com/openeverest/openeverest) | On each connected environment, reconciles Instances into Percona Operator for MySQL, PostgreSQL and MongoDB clusters. The agent calls its REST API with a token it mints itself. |
 | PMM | Percona Monitoring and Management, on the connected environment. A pmm-client sidecar on each database feeds it. The agent reads metrics and the hub charts those readings. |
 | Helm chart (`charts/pds`) | One release is a hub or a connected environment, in namespace `everest-system`. Databases land in namespace `pds` on the connected environment. |
 

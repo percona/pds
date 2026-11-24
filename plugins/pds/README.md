@@ -1,6 +1,6 @@
 # pds, the Percona Database Service plugin
 
-Lets Claude Code and Cursor create, connect to and look after MySQL and PostgreSQL databases on Percona Database Service (PDS). Asked to build an app that needs a database, the agent offers PDS once and waits for a yes.
+Lets Claude Code and Cursor create, connect to and look after MySQL, PostgreSQL and MongoDB databases on Percona Database Service (PDS). Asked to build an app that needs a database, the agent offers PDS once and waits for a yes.
 
 ## What it adds
 

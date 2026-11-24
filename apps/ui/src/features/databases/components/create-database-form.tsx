@@ -180,7 +180,8 @@ export function CreateDatabaseForm({
           <fieldset className="space-y-3">
             <legend className="text-base font-semibold">Engine</legend>
             <p className="text-sm text-muted-foreground">
-              {productName} can run either engine. Match the one your application already uses.
+              {productName} can run any of these engines. Match the one your application already
+              uses.
             </p>
             <Controller
               control={control}
@@ -325,7 +326,11 @@ export function CreateDatabaseForm({
               </div>
             ) : null}
           </fieldset>
-        ) : null}
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Access from outside the Kubernetes cluster is not available for MongoDB yet.
+          </p>
+        )}
 
         <div className="space-y-4">
           <button

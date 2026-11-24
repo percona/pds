@@ -41,15 +41,17 @@ describe("App", () => {
     expect(screen.queryByRole("heading", { name: /request access/i })).not.toBeInTheDocument();
   });
 
-  it("names both engines outside the pricing table", () => {
+  it("names the three engines outside the pricing table", () => {
     const { container } = render(<App />);
     const pricing = container.querySelector("#pricing");
     const outsidePricing = (container.textContent ?? "").replace(pricing?.textContent ?? "", "");
 
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("MySQL and PostgreSQL");
-    expect(outsidePricing).toContain("MySQL or PostgreSQL on prod-us-west-2");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "MySQL, PostgreSQL, and MongoDB",
+    );
+    expect(outsidePricing).toContain("MySQL, PostgreSQL, or MongoDB on prod-us-west-2");
     expect(outsidePricing).toContain("PostgreSQL");
-    expect(outsidePricing).not.toMatch(/MongoDB/);
+    expect(outsidePricing).toContain("MongoDB");
   });
 
   it("no longer marks PostgreSQL as coming in the pricing table", () => {

@@ -190,7 +190,7 @@ and the backup store are off. Use Connect an environment after it is up.
   `adapter.database.operator.enabled=false`. The in-cluster database is created
   by a hook, so `helm rollback` does not roll it back, and it has no
   NetworkPolicy.
-- A hub serves databases (MySQL and PostgreSQL), environments, backups, connections,
+- A hub serves databases (MySQL, PostgreSQL and MongoDB), environments, backups, connections,
   support, chat with the Claude and Cursor keys an Organization pastes, activity
   and metrics, which come
   from the readings each agent posts.
@@ -813,5 +813,6 @@ installs the release it carries without the checks.
 | Sign in ends at "Signing in did not finish" | The issuer's Google or GitHub connection is not turned on for the adapter's client, or the callback URL does not match `adapter.hub.publicURL`. A quick tunnel changes address when its pod restarts |
 | The MCP server lists no environments for an admin | Without `PDS_TEAM` it acts in the person's own Team. Set `PDS_TEAM` to the Team that holds them |
 | Staging or Prod stuck in Creating | Fewer than three schedulable nodes on the connected environment |
+| A MongoDB database stays in Creating | The environment lacks CPU or memory: a Dev member with backup needs about 1.3 CPU and 2Gi, and a 3 member set needs 3 schedulable nodes |
 | Scale refused | A backup is Pending or Running. One stuck in Pending blocks scaling until it is deleted with kubectl; the API has no backup delete |
 | Support actions missing | The ServiceNow URL (`SN_URL`) or keys are absent, so the support routes answer 501. Paste the client token on the Connections panel. There is no platform status page |

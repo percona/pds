@@ -52,11 +52,23 @@ func TestTheEngineListOffersMongoDBOnlyWhenTheSwitchIsOn(t *testing.T) {
 	}
 }
 
-func TestTheSwitchIsOffByDefault(t *testing.T) {
-	assert.False(t, mcp.MongoDBEnabled)
+func TestTheSwitchIsOnByDefault(t *testing.T) {
+	assert.True(t, mcp.MongoDBEnabled)
 	_, properties := createTool(t, connectAt(t, nil, auth.AccessChange))
 
-	assert.Equal(t, []any{"mysql", "postgresql"}, properties["engine"].(map[string]any)["enum"])
+	assert.Equal(t, []any{"mysql", "postgresql", "mongodb"}, properties["engine"].(map[string]any)["enum"])
+	assert.Equal(t, "MySQL, PostgreSQL and MongoDB", mcp.OfferedEngines())
+}
+
+func TestTheNewDatabasePromptDescriptionNamesTheOfferedEngines(t *testing.T) {
+	for _, prompt := range listedPrompts(t, connectAt(t, nil, auth.AccessChange)) {
+		if prompt.Name == "new_database" {
+			assert.Contains(t, prompt.Description, "Create a MySQL, PostgreSQL or MongoDB database")
+
+			return
+		}
+	}
+	t.Fatal("new_database is not listed")
 }
 
 func TestTheGuidanceSaysWhatDiffersForMongoDBOnlyWhenTheSwitchIsOn(t *testing.T) {
@@ -134,7 +146,7 @@ func TestWithTheSwitchOnAMongoDBNameOf23CharactersIsRefusedWithTheHubsSentence(t
 
 func TestWithTheSwitchOffTheCreateToolRefusesMongoDB(t *testing.T) {
 	world := newTeamWorld(t)
-	session := connectAs(t, world.srv, asChangeDelete(ann), world.logs.logger())
+	session := connectAs(t, world.srv, asChangeDelete(ann), world.logs.logger(), mcp.WithMongoDB(false))
 
 	res := callTool(t, session, "create_database", map[string]any{
 		"engine": "mongodb", "name": "orders", "environment": "acme-env", "profile": "dev",

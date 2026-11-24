@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import {
+  engines,
   parseArgs,
   parseGoTestJson,
   parseSSE,
@@ -138,6 +139,15 @@ describe("parseArgs", () => {
     assert.equal(o.url, undefined);
   });
 
+  it("takes each engine the registry offers and no other", () => {
+    assert.deepEqual(engines, ["mysql", "postgresql", "mongodb"]);
+    for (const engine of engines) assert.equal(parseArgs(["--engine", engine]).engine, engine);
+    assert.throws(
+      () => parseArgs(["--engine", "oracle"]),
+      /--engine is mysql, postgresql or mongodb/,
+    );
+  });
+
   it("rejects an option it does not know, and a key given as an option", () => {
     assert.throws(() => parseArgs(["--nope"]), /unknown option/);
     assert.throws(() => parseArgs(["--api-key", "x"]), /unknown option/);
@@ -171,6 +181,16 @@ describe("scanSecrets", () => {
     assert.deepEqual(scanSecrets("postgres://app:s3cretpw@db.example:5432/app", []), [
       "a connection string with a password",
     ]);
+  });
+
+  it("finds a MongoDB connection string with a password", () => {
+    assert.deepEqual(
+      scanSecrets(
+        "mongodb://databaseAdmin:s3cretpw@a.pds:27017,b.pds:27017/admin?replicaSet=rs0",
+        [],
+      ),
+      ["a connection string with a password"],
+    );
   });
 
   it("lets a masked connection string and plain prose through", () => {

@@ -41,12 +41,13 @@ describe("Pricing", () => {
     expect(within(table).getAllByText("Not included").length).toBeGreaterThan(0);
   });
 
-  it("lists both engines without a soon badge", () => {
+  it("lists the three engines without a soon badge", () => {
     render(<Pricing />);
     const engines = screen.getByRole("row", { name: /Database engines/ });
 
     expect(engines).toHaveTextContent("MySQL");
     expect(engines).toHaveTextContent("PostgreSQL");
+    expect(engines).toHaveTextContent("MongoDB");
     expect(engines).not.toHaveTextContent("Soon");
   });
 });

@@ -3,6 +3,7 @@ import { Fragment, type ReactNode } from "react";
 import { SectionHeading } from "@/components/section-heading";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
+import { engines } from "@/lib/configurator";
 import { consoleUrl, sectionIds } from "@/lib/site";
 import { cn } from "@/lib/utils";
 
@@ -28,16 +29,16 @@ const included = (value: string, options: { soon?: boolean; note?: string } = {}
   note: options.note,
 });
 
-const engines: Value = {
+const engineValue: Value = {
   kind: "text",
-  lines: [{ text: "MySQL" }, { text: "PostgreSQL" }],
+  lines: engines.map(({ label }) => ({ text: label })),
 };
 
 const groups: { title: string; rows: Row[] }[] = [
   {
     title: "Platform",
     rows: [
-      { label: "Database engines", yourself: engines, us: engines },
+      { label: "Database engines", yourself: engineValue, us: engineValue },
       {
         label: "Provisioning templates",
         yourself: text("Dev / Staging / Prod"),
