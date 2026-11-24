@@ -1571,6 +1571,23 @@ func (s *Service) SetBackupSchedule(ctx context.Context, id string, in *engine.S
 	return result, nil
 }
 
+// assignNewRepoLocked claims the repository of an environment the inventory does
+// not list yet, so whichever writes to Git first, the join or a managed
+// environment's release, settles the name the other uses. It reports whether the
+// inventory listed the environment. The caller holds the environment's lock.
+func (s *Service) assignNewRepoLocked(ctx context.Context, name string) (known bool, err error) {
+	if _, known = s.inv.Get(name, s.now()); known {
+		return true, nil
+	}
+	if assigner, ok := s.git.(repoAssigner); ok {
+		if err := assigner.Assign(ctx, name); err != nil {
+			return false, fmt.Errorf("%w: %w", ErrGitHost, err)
+		}
+	}
+
+	return false, nil
+}
+
 // IssueJoin mints a token bound to one environment name and writes empty Flux
 // kustomize dirs so the spoke can pull before the first create. The environment
 // is registered so a hub restart still lists it as unreachable until a beat.
@@ -1583,13 +1600,9 @@ func (s *Service) IssueJoin(ctx context.Context, name string) (string, error) {
 	defer s.life.Unlock()
 	unlock := s.spokes.lock(name)
 	defer unlock()
-	_, alreadyKnown := s.inv.Get(name, s.now())
-	if !alreadyKnown {
-		if assigner, ok := s.git.(repoAssigner); ok {
-			if err := assigner.Assign(ctx, name); err != nil {
-				return "", fmt.Errorf("%w: %w", ErrGitHost, err)
-			}
-		}
+	alreadyKnown, err := s.assignNewRepoLocked(ctx, name)
+	if err != nil {
+		return "", err
 	}
 	if s.git != nil {
 		if err := s.git.EnsureRepo(ctx, name); err != nil {

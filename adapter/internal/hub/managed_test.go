@@ -77,6 +77,65 @@ func TestEnrollManagedRefusesAnInvalidName(t *testing.T) {
 	assert.ErrorIs(t, err, hub.ErrInvalidEnvironment)
 }
 
+// keyedFiles is a GitHub that also holds the deploy keys of each repository.
+type keyedFiles struct {
+	memFiles
+	keys map[string][]string
+}
+
+func (k *keyedFiles) EnsureCloneKey(ctx context.Context, repo string) (string, string, error) {
+	const pub = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAItesthub pds-flux"
+	if err := k.EnsureDeployKey(ctx, repo, pub); err != nil {
+		return "", "", err
+	}
+
+	return "-----BEGIN OPENSSH PRIVATE KEY-----\ntest\n-----END OPENSSH PRIVATE KEY-----\n", pub, nil
+}
+
+func (k *keyedFiles) EnsureDeployKey(ctx context.Context, repo, pub string) error {
+	if err := k.EnsureRepo(ctx, repo); err != nil {
+		return err
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.keys == nil {
+		k.keys = map[string][]string{}
+	}
+	k.keys[repo] = append(k.keys[repo], pub)
+
+	return nil
+}
+
+func (k *keyedFiles) RevokeCloneKey(_ context.Context, repo string) error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	delete(k.keys, repo)
+
+	return nil
+}
+
+// A managed environment's release is written before it joins, so the write is
+// the first to need its repository. Both must use the one its Team claims, or
+// Flux clones a repository that does not hold the release.
+func TestTheReleaseAndTheJoinOfANewManagedEnvironmentShareItsClaimedRepository(t *testing.T) {
+	ctx := context.Background()
+	host := &keyedFiles{}
+	files := claimingTeamGit(host, &memClaims{}, 1, "acme-web")
+	tokens := hub.NewTokenStore(hub.NewSecretTokenPersist(&memKV{}, "everest-system", "pds-join-tokens"), 0)
+	svc := hub.NewService(hub.NewGitHubStore(files), hub.NewInventory(time.Minute),
+		hub.Options{Namespace: "pds", Tokens: tokens, GitHost: files})
+	release := "clusters/byoc/platform/pds/helmrelease.yaml"
+
+	require.NoError(t, svc.CommitFiles(ctx, "byoc", map[string][]byte{release: []byte("kind: HelmRelease\n")}, "release"))
+	enrolled, err := svc.EnrollManaged(ctx, "byoc")
+	require.NoError(t, err)
+
+	assert.Equal(t, "acme-web-byoc", enrolled.Repo)
+	assert.Contains(t, host.repos["acme-web-byoc"], release, "the release is where Flux clones")
+	assert.NotEmpty(t, host.keys["acme-web-byoc"], "Flux may clone it")
+	assert.NotContains(t, host.repos, "byoc", "nothing is written under the bare name")
+}
+
 func TestCommitFilesWritesIntoTheEnvironmentsTree(t *testing.T) {
 	ctx := context.Background()
 	svc, store := managedHub(t)

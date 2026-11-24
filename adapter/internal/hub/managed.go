@@ -67,6 +67,9 @@ func (s *Service) CommitFiles(ctx context.Context, environment string, files map
 	defer s.life.Unlock()
 	unlock := s.spokes.lock(environment)
 	defer unlock()
+	if _, err := s.assignNewRepoLocked(ctx, environment); err != nil {
+		return err
+	}
 
 	if err := s.store.Write(ctx, files, message); err != nil {
 		return fmt.Errorf("%w: %w", ErrGitHost, err)
