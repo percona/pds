@@ -334,6 +334,30 @@ func TestTheServiceLinkedRolesItMayCreateAreNamedNotOpen(t *testing.T) {
 	assert.True(t, found)
 }
 
+// EKS reads a service-linked role to see whether it exists before it asks for
+// one, so the service role may read exactly the ones it may have made.
+func TestTheServiceRoleMayReadTheServiceLinkedRolesItMayCreate(t *testing.T) {
+	var made []string
+	var read []any
+	for _, statement := range statements(t, loadCloudTemplate(t).Resources["IamPolicy"].Properties["PolicyDocument"]) {
+		actions := asList(statement["Action"])
+		if contains(actions, "iam:CreateServiceLinkedRole") {
+			made = asList(statement["Condition"].(map[string]any)["StringEquals"].(map[string]any)["iam:AWSServiceName"])
+		}
+		if statement["Sid"] == "ReadTheServiceLinkedRoles" {
+			assert.Equal(t, []string{"iam:GetRole"}, actions)
+			read, _ = statement["Resource"].([]any)
+		}
+	}
+
+	require.NotEmpty(t, made)
+	want := make([]any, 0, len(made))
+	for _, service := range made {
+		want = append(want, map[string]any{"Fn::Sub": "arn:aws:iam::${AWS::AccountId}:role/aws-service-role/" + service + "/*"})
+	}
+	assert.Equal(t, want, read)
+}
+
 func TestTheStackCannotBeChangedByTheControlPlane(t *testing.T) {
 	var denied bool
 	inline := loadCloudTemplate(t).Resources["ControlPlaneRole"].Properties["Policies"].([]any)

@@ -447,6 +447,16 @@ Resources:
                   - "eks-nodegroup.amazonaws.com"
                   - "elasticloadbalancing.amazonaws.com"
                   - "autoscaling.amazonaws.com"
+          # EKS reads a service-linked role to see whether it exists before it
+          # asks for one.
+          - Sid: ReadTheServiceLinkedRoles
+            Effect: Allow
+            Action: "iam:GetRole"
+            Resource:
+              - Fn::Sub: "arn:aws:iam::${AWS::AccountId}:role/aws-service-role/eks.amazonaws.com/*"
+              - Fn::Sub: "arn:aws:iam::${AWS::AccountId}:role/aws-service-role/eks-nodegroup.amazonaws.com/*"
+              - Fn::Sub: "arn:aws:iam::${AWS::AccountId}:role/aws-service-role/elasticloadbalancing.amazonaws.com/*"
+              - Fn::Sub: "arn:aws:iam::${AWS::AccountId}:role/aws-service-role/autoscaling.amazonaws.com/*"
           - Sid: CreateTheOidcProviderWithTheOwnershipTag
             Effect: Allow
             Action: "iam:CreateOpenIDConnectProvider"
