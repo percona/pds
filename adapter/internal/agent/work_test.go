@@ -58,7 +58,7 @@ func TestEachWorkKindReachesTheDatabaseService(t *testing.T) {
 	db := &fakeDatabases{}
 	replicas := 3
 
-	results := applyWork(context.Background(), quietLogger(), db, nil, nil, []hub.Work{
+	results := applyWork(context.Background(), quietLogger(), db, nil, nil, nil, []hub.Work{
 		{ID: "w1", Kind: hub.WorkBackup, Database: "pds.orders-dev", BackupID: "orders-dev-1"},
 		{ID: "w2", Kind: hub.WorkDelete, Database: "pds.orders-old"},
 		{ID: "w3", Kind: hub.WorkScale, Database: "pds.orders-dev", Replicas: &replicas},
@@ -79,7 +79,7 @@ func TestEachWorkKindReachesTheDatabaseService(t *testing.T) {
 func TestAFailedItemIsReportedRatherThanDropped(t *testing.T) {
 	db := &fakeDatabases{backupErr: errors.New("instance is not ready")}
 
-	results := applyWork(context.Background(), quietLogger(), db, nil, nil, []hub.Work{
+	results := applyWork(context.Background(), quietLogger(), db, nil, nil, nil, []hub.Work{
 		{ID: "w1", Kind: hub.WorkBackup, Database: "pds.orders-dev"},
 	})
 
@@ -98,7 +98,7 @@ func TestASeedReachesTheSeeder(t *testing.T) {
 		return nil
 	}
 
-	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, seed, []hub.Work{
+	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, seed, nil, []hub.Work{
 		{ID: "w1", Kind: hub.WorkSeed, Database: "pds.reporting", BackupID: "reporting-1", Name: "reporting-copy"},
 	})
 
@@ -113,7 +113,7 @@ func TestASeedReachesTheSeeder(t *testing.T) {
 func TestAFailedSeedIsReported(t *testing.T) {
 	seed := func(context.Context, string, string, string, string) error { return errors.New("backup not found") }
 
-	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, seed, []hub.Work{
+	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, seed, nil, []hub.Work{
 		{ID: "w1", Kind: hub.WorkSeed, Database: "pds.reporting", BackupID: "gone", Name: "copy"},
 	})
 
@@ -123,7 +123,7 @@ func TestAFailedSeedIsReported(t *testing.T) {
 
 // An agent that cannot seed says so, so the hub stops offering the item.
 func TestASeedWithNoSeederIsReportedRatherThanLeftInFlight(t *testing.T) {
-	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, nil, []hub.Work{
+	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, nil, nil, []hub.Work{
 		{ID: "w1", Kind: hub.WorkSeed, Database: "pds.reporting", BackupID: "b", Name: "copy"},
 	})
 
@@ -134,7 +134,7 @@ func TestASeedWithNoSeederIsReportedRatherThanLeftInFlight(t *testing.T) {
 func TestASeedWithoutANamespacedSourceIsReported(t *testing.T) {
 	seed := func(context.Context, string, string, string, string) error { return nil }
 
-	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, seed, []hub.Work{
+	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, seed, nil, []hub.Work{
 		{ID: "w1", Kind: hub.WorkSeed, Database: "reporting", BackupID: "b", Name: "copy"},
 	})
 
@@ -147,7 +147,7 @@ func TestASeedWithoutANamespacedSourceIsReported(t *testing.T) {
 func TestAnUnknownKindIsReportedAndSkipped(t *testing.T) {
 	db := &fakeDatabases{}
 
-	results := applyWork(context.Background(), quietLogger(), db, nil, nil, []hub.Work{
+	results := applyWork(context.Background(), quietLogger(), db, nil, nil, nil, []hub.Work{
 		{ID: "w1", Kind: "teleport", Database: "pds.orders-dev"},
 	})
 
@@ -164,7 +164,7 @@ func TestCredentialsWorkPreparesTheUsersSecret(t *testing.T) {
 		return nil
 	}
 
-	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, prepare, nil, []hub.Work{
+	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, prepare, nil, nil, []hub.Work{
 		{ID: "w1", Kind: hub.WorkCredentials, Database: "pds.orders"},
 	})
 
@@ -179,7 +179,7 @@ func TestCredentialsWorkPreparesTheUsersSecret(t *testing.T) {
 func TestCredentialsWorkReportsAFailure(t *testing.T) {
 	prepare := func(context.Context, string, string) error { return errors.New("secrets is forbidden") }
 
-	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, prepare, nil, []hub.Work{
+	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, prepare, nil, nil, []hub.Work{
 		{ID: "w1", Kind: hub.WorkCredentials, Database: "pds.orders"},
 	})
 
@@ -188,7 +188,7 @@ func TestCredentialsWorkReportsAFailure(t *testing.T) {
 }
 
 func TestCredentialsWorkWithoutKubernetesIsReported(t *testing.T) {
-	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, nil, []hub.Work{
+	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, nil, nil, []hub.Work{
 		{ID: "w1", Kind: hub.WorkCredentials, Database: "pds.orders"},
 	})
 
@@ -204,7 +204,7 @@ func TestCredentialsWorkRefusesAnIDWithoutANamespace(t *testing.T) {
 		return nil
 	}
 
-	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, prepare, nil, []hub.Work{
+	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, prepare, nil, nil, []hub.Work{
 		{ID: "w1", Kind: hub.WorkCredentials, Database: "orders"},
 	})
 
@@ -230,7 +230,7 @@ func TestAFailedSeedCarriesTheReasonForItsCause(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			seed := func(context.Context, string, string, string, string) error { return tc.err }
 
-			results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, seed, []hub.Work{
+			results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, seed, nil, []hub.Work{
 				{ID: "w1", Kind: hub.WorkSeed, Database: "pds.reporting", BackupID: "b", Name: "copy"},
 			})
 
@@ -242,7 +242,7 @@ func TestAFailedSeedCarriesTheReasonForItsCause(t *testing.T) {
 }
 
 func TestASeedWithNoSeederReportsItCannotSeed(t *testing.T) {
-	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, nil, []hub.Work{
+	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, nil, nil, []hub.Work{
 		{ID: "w1", Kind: hub.WorkSeed, Database: "pds.reporting", BackupID: "b", Name: "copy"},
 	})
 
@@ -253,7 +253,7 @@ func TestASeedWithNoSeederReportsItCannotSeed(t *testing.T) {
 func TestASeedWithoutANamespacedSourceReportsOther(t *testing.T) {
 	seed := func(context.Context, string, string, string, string) error { return nil }
 
-	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, seed, []hub.Work{
+	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, seed, nil, []hub.Work{
 		{ID: "w1", Kind: hub.WorkSeed, Database: "reporting", BackupID: "b", Name: "copy"},
 	})
 
@@ -265,7 +265,7 @@ func TestOnlyAFailedSeedCarriesAReason(t *testing.T) {
 	seed := func(context.Context, string, string, string, string) error { return nil }
 	databases := &fakeDatabases{}
 
-	results := applyWork(context.Background(), quietLogger(), databases, nil, seed, []hub.Work{
+	results := applyWork(context.Background(), quietLogger(), databases, nil, seed, nil, []hub.Work{
 		{ID: "w1", Kind: hub.WorkSeed, Database: "pds.reporting", BackupID: "b", Name: "copy"},
 		{ID: "w2", Kind: hub.WorkDelete, Database: "pds.gone"},
 	})

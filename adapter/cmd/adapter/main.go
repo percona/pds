@@ -180,6 +180,7 @@ func run() error {
 			}
 			opts.Retain = backupRetention(cfg, everestClient, environment)
 			opts.Credentials = newUsersSecrets(environment)
+			opts.Rotate = newRotateUsers(everestClient, environment)
 			opts.Support = environment
 			opts.Cleanup = func(ctx context.Context, namespace, name string) (int, error) {
 				return environment.DeleteSecrets(ctx, namespace, postgresql.LeftoverSecrets(name))

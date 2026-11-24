@@ -1,9 +1,9 @@
 package mysql
 
 import (
-	"crypto/rand"
-	"math/big"
 	"strings"
+
+	"github.com/percona/pds/adapter/internal/engine"
 )
 
 // systemUsers are the users the PXC operator gives a password to when the
@@ -26,15 +26,6 @@ func ExporterCuts(password string) bool {
 	return strings.ContainsAny(password, exporterCuts)
 }
 
-// passwordAlphabet is letters and digits only. Monitoring writes the monitor
-// password unquoted into the exporter's my.cnf, and the exporter cuts it at #
-// or ; and expands a $ in it, all of which the operator's own symbols include.
-const passwordAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-
-// passwordLength gives about 142 bits from the alphabet above, more than the
-// operator's 16 to 20 characters with symbols.
-const passwordLength = 24
-
 // UsersSecretName is the Secret the PXC provider names as a database's users
 // Secret.
 func UsersSecretName(instance string) string {
@@ -46,7 +37,7 @@ func UsersSecretName(instance string) string {
 func SystemPasswords() (map[string]string, error) {
 	out := make(map[string]string, len(systemUsers))
 	for _, user := range systemUsers {
-		password, err := randomPassword()
+		password, err := engine.RandomPassword()
 		if err != nil {
 			return nil, err
 		}
@@ -54,18 +45,4 @@ func SystemPasswords() (map[string]string, error) {
 	}
 
 	return out, nil
-}
-
-func randomPassword() (string, error) {
-	limit := big.NewInt(int64(len(passwordAlphabet)))
-	b := make([]byte, passwordLength)
-	for i := range b {
-		n, err := rand.Int(rand.Reader, limit)
-		if err != nil {
-			return "", err
-		}
-		b[i] = passwordAlphabet[n.Int64()]
-	}
-
-	return string(b), nil
 }

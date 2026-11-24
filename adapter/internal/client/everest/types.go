@@ -372,6 +372,26 @@ type InstanceStatus struct {
 // cannot be placed stays Initializing and this says why.
 const ConditionPodsScheduled = "PodsScheduled"
 
+// ConditionDataSourceReady is the condition the provider sets True once the
+// Instance has been seeded from its data source.
+const ConditionDataSourceReady = "DataSourceReady"
+
+// DataSourceSeeded reports whether the Instance is Ready and has been seeded
+// from its data source. An Instance with no data source never sets the
+// condition, so it is false for one.
+func (s InstanceStatus) DataSourceSeeded() bool {
+	if s.Phase != PhaseReady {
+		return false
+	}
+	for _, c := range s.Conditions {
+		if c.Type == ConditionDataSourceReady {
+			return c.Status == "True"
+		}
+	}
+
+	return false
+}
+
 // Condition is one entry of status.conditions.
 type Condition struct {
 	Type               string     `json:"type"`

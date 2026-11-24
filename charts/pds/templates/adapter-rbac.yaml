@@ -130,6 +130,11 @@ subjects:
 # generates one, because the operator's passwords can hold characters the
 # monitoring exporter cuts the monitor password at. Create cannot be scoped to
 # a name that does not exist yet, so it covers the namespace too.
+# A MongoDB database restored from a backup inherits its source's users Secret,
+# so once the restore has finished the agent patches new passwords into the
+# copy's Secret. Its name is not known when the chart renders either, so patch
+# covers the namespace. With delete and create the agent could already replace
+# any Secret here, so patch adds no reach, and it still reads nothing.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -145,7 +150,7 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["delete", "create"]
+    verbs: ["delete", "create", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

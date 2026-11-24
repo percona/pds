@@ -51,6 +51,22 @@ describe("restoreNameRule", () => {
   });
 });
 
+// The MongoDB provider refuses a database name over 22 characters, copy or not.
+describe("restoreNameRule for MongoDB", () => {
+  it("holds a MongoDB copy to the MongoDB name limit", () => {
+    expect(restoreNameRule("mongodb").limit).toBe(22);
+    expect(isRestoreDatabaseName("a".repeat(22), "mongodb")).toBe(true);
+    expect(isRestoreDatabaseName("a".repeat(23), "mongodb")).toBe(false);
+  });
+
+  it("suggests a MongoDB copy name inside the MongoDB limit", () => {
+    const suggested = restoreNameSuggestion("a".repeat(63), [], "mongodb");
+
+    expect(suggested).toHaveLength(22);
+    expect(suggested.endsWith("-restore-1")).toBe(true);
+  });
+});
+
 describe("restoreNameSuggestion", () => {
   it("offers the source name with a restore suffix", () => {
     expect(restoreNameSuggestion("orders", [], "mysql")).toBe("orders-restore-1");

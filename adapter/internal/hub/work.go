@@ -24,6 +24,10 @@ const (
 	// Secret. The hub keeps the database out of the environment's index until
 	// the agent answers, so the Secret exists before the operator looks.
 	WorkCredentials = "credentials"
+	// WorkRotate asks the agent to write new passwords into the users Secret of
+	// a MongoDB database restored from a backup, once the restore has finished.
+	// The copy inherits the source's passwords until it does.
+	WorkRotate = "rotate"
 	// WorkSupportOpen asks the agent to install a support access window's
 	// workload, WorkSupportExtend to move its expiry and WorkSupportClose to
 	// remove it.
