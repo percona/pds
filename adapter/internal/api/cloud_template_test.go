@@ -243,32 +243,52 @@ func TestTaggingIsAllowedOnlyWhileCreatingAndNeverOnWhatExists(t *testing.T) {
 	}
 }
 
-// CloudFormation applies a stack's tags to an EKS resource with TagResource
-// after creating it, so tagging is allowed, but only on a resource that already
-// carries the ownership tag: nothing the customer made can be claimed.
-func TestEksTagsGoOnlyOnWhatAlreadyCarriesTheOwnershipTag(t *testing.T) {
+// CloudFormation checks that it may tag an EKS resource before the resource
+// exists, and deletes one that may never have been made, so neither can depend
+// on the ownership tag. Both are scoped by the exact names PDS gives instead:
+// pds- and a 12 character environment ID, and what sits under such a cluster.
+func TestEksTagsAndDeletesAreScopedByTheNamesPdsGives(t *testing.T) {
+	const id = "pds-????????????"
+	names := []any{
+		map[string]any{"Fn::Sub": "arn:aws:eks:*:${AWS::AccountId}:cluster/" + id},
+		map[string]any{"Fn::Sub": "arn:aws:eks:*:${AWS::AccountId}:nodegroup/" + id + "/*"},
+		map[string]any{"Fn::Sub": "arn:aws:eks:*:${AWS::AccountId}:addon/" + id + "/*"},
+		map[string]any{"Fn::Sub": "arn:aws:eks:*:${AWS::AccountId}:podidentityassociation/" + id + "/*"},
+	}
+	region := map[string]any{"aws:RequestedRegion": map[string]any{"Ref": "AllowedRegions"}}
 	policy := loadCloudTemplate(t).Resources["EksPolicy"]
-	owned := map[string]any{"aws:ResourceTag/percona.com/pds": "false"}
-	unowned := map[string]any{"aws:ResourceTag/percona.com/pds": "true"}
 
-	var allowed, denied bool
+	var tag, remove map[string]any
 	for _, statement := range statements(t, policy.Properties["PolicyDocument"]) {
-		if !contains(asList(statement["Action"]), "eks:TagResource") {
+		actions := asList(statement["Action"])
+		if statement["Effect"] == "Deny" {
+			assert.NotContains(t, actions, "eks:TagResource", "a deny would refuse CloudFormation's check before create")
 			continue
 		}
-		condition, _ := statement["Condition"].(map[string]any)
-		require.NotNil(t, condition, "%v: TagResource always carries a condition", statement["Sid"])
-		switch statement["Effect"] {
-		case "Allow":
-			allowed = true
-			assert.Equal(t, owned, condition["Null"], "TagResource is allowed only on owned resources")
-		case "Deny":
-			denied = true
-			assert.Equal(t, unowned, condition["Null"], "TagResource is denied on what is not owned")
+		if contains(actions, "eks:TagResource") {
+			tag = statement
+		}
+		if statement["Sid"] == "DeleteEksResourcesNamedByPds" {
+			remove = statement
 		}
 	}
-	assert.True(t, allowed, "CloudFormation can tag the resources it made")
-	assert.True(t, denied, "an unowned resource is denied explicitly")
+
+	require.NotNil(t, tag, "CloudFormation can tag what it creates")
+	assert.Equal(t, []string{"eks:TagResource"}, asList(tag["Action"]))
+	assert.Equal(t, names, tag["Resource"])
+	assert.Equal(t, map[string]any{
+		"Null":         map[string]any{"aws:RequestTag/percona.com/pds": "false"},
+		"StringEquals": region,
+	}, tag["Condition"], "a tag request always carries the ownership tag")
+
+	require.NotNil(t, remove, "CloudFormation can delete what was never made")
+	deletes := asList(remove["Action"])
+	assert.Len(t, deletes, 4, "one delete for each kind of name")
+	for _, action := range deletes {
+		assert.True(t, strings.HasPrefix(action, "eks:Delete"), "%s: only deletes are scoped by name alone", action)
+	}
+	assert.Equal(t, names, remove["Resource"])
+	assert.Equal(t, map[string]any{"StringEquals": region}, remove["Condition"])
 }
 
 func TestTheServiceLinkedRolesItMayCreateAreNamedNotOpen(t *testing.T) {

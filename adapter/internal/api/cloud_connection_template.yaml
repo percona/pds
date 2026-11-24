@@ -353,26 +353,40 @@ Resources:
               StringEquals:
                 "aws:RequestedRegion":
                   Ref: AllowedRegions
-          # CloudFormation applies the stack's tags with TagResource after it
-          # creates a cluster, a node group or an add-on. Only what already
-          # carries the ownership tag may be tagged, so nothing else is claimed.
-          - Sid: TagOwnedEksResources
+          # CloudFormation checks that it may tag a resource before creating it,
+          # and deletes resources that a failed create never made. Neither has
+          # the ownership tag then, so both are scoped by the names PDS gives:
+          # pds- and the 12 character environment ID, and what sits under it.
+          - Sid: TagEksResourcesNamedByPds
             Effect: Allow
             Action: "eks:TagResource"
-            Resource: "*"
+            Resource:
+              - Fn::Sub: "arn:aws:eks:*:${AWS::AccountId}:cluster/pds-????????????"
+              - Fn::Sub: "arn:aws:eks:*:${AWS::AccountId}:nodegroup/pds-????????????/*"
+              - Fn::Sub: "arn:aws:eks:*:${AWS::AccountId}:addon/pds-????????????/*"
+              - Fn::Sub: "arn:aws:eks:*:${AWS::AccountId}:podidentityassociation/pds-????????????/*"
             Condition:
               "Null":
-                "aws:ResourceTag/percona.com/pds": "false"
+                "aws:RequestTag/percona.com/pds": "false"
               StringEquals:
                 "aws:RequestedRegion":
                   Ref: AllowedRegions
-          - Sid: NeverTagWhatIsNotOwned
-            Effect: Deny
-            Action: "eks:TagResource"
-            Resource: "*"
+          - Sid: DeleteEksResourcesNamedByPds
+            Effect: Allow
+            Action:
+              - "eks:DeleteCluster"
+              - "eks:DeleteNodegroup"
+              - "eks:DeleteAddon"
+              - "eks:DeletePodIdentityAssociation"
+            Resource:
+              - Fn::Sub: "arn:aws:eks:*:${AWS::AccountId}:cluster/pds-????????????"
+              - Fn::Sub: "arn:aws:eks:*:${AWS::AccountId}:nodegroup/pds-????????????/*"
+              - Fn::Sub: "arn:aws:eks:*:${AWS::AccountId}:addon/pds-????????????/*"
+              - Fn::Sub: "arn:aws:eks:*:${AWS::AccountId}:podidentityassociation/pds-????????????/*"
             Condition:
-              "Null":
-                "aws:ResourceTag/percona.com/pds": "true"
+              StringEquals:
+                "aws:RequestedRegion":
+                  Ref: AllowedRegions
           - Sid: NeverUntag
             Effect: Deny
             Action: "eks:UntagResource"
