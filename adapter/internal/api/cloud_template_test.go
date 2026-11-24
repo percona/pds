@@ -93,20 +93,33 @@ func TestTheTrustPolicyNamesTheControlPlaneRequiresTheSecretAndWhoActed(t *testi
 	role := tpl.Resources["ControlPlaneRole"]
 	require.Equal(t, "AWS::IAM::Role", role.Type)
 
-	statements := statements(t, role.Properties["AssumeRolePolicyDocument"])
-	require.Len(t, statements, 1)
-	trust := statements[0]
+	// AWS evaluates each action of AssumeRole on its own, and sts:ExternalId is
+	// only in the request context of sts:AssumeRole. A SetSourceIdentity grant
+	// that also requires the external ID never matches, so the two are apart.
+	byAction := map[string]map[string]any{}
+	for _, statement := range statements(t, role.Properties["AssumeRolePolicyDocument"]) {
+		actions := asList(statement["Action"])
+		require.Len(t, actions, 1, "one action per trust statement")
+		assert.Equal(t, map[string]any{"AWS": map[string]any{"Ref": "ControlPlanePrincipalArn"}}, statement["Principal"])
+		byAction[actions[0]] = statement["Condition"].(map[string]any)
+	}
+	require.Len(t, byAction, 2)
 
-	assert.Equal(t, map[string]any{"AWS": map[string]any{"Ref": "ControlPlanePrincipalArn"}}, trust["Principal"])
-	assert.ElementsMatch(t, []string{"sts:AssumeRole", "sts:SetSourceIdentity"}, asList(trust["Action"]))
-	condition := trust["Condition"].(map[string]any)
-	assert.Equal(t, map[string]any{"sts:ExternalId": map[string]any{"Ref": "ExternalId"}}, condition["StringEquals"])
+	assume := byAction["sts:AssumeRole"]
+	require.NotNil(t, assume)
+	assert.Equal(t, map[string]any{"sts:ExternalId": map[string]any{"Ref": "ExternalId"}}, assume["StringEquals"])
 
-	patterns := asList(condition["StringLike"].(map[string]any)["sts:SourceIdentity"])
-	assert.ElementsMatch(t, []string{"pds-user-*", "pds-job-*"}, patterns)
-	for _, pattern := range patterns {
-		literal, _, _ := strings.Cut(pattern, "*")
-		assert.GreaterOrEqual(t, len(literal), 6, "%s: AWS needs six literal characters before a wildcard", pattern)
+	source := byAction["sts:SetSourceIdentity"]
+	require.NotNil(t, source)
+	assert.NotContains(t, source, "StringEquals", "the external ID is not in the SetSourceIdentity context")
+
+	for action, condition := range byAction {
+		patterns := asList(condition["StringLike"].(map[string]any)["sts:SourceIdentity"])
+		assert.ElementsMatch(t, []string{"pds-user-*", "pds-job-*"}, patterns, action)
+		for _, pattern := range patterns {
+			literal, _, _ := strings.Cut(pattern, "*")
+			assert.GreaterOrEqual(t, len(literal), 6, "%s: AWS needs six literal characters before a wildcard", pattern)
+		}
 	}
 	assert.Equal(t, float64(3600), role.Properties["MaxSessionDuration"])
 }

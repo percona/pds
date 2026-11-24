@@ -39,17 +39,27 @@ Resources:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
+          # sts:ExternalId is only in the context AWS evaluates sts:AssumeRole
+          # in, so SetSourceIdentity is granted in a statement of its own.
           - Effect: Allow
             Principal:
               AWS:
                 Ref: ControlPlanePrincipalArn
-            Action:
-              - "sts:AssumeRole"
-              - "sts:SetSourceIdentity"
+            Action: "sts:AssumeRole"
             Condition:
               StringEquals:
                 "sts:ExternalId":
                   Ref: ExternalId
+              StringLike:
+                "sts:SourceIdentity":
+                  - "pds-user-*"
+                  - "pds-job-*"
+          - Effect: Allow
+            Principal:
+              AWS:
+                Ref: ControlPlanePrincipalArn
+            Action: "sts:SetSourceIdentity"
+            Condition:
               StringLike:
                 "sts:SourceIdentity":
                   - "pds-user-*"
@@ -647,7 +657,7 @@ Resources:
 Outputs:
   TemplateVersion:
     Description: The version of this template. The control plane asks for at least the version it ships.
-    Value: "2"
+    Value: "3"
   ConnectionId:
     Value:
       Ref: ConnectionId

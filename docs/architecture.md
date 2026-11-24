@@ -695,7 +695,10 @@ kubeconfig is stored, only what makes the next assume possible.
 - **Trust.** The role trusts the role or user in `HUB_CLOUD_PRINCIPAL_ARN`, never
   an account root, and only with the connection's `sts:ExternalId` and an
   `sts:SourceIdentity` that matches `pds-user-*` or `pds-job-*`, so the customer's
-  CloudTrail says whether a person or a job acted. AWS wants six literal
+  CloudTrail says whether a person or a job acted. `sts:SetSourceIdentity` is
+  granted in a statement of its own, without the external ID: AWS evaluates it
+  apart from `sts:AssumeRole`, and the external ID is not in its context, so a
+  shared statement denies every assume. AWS wants six literal
   characters before a wildcard and no colon in the value, hence the form. Without
   that setting enroll, events and verify answer 501.
 - **Permissions.** The control plane role passes the service role to
