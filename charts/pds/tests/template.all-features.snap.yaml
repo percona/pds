@@ -1261,6 +1261,8 @@ spec:
               value: "flux-system/pds"
             - name: HUB_MANAGED_CHART_VERSION
               value: "0.1.0-rc.1"
+            - name: HUB_MANAGED_CHART_URL
+              value: "oci://ghcr.io/example/charts"
             - name: HUB_MANAGED_OUTGOING_CIDRS
               value: "203.0.113.7/32,198.51.100.0/24"
             - name: ADAPTER_FEATURE_ACTIVITY

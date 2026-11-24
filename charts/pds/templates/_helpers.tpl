@@ -719,6 +719,10 @@ in the Secret.
 - name: HUB_MANAGED_CHART_VERSION
   value: {{ . | quote }}
 {{- end }}
+{{- with .Values.adapter.hub.managedChartURL }}
+- name: HUB_MANAGED_CHART_URL
+  value: {{ . | quote }}
+{{- end }}
 {{- with .Values.adapter.hub.managedOutgoingCIDRs }}
 - name: HUB_MANAGED_OUTGOING_CIDRS
   value: {{ join "," . | quote }}

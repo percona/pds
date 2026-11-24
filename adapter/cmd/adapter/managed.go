@@ -44,7 +44,7 @@ func managedSettings(cfg config.Config) (managed.Settings, managed.CreatorSettin
 	repository, tag := splitImage(cfg.HubAgentImage)
 
 	settings := managed.Settings{
-		OutgoingCIDRs: cfg.ManagedOutgoingCIDRs, FluxVersion: managed.FluxVersion, ChartVersion: cfg.ManagedChartVersion,
+		OutgoingCIDRs: cfg.ManagedOutgoingCIDRs, FluxVersion: managed.FluxVersion, ChartVersion: cfg.ManagedChartVersion, ChartURL: cfg.ManagedChartURL,
 		HubURL: cfg.HubPublicURL, ImageRepository: repository, ImageTag: tag,
 	}
 	creator := managed.CreatorSettings{

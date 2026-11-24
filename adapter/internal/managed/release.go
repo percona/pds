@@ -43,8 +43,6 @@ const (
 	BackupUserRequestKey = "request"
 	BackupUserRemove     = "remove"
 	BackupUserRemovedKey = "removed"
-	// ChartURL is where the control plane's published chart lives.
-	ChartURL = "oci://ghcr.io/percona/charts"
 )
 
 // BackupUserName is the IAM user the agent makes for an environment's backups.
@@ -55,7 +53,9 @@ func BackupUserName(environmentID string) string { return "pds-" + environmentID
 // ReleaseInput is the small named set of values a managed environment adds to
 // the connected-environment overlay.
 type ReleaseInput struct {
-	ChartVersion    string
+	ChartVersion string
+	// ChartURL is the OCI registry the chart is installed from.
+	ChartURL        string
 	HubURL          string
 	EnvironmentName string
 	// EnvironmentID is the value of the percona.com/pds tag the environment's
@@ -197,6 +197,9 @@ func merge(base, overlay map[string]any) {
 // ReleaseFiles are the files that make the pds release part of the
 // environment's Git repository, under clusters/<environment>/platform/pds.
 func ReleaseFiles(environment string, in ReleaseInput) (map[string][]byte, error) {
+	if in.ChartURL == "" {
+		return nil, errors.New("render the pds release: the chart registry is empty")
+	}
 	release, err := RenderRelease(in)
 	if err != nil {
 		return nil, err
@@ -205,7 +208,7 @@ func ReleaseFiles(environment string, in ReleaseInput) (map[string][]byte, error
 		"apiVersion": "source.toolkit.fluxcd.io/v1",
 		"kind":       "HelmRepository",
 		"metadata":   map[string]any{"name": ChartRepository, "namespace": "flux-system"},
-		"spec":       map[string]any{"type": "oci", "interval": "1h", "url": ChartURL},
+		"spec":       map[string]any{"type": "oci", "interval": "1h", "url": in.ChartURL},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("render the chart source: %w", err)

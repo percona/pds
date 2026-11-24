@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/percona/pds/adapter/internal/client/kube"
+	"github.com/percona/pds/adapter/internal/config"
 	"github.com/percona/pds/adapter/internal/managed"
 )
 
@@ -100,6 +101,7 @@ func run(args []string) error {
 		repository = flags.String("image-repository", "", "the agent image")
 		tag        = flags.String("image-tag", "", "the agent image tag")
 		chart      = flags.String("chart-version", "", "the pds chart version")
+		chartURL   = flags.String("chart-url", config.DefaultManagedChartURL, "the OCI registry the chart is installed from")
 		bucket     = flags.String("bucket", "smoke", "the backup bucket the release names; nothing is created")
 		region     = flags.String("region", "us-east-1", "the backup region the release names")
 	)
@@ -138,7 +140,7 @@ func run(args []string) error {
 		access: managed.KubeAccess{Endpoint: *endpoint, CA: ca, Token: string(token)},
 		join:   join,
 		release: managed.ReleaseInput{
-			ChartVersion: *chart, HubURL: *hubURL, EnvironmentName: join.Environment,
+			ChartVersion: *chart, ChartURL: *chartURL, HubURL: *hubURL, EnvironmentName: join.Environment,
 			ImageRepository: *repository, ImageTag: *tag, Bucket: *bucket, Region: *region,
 		},
 		gitDir: *gitDir,

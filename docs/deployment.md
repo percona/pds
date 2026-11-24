@@ -526,14 +526,16 @@ are in [architecture.md](architecture.md#cloud-connections).
 
 A control plane builds managed environments only when it can reach their
 Kubernetes API from addresses it declares and knows which chart to install. The
-chart sets the first two from `adapter.hub.managedOutgoingCIDRs` (a list) and
-`adapter.hub.managedChartVersion`, and the other three take `adapter.extraEnv`.
+chart sets the first three from `adapter.hub.managedOutgoingCIDRs` (a list),
+`adapter.hub.managedChartVersion` and `adapter.hub.managedChartURL`, and the other
+three take `adapter.extraEnv`.
 The Compose stack reads all of them from `pds.env`:
 
 | Variable | Default | Value |
 |----------|---------|-------|
 | `HUB_MANAGED_OUTGOING_CIDRS` | none | The addresses this control plane's AWS calls come from, as comma separated CIDRs such as `203.0.113.7/32`. Only they may reach an environment's endpoint while it is open. `0.0.0.0/0` is accepted when you choose it, for a control plane with no stable outgoing address, and leaves IAM as the only protection. Empty refuses managed environments |
-| `HUB_MANAGED_CHART_VERSION` | none | The published `pds` chart version a managed environment installs, such as `0.1.0`. It has to be a release in `oci://ghcr.io/percona/charts`. Empty refuses managed environments |
+| `HUB_MANAGED_CHART_VERSION` | none | The published `pds` chart version a managed environment installs, such as `0.1.0`. It has to be a release in the registry named by `HUB_MANAGED_CHART_URL`. Empty refuses managed environments |
+| `HUB_MANAGED_CHART_URL` | `oci://ghcr.io/percona/charts` | The OCI registry a managed environment installs the chart from. Set it only to test a chart that is not released. The environment pulls it without credentials, so the registry has to be readable by anyone |
 | `HUB_PROVISION_LEASE_TTL` | `1m` | How long a provisioning run's lease lasts unrenewed. A worker that dies is replaced after it |
 | `HUB_PROVISION_MAX_ATTEMPTS` | `5` | Automatic attempts of one step before the run fails and waits for Retry |
 | `HUB_PROVISION_WINDOW_MAX_AGE` | `30m` | How long an Access window may stay open before the sweeper closes it |

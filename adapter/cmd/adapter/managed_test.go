@@ -21,7 +21,7 @@ import (
 
 func TestManagedSettingsComeFromTheDeploymentsConfiguration(t *testing.T) {
 	cfg := config.Config{
-		ManagedOutgoingCIDRs: []string{"203.0.113.7/32"}, ManagedChartVersion: "0.1.0",
+		ManagedOutgoingCIDRs: []string{"203.0.113.7/32"}, ManagedChartVersion: "0.1.0", ManagedChartURL: "oci://ghcr.io/example/charts",
 		HubAgentImage: "ghcr.io/percona/pds-adapter:0.1.0", HubPublicURL: "https://hub.example",
 	}
 
@@ -29,6 +29,7 @@ func TestManagedSettingsComeFromTheDeploymentsConfiguration(t *testing.T) {
 
 	assert.Equal(t, []string{"203.0.113.7/32"}, deps.OutgoingCIDRs)
 	assert.Equal(t, "0.1.0", deps.ChartVersion)
+	assert.Equal(t, "oci://ghcr.io/example/charts", deps.ChartURL)
 	assert.Equal(t, managed.FluxVersion, deps.FluxVersion)
 	assert.Equal(t, "https://hub.example", deps.HubURL)
 	assert.Equal(t, "ghcr.io/percona/pds-adapter", deps.ImageRepository)

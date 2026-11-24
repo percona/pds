@@ -150,7 +150,9 @@ type Settings struct {
 	OutgoingCIDRs []string
 	FluxVersion   string
 	ChartVersion  string
-	HubURL        string
+	// ChartURL is the OCI registry the chart is installed from.
+	ChartURL string
+	HubURL   string
 	// ImageRepository and ImageTag are the agent image the release installs.
 	ImageRepository string
 	ImageTag        string
@@ -526,7 +528,7 @@ func (d Deps) writeRelease(ctx context.Context, _ provision.Env, s scope) error 
 // environment's Git repository, where Flux applies it.
 func (d Deps) commitRelease(ctx context.Context, s scope, version string) error {
 	files, err := ReleaseFiles(s.rec.Name, ReleaseInput{
-		ChartVersion: version, HubURL: d.Settings.HubURL, EnvironmentName: s.rec.Name, EnvironmentID: s.rec.ID,
+		ChartVersion: version, ChartURL: d.Settings.ChartURL, HubURL: d.Settings.HubURL, EnvironmentName: s.rec.Name, EnvironmentID: s.rec.ID,
 		ImageRepository: d.Settings.ImageRepository, ImageTag: d.Settings.ImageTag,
 		Bucket: bucketName(s), Region: s.rec.Region,
 		BackupUser: BackupUserName(s.rec.ID), BackupUserPath: aws.ConnectionPath(s.conn.ID),

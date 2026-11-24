@@ -17,6 +17,7 @@ var update = flag.Bool("update", false, "rewrite the golden files")
 func releaseInput() managed.ReleaseInput {
 	return managed.ReleaseInput{
 		ChartVersion:      "0.1.0",
+		ChartURL:          "oci://ghcr.io/percona/charts",
 		HubURL:            "https://hub.example",
 		EnvironmentName:   "orders",
 		EnvironmentID:     "0123456789ab",
@@ -166,4 +167,31 @@ func TestRenderReleaseRefusesABackupUserWithNoPathToLiveUnder(t *testing.T) {
 	_, err := managed.RenderRelease(in)
 
 	require.Error(t, err)
+}
+
+func TestReleaseFilesInstallTheChartFromTheGivenRegistry(t *testing.T) {
+	in := releaseInput()
+	in.ChartURL = "oci://ghcr.io/example/charts"
+
+	files, err := managed.ReleaseFiles("orders", in)
+	require.NoError(t, err)
+
+	var source struct {
+		Spec struct {
+			Type string `json:"type"`
+			URL  string `json:"url"`
+		} `json:"spec"`
+	}
+	require.NoError(t, yaml.Unmarshal(files["clusters/orders/platform/pds/helmrepository.yaml"], &source))
+	assert.Equal(t, "oci", source.Spec.Type)
+	assert.Equal(t, "oci://ghcr.io/example/charts", source.Spec.URL)
+}
+
+func TestReleaseFilesRefuseAMissingChartRegistry(t *testing.T) {
+	in := releaseInput()
+	in.ChartURL = ""
+
+	_, err := managed.ReleaseFiles("orders", in)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "chart registry")
 }

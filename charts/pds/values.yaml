@@ -236,6 +236,10 @@ adapter:
     # -- Published pds chart version a managed environment installs, such as
     # 0.1.0. Empty refuses to create a managed environment.
     managedChartVersion: ""
+    # -- OCI registry a managed environment installs the chart from. Empty uses
+    # oci://ghcr.io/percona/charts. The registry has to be readable without
+    # credentials.
+    managedChartURL: ""
     # -- Addresses this control plane's AWS calls come from, as CIDRs such as
     # 203.0.113.7/32. They are the only addresses a managed environment's
     # Kubernetes API is open to while the control plane works in it. Empty

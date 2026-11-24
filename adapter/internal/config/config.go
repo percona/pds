@@ -66,6 +66,9 @@ type Config struct {
 	// ManagedChartVersion is the published pds chart a managed environment
 	// installs. Empty refuses managed environments.
 	ManagedChartVersion string
+	// ManagedChartURL is the OCI registry a managed environment installs the pds
+	// chart from. It defaults to the published one.
+	ManagedChartURL string
 	// AgentReleaseNamespace and AgentReleaseName name the Flux HelmRelease an
 	// agent reports on its heartbeat. Empty means the environment has none, as a
 	// connected environment does.
@@ -1205,6 +1208,12 @@ func loadProvisioning(cfg *Config, lookup func(key, fallback string) string) err
 		cfg.ManagedChartVersion = version
 	}
 
+	// The address is written into a Flux HelmRepository, so only an OCI one passes.
+	cfg.ManagedChartURL = strings.TrimSpace(lookup("HUB_MANAGED_CHART_URL", DefaultManagedChartURL))
+	if !chartRegistry.MatchString(cfg.ManagedChartURL) {
+		return fmt.Errorf("HUB_MANAGED_CHART_URL: %q is not an OCI registry such as %s", cfg.ManagedChartURL, DefaultManagedChartURL)
+	}
+
 	if ref := strings.TrimSpace(lookup("AGENT_RELEASE_REF", "")); ref != "" {
 		namespace, name, ok := strings.Cut(ref, "/")
 		if !ok || !dnsLabel.MatchString(namespace) || !dnsLabel.MatchString(name) {
@@ -1227,6 +1236,11 @@ func loadProvisioning(cfg *Config, lookup func(key, fallback string) string) err
 }
 
 var dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+
+// DefaultManagedChartURL is where the published pds chart lives.
+const DefaultManagedChartURL = "oci://ghcr.io/percona/charts"
+
+var chartRegistry = regexp.MustCompile(`^oci://[A-Za-z0-9][A-Za-z0-9._:/-]*$`)
 
 var chartVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`)
 

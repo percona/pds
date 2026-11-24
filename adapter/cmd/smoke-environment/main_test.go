@@ -28,7 +28,7 @@ func testInput(dir string) input {
 		access:  managed.KubeAccess{Endpoint: "https://127.0.0.1:1", Token: "t"},
 		join:    managed.Join{Environment: "spoke-a", AgentToken: "agent-secret", GitURL: "http://git/pds.git", Namespace: "pds"},
 		gitDir:  dir,
-		release: managed.ReleaseInput{ChartVersion: "0.1.0", HubURL: "http://hub", EnvironmentName: "spoke-a", ImageRepository: "img", ImageTag: "dev", Bucket: "smoke", Region: "us-east-1"},
+		release: managed.ReleaseInput{ChartVersion: "0.1.0", ChartURL: "oci://ghcr.io/percona/charts", HubURL: "http://hub", EnvironmentName: "spoke-a", ImageRepository: "img", ImageTag: "dev", Bucket: "smoke", Region: "us-east-1"},
 		flux:    managed.FluxVersion,
 	}
 }

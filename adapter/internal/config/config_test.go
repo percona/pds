@@ -76,6 +76,7 @@ func clearEnv(t *testing.T) {
 		"HUB_CLOUD_PRINCIPAL_ARN",
 		"HUB_MANAGED_OUTGOING_CIDRS",
 		"HUB_MANAGED_CHART_VERSION",
+		"HUB_MANAGED_CHART_URL",
 		"AGENT_RELEASE_REF",
 		"AGENT_BACKUP_USER",
 		"AGENT_BACKUP_USER_PATH",
@@ -1514,12 +1515,14 @@ func TestLoadReadsTheProvisioningSettings(t *testing.T) {
 	assert.Equal(t, 5, got.ProvisionMaxAttempts)
 	assert.Equal(t, 30*time.Minute, got.ProvisionWindowMaxAge)
 	assert.Empty(t, got.ManagedChartVersion, "no published chart refuses managed environments")
+	assert.Equal(t, "oci://ghcr.io/percona/charts", got.ManagedChartURL, "the published registry is the default")
 
 	t.Setenv("HUB_MANAGED_OUTGOING_CIDRS", " 203.0.113.7/32 , 198.51.100.0/24,")
 	t.Setenv("HUB_PROVISION_LEASE_TTL", "2m")
 	t.Setenv("HUB_PROVISION_MAX_ATTEMPTS", "8")
 	t.Setenv("HUB_PROVISION_WINDOW_MAX_AGE", "10m")
 	t.Setenv("HUB_MANAGED_CHART_VERSION", " 0.1.0-rc.1 ")
+	t.Setenv("HUB_MANAGED_CHART_URL", " oci://ghcr.io/example/charts ")
 	got, err = config.Load()
 	require.NoError(t, err)
 	assert.Equal(t, []string{"203.0.113.7/32", "198.51.100.0/24"}, got.ManagedOutgoingCIDRs)
@@ -1527,6 +1530,7 @@ func TestLoadReadsTheProvisioningSettings(t *testing.T) {
 	assert.Equal(t, 8, got.ProvisionMaxAttempts)
 	assert.Equal(t, 10*time.Minute, got.ProvisionWindowMaxAge)
 	assert.Equal(t, "0.1.0-rc.1", got.ManagedChartVersion)
+	assert.Equal(t, "oci://ghcr.io/example/charts", got.ManagedChartURL)
 
 	t.Setenv("HUB_MANAGED_OUTGOING_CIDRS", "0.0.0.0/0")
 	got, err = config.Load()
@@ -1538,6 +1542,7 @@ func TestLoadRefusesBadProvisioningSettings(t *testing.T) {
 	for name, value := range map[string]string{
 		"HUB_MANAGED_OUTGOING_CIDRS":   "203.0.113.7",
 		"HUB_MANAGED_CHART_VERSION":    "latest",
+		"HUB_MANAGED_CHART_URL":        "https://ghcr.io/percona/charts",
 		"HUB_PROVISION_LEASE_TTL":      "soon",
 		"HUB_PROVISION_MAX_ATTEMPTS":   "0",
 		"HUB_PROVISION_WINDOW_MAX_AGE": "-1m",
