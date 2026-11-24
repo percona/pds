@@ -150,19 +150,13 @@ func Run(ctx context.Context, t sqlrun.Target, password string, cmd mongoguard.C
 	// The driver adds its own maxTimeMS to a command whose context has a deadline, and the server
 	// refuses a command that carries two. The command's own maxTimeMS is the server's limit, so
 	// the client side one is a cancel, which the driver does not read as a deadline.
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	var gaveUp atomic.Bool
-	timer := time.AfterFunc(lim.Timeout+backstop, func() {
-		gaveUp.Store(true)
-		cancel()
-	})
-	defer timer.Stop()
+	ctx, stop, gaveUp := withLimit(ctx, lim.Timeout+backstop)
+	defer stop()
 	db := client.Database(cmd.Database)
 
 	reply, err := db.RunCommand(ctx, doc).Raw()
 	if err != nil {
-		if gaveUp.Load() {
+		if gaveUp() {
 			return sqlrun.Result{}, sqlrun.ErrTimeout
 		}
 
@@ -178,6 +172,23 @@ func Run(ctx context.Context, t sqlrun.Target, password string, cmd mongoguard.C
 	}
 
 	return res, nil
+}
+
+// withLimit returns a context that is cancelled after d, a stop that releases it and its timer, and
+// whether the cancel came from the limit. Each call has its own timer and flag, so one command's
+// limit never reaches another.
+func withLimit(ctx context.Context, d time.Duration) (context.Context, func(), func() bool) {
+	ctx, cancel := context.WithCancel(ctx)
+	var expired atomic.Bool
+	timer := time.AfterFunc(d, func() {
+		expired.Store(true)
+		cancel()
+	})
+
+	return ctx, func() {
+		timer.Stop()
+		cancel()
+	}, expired.Load
 }
 
 // unreadable is the answer to a command whose values MongoDB's extended JSON cannot read.

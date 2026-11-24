@@ -279,3 +279,35 @@ func TestAServerMessageNeverRepeatsThePassword(t *testing.T) {
 		t.Fatalf("error %v", got)
 	}
 }
+
+func TestACommandThatFinishesBeforeItsLimitNeverSeesACancelledContext(t *testing.T) {
+	ctx, stop, expired := withLimit(t.Context(), time.Hour)
+	if ctx.Err() != nil || expired() {
+		t.Fatal("the context was cancelled before the limit")
+	}
+	stop()
+	if expired() {
+		t.Fatal("stopping a command that finished counts as running out of time")
+	}
+}
+
+func TestACommandWhoseLimitPassesIsCancelledAndSaysSo(t *testing.T) {
+	ctx, stop, expired := withLimit(t.Context(), time.Millisecond)
+	defer stop()
+	<-ctx.Done()
+	if !expired() {
+		t.Fatal("the cancel was not put down to the limit")
+	}
+}
+
+func TestOneCommandsLimitNeverReachesTheNextOne(t *testing.T) {
+	first, stopFirst, firstExpired := withLimit(t.Context(), time.Millisecond)
+	<-first.Done()
+	stopFirst()
+
+	second, stopSecond, secondExpired := withLimit(t.Context(), time.Hour)
+	defer stopSecond()
+	if second.Err() != nil || secondExpired() || !firstExpired() {
+		t.Fatal("a later command shares the cancelled state of an earlier one")
+	}
+}

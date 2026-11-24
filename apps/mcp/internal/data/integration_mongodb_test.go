@@ -1,7 +1,9 @@
 package data_test
 
 import (
+	"context"
 	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -11,6 +13,9 @@ import (
 	"github.com/percona/pds/apps/mcp/internal/data"
 	"github.com/percona/pds/apps/mcp/internal/fakecp"
 	"github.com/percona/pds/apps/mcp/internal/messages"
+	"github.com/percona/pds/apps/mcp/internal/mongoguard"
+	"github.com/percona/pds/apps/mcp/internal/mongorun"
+	"github.com/percona/pds/apps/mcp/internal/sqlrun"
 )
 
 // These tests drive the data server against a real MongoDB, the way an agent does. They skip only
@@ -31,6 +36,29 @@ func realMongoDB(t *testing.T) string {
 	return dbURI2("mongodb", "root", os.Getenv("PDS_TEST_MONGODB_PASSWORD"), host, n, "/admin?ssl=false")
 }
 
+// dropAfter drops the collections when the test ends. The test's own context and the data server
+// it drove are already cancelled by then, so it connects on its own.
+func dropAfter(t *testing.T, uri string, collections ...string) {
+	t.Helper()
+	u, _ := url.Parse(uri)
+	password, _ := u.User.Password()
+	port, _ := strconv.Atoi(u.Port())
+	target := sqlrun.Target{Engine: sqlrun.MongoDB, Host: u.Hostname(), Port: port, User: u.User.Username(), Database: "pds_test", AuthSource: "admin", TLS: sqlrun.TLSOff}
+	t.Cleanup(func() {
+		ctx := context.WithoutCancel(t.Context())
+		for _, name := range collections {
+			cmd, err := mongoguard.Check(`{"drop": "`+name+`"}`, target.Database, mongoguard.ReadWrite)
+			if err != nil {
+				t.Errorf("drop %s: %v", name, err)
+
+				continue
+			}
+			// A collection that was never created cannot be dropped, which is fine.
+			_, _ = mongorun.Run(ctx, target, password, cmd, sqlrun.Limits{MaxRows: 1, MaxBytes: 1000, Timeout: 10 * time.Second})
+		}
+	})
+}
+
 func TestAnAgentReadsAMongoDBDatabaseAndCannotWriteThroughTheReadTool(t *testing.T) {
 	uri := realMongoDB(t)
 	r := newRig(t, options{scopes: withWrites, real: true, database: fakecp.Database{URI: uri}})
@@ -40,11 +68,7 @@ func TestAnAgentReadsAMongoDBDatabaseAndCannotWriteThroughTheReadTool(t *testing
 	if res := r.call("connect_database", map[string]any{"id": databaseID, "database": "pds_test"}); res.IsError {
 		t.Fatalf("connect: %q", text(res))
 	}
-	t.Cleanup(func() {
-		for _, name := range []string{collection, copyOf} {
-			r.call("run_query", map[string]any{"id": databaseID, "sql": `{"drop": "` + name + `"}`})
-		}
-	})
+	dropAfter(t, uri, collection, copyOf)
 
 	insert := `{"insert": "` + collection + `", "documents": [{"n": 1, "word": "one"}, {"n": 2, "word": "two"}, {"n": 3, "word": "three"}]}`
 	if res := r.call("run_query", map[string]any{"id": databaseID, "sql": insert}); res.IsError || !strings.Contains(text(res), `"n":3`) {
@@ -122,11 +146,7 @@ func TestAnAggregateThatWritesRunsOnlyThroughTheWriteTool(t *testing.T) {
 	collection := "agent_" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	copyOf := collection + "_copy"
 	r.call("connect_database", map[string]any{"id": databaseID, "database": "pds_test"})
-	t.Cleanup(func() {
-		for _, name := range []string{collection, copyOf} {
-			r.call("run_query", map[string]any{"id": databaseID, "sql": `{"drop": "` + name + `"}`})
-		}
-	})
+	dropAfter(t, uri, collection, copyOf)
 	r.call("run_query", map[string]any{"id": databaseID, "sql": `{"insert": "` + collection + `", "documents": [{"n": 1}, {"n": 2}]}`})
 
 	if res := r.call("run_query", map[string]any{"id": databaseID, "sql": `{"aggregate": "` + collection + `", "pipeline": [{"$match": {}}, {"$out": "` + copyOf + `"}]}`}); res.IsError {
@@ -145,9 +165,7 @@ func TestAMongoDBCommandPastItsTimeLimitIsStoppedAndSaysSo(t *testing.T) {
 	r := newRig(t, options{scopes: withWrites, real: true, database: fakecp.Database{URI: uri}})
 	collection := "agent_" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	r.call("connect_database", map[string]any{"id": databaseID, "database": "pds_test"})
-	t.Cleanup(func() {
-		r.call("run_query", map[string]any{"id": databaseID, "sql": `{"drop": "` + collection + `"}`})
-	})
+	dropAfter(t, uri, collection)
 
 	var documents []string
 	for i := range 4000 {
