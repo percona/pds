@@ -2,6 +2,7 @@ import { Check } from "lucide-react";
 import { useId, useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
 import { ConnectedAgents } from "@/features/agent-sessions";
+import { engineListPhrase } from "@/features/databases";
 import {
   accessChoices,
   bridgeConfig,
@@ -64,8 +65,8 @@ export function AgentsPage() {
       <ol className="space-y-6">
         <Step number={1} title="Claude Code plugin">
           <p className="text-sm">
-            Run this in a terminal. The plugin adds PDS and a local data server for MySQL and
-            PostgreSQL.
+            Run this in a terminal. The plugin adds PDS and a local data server for{" "}
+            {engineListPhrase}.
           </p>
           <CommandBlock
             command={claudeCodeInstall}

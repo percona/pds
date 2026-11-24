@@ -4,6 +4,7 @@ import { ChoiceGroup } from "@/components/choice-group";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   describeSelection,
+  engineNames,
   engines,
   joinCommand,
   profiles,
@@ -51,7 +52,7 @@ export function Hero() {
               id="hero-title"
               className="text-3xl font-semibold tracking-tight text-balance sm:text-5xl"
             >
-              MySQL and PostgreSQL on Amazon EKS, with Percona behind you.
+              {engineNames("and")} on Amazon EKS, backed by Percona.
             </h1>
 
             <p className="max-w-xl text-base text-muted-foreground text-pretty sm:text-lg">

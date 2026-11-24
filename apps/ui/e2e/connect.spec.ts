@@ -213,7 +213,7 @@ test("an empty environment explains itself and offers the create button", async 
 
   await expect(page.getByText("No databases yet")).toBeVisible();
   await expect(
-    page.getByText("Create a MySQL or PostgreSQL database on this Kubernetes cluster."),
+    page.getByText("Create a MySQL, PostgreSQL, or MongoDB database on this Kubernetes cluster."),
   ).toBeVisible();
   await expect(page.getByRole("link", { name: "Create database" })).toHaveAttribute(
     "href",

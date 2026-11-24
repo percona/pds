@@ -120,7 +120,9 @@ describe("DatabaseList", () => {
 
     expect(screen.getByText("No databases yet")).toBeInTheDocument();
     expect(
-      screen.getByText("Create a MySQL or PostgreSQL database on this Kubernetes cluster."),
+      screen.getByText(
+        "Create a MySQL, PostgreSQL, or MongoDB database on this Kubernetes cluster.",
+      ),
     ).toBeInTheDocument();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });

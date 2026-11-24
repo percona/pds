@@ -1,10 +1,10 @@
 {
   "name": "pds",
-  "version": "0.1.4",
-  "description": "Create, connect to and look after MySQL and PostgreSQL databases on Percona Database Service from your AI agent.",
+  "version": "0.1.5",
+  "description": "Create, connect to and look after MySQL, PostgreSQL and MongoDB databases on Percona Database Service from your AI agent.",
   "author": { "name": "Percona" },
   "homepage": "https://github.com/percona/pds/tree/main/plugins/pds",
   "repository": "https://github.com/percona/pds",
   "license": "Apache-2.0",
-  "keywords": ["percona", "pds", "database", "mysql", "postgresql", "mcp"]
+  "keywords": ["percona", "pds", "database", "mysql", "postgresql", "mongodb", "mcp"]
 }

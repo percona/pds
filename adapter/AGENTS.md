@@ -283,7 +283,7 @@ The OpenEverest boundary:
 The instance comes from `SN_URL`, which has no default: without it support
 is off. HTTPS only. Header `x-sn-apikey` plus a `client_token` body field.
 `ticket_type` is always `CASE`, and `u_main_technology` follows the engine
-(`MySQL` or `PostgreSQL`). Payloads are sanitized before they leave: no
+(`MySQL`, `PostgreSQL` or `MongoDB`). Payloads are sanitized before they leave: no
 connection strings, passwords or secrets. Without the URL and both keys the
 support routes answer 501. Every live check creates a real case, so test against
 a non-production ServiceNow instance.

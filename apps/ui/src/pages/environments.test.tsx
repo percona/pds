@@ -112,7 +112,7 @@ describe("EnvironmentsPage", () => {
     expect(await screen.findByText("No environments yet")).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "Environments" })).toBeInTheDocument();
     expect(
-      screen.getByText(/Add an environment to run MySQL or PostgreSQL on it from here/),
+      screen.getByText(/Add an environment to run MySQL, PostgreSQL, or MongoDB on it from here/),
     ).toBeInTheDocument();
 
     const connect = screen.getAllByRole("link", { name: "Create an environment" });
@@ -180,7 +180,7 @@ describe("EnvironmentsPage", () => {
     await userEvent.click(await screen.findByRole("link", { name: /spoke-a/ }));
 
     expect(await screen.findByRole("heading", { level: 1, name: "Databases" })).toBeInTheDocument();
-    expect(screen.getByText("MySQL or PostgreSQL on spoke-a.")).toBeInTheDocument();
+    expect(screen.getByText("MySQL, PostgreSQL, or MongoDB on spoke-a.")).toBeInTheDocument();
     expect(screen.getByText("orders-dev")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Create database" })).toHaveAttribute(
       "href",

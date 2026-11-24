@@ -24,7 +24,7 @@ export const engines: EngineOption[] = [
     id: "mongodb",
     label: "MongoDB",
     detail: "The usual choice for existing MongoDB apps.",
-    enabled: false,
+    enabled: true,
   },
 ];
 
@@ -73,6 +73,8 @@ export const createPageDescription = `A ${joinLabels(visibleEngines, "or")} data
 export const emptyListDescription = `Create a ${joinLabels(visibleEngines, "or")} database on this Kubernetes cluster.`;
 
 export const engineChoicePhrase = joinLabels(visibleEngines, "or");
+
+export const engineListPhrase = joinLabels(visibleEngines, "and");
 
 function joinLabels(options: EngineOption[], conjunction: "and" | "or"): string {
   const labels = options.map((engine) => engine.label);

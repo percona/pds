@@ -63,6 +63,14 @@ function headings() {
 }
 
 describe("AgentsPage", () => {
+  it("says the plugin's data server serves the three engines", async () => {
+    await openPage();
+
+    expect(
+      await screen.findByText(/a local data server for MySQL, PostgreSQL, and MongoDB\./),
+    ).toBeInTheDocument();
+  });
+
   it("offers the plugins first, then the address, then the bridge", async () => {
     await openPage();
     await screen.findByRole("heading", { level: 2, name: "Connected agents" });

@@ -1,7 +1,7 @@
 import { ChevronLeft, ChevronRight, Database, Plus } from "lucide-react";
 import { Bar, Button, Check, Stage, States, Window, type Act } from "@/vendor/stageshow";
 import { usePageTheme } from "@/lib/page-theme";
-import { environmentName, type Selection } from "@/lib/configurator";
+import { engineNames, environmentName, type Selection } from "@/lib/configurator";
 import { ConsoleSidebar, OutlineBadge, Pill } from "./faux-console";
 
 type Scene = { step: number };
@@ -109,7 +109,7 @@ export function ProvisionDemo({ engine, profile }: Selection) {
                         <div>
                           <p className="fx-title">Databases</p>
                           <p className="fx-small">
-                            MySQL or PostgreSQL on{" "}
+                            {engineNames("or")} on{" "}
                             <span style={{ whiteSpace: "nowrap" }}>{environmentName}</span>.
                           </p>
                         </div>

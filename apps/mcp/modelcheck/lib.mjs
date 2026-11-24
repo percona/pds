@@ -3,8 +3,10 @@
 // touches the network, the disk or the environment, so the tests need no control plane.
 
 export const providers = ["anthropic", "cursor"];
+export const engines = ["mysql", "postgresql", "mongodb"];
 export const variables = ["database", "engine"];
 
+const engineChoice = `${engines.slice(0, -1).join(", ")} or ${engines.at(-1)}`;
 const productionHosts = new Set(["pds.percona.com"]);
 const decisions = ["approve", "reject", "wrong-name-then-reject"];
 const kinds = ["chat", "contract", "manual"];
@@ -122,6 +124,7 @@ export function parseArgs(argv) {
         break;
       case "--engine":
         o.engine = value(i++, flag);
+        if (!engines.includes(o.engine)) throw new Error(`--engine is ${engineChoice}`);
         break;
       case "--provider": {
         const p = value(i++, flag);

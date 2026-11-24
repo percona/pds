@@ -105,7 +105,10 @@ func loadGuidance(mongodb bool) guidance {
 		panic("mcp: no prompt files")
 	}
 	for _, file := range files {
-		g.prompts = append(g.prompts, parsePrompt(file, read(strings.TrimPrefix(file, "guidance/")), promptChecks(g.engines)))
+		p := parsePrompt(file, read(strings.TrimPrefix(file, "guidance/")), promptChecks(g.engines))
+		// A description may name the offered engines, which no tier changes.
+		p.Description = render(template.Must(template.New(p.Name).Option("missingkey=zero").Parse(p.Description)), g.facts(auth.AccessRead))
+		g.prompts = append(g.prompts, p)
 	}
 
 	return g

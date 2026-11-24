@@ -11,7 +11,7 @@ import (
 // picker in apps/ui/src/features/databases/engines.ts shares: MongoDB is
 // offered to customers when both are on. A registry follows it unless a test
 // says otherwise, and so does the guidance the plugin ships.
-const MongoDBEnabled = false
+const MongoDBEnabled = true
 
 // An offered engine is one a person may ask the registry to create.
 type offered struct {
@@ -58,6 +58,12 @@ func engineLabels(engines []offered) []string {
 	}
 
 	return labels
+}
+
+// OfferedEngines is the engines a registry offers by default, as prose: "MySQL,
+// PostgreSQL and MongoDB". The Chat's role prompt names them from here.
+func OfferedEngines() string {
+	return joinWords(engineLabels(offeredEngines(MongoDBEnabled)), "and")
 }
 
 func isOffered(engines []offered, id string) bool {

@@ -38,7 +38,7 @@ Options:
   --production            Allow the production control plane. Refused without it.
   --database <name>       A scratch database on that control plane for the Chat cases. Cases that
                           need it are skipped without it.
-  --engine <mysql|postgresql>  The engine of that database, for the find case.
+  --engine <mysql|postgresql|mongodb>  The engine of that database, for the find case.
   --provider <anthropic|cursor|both>  Chat providers to run. Default both.
   --only <id,id>          Run only these cases.
   --yes                   Do not ask before each case.

@@ -1,7 +1,8 @@
 import mysqlMark from "@/assets/integrations/mysql-mark.png";
+import mongodbMark from "@/assets/integrations/mongodb-mark.svg";
 import postgresqlMark from "@/assets/integrations/postgresql-mark.png";
 
-export type EngineId = "mysql" | "postgresql";
+export type EngineId = "mysql" | "postgresql" | "mongodb";
 export type ProfileId = "dev" | "staging" | "prod";
 
 export type Engine = {
@@ -36,7 +37,20 @@ export const engines: Engine[] = [
     logo: postgresqlMark,
     database: "payments",
   },
+  {
+    id: "mongodb",
+    label: "MongoDB",
+    logo: mongodbMark,
+    database: "events",
+  },
 ];
+
+/** The engines as prose, from the one list the demo offers: "MySQL, PostgreSQL, and MongoDB". */
+export function engineNames(conjunction: "and" | "or"): string {
+  const labels = engines.map((engine) => engine.label);
+
+  return `${labels.slice(0, -1).join(", ")}, ${conjunction} ${labels[labels.length - 1]}`;
+}
 
 // The profile names and consequence lines are the console's own.
 export const profiles: Profile[] = [

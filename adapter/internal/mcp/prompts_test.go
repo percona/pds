@@ -146,6 +146,9 @@ func TestInstructionsAndPromptsNameOnlyArgumentsTheToolsTake(t *testing.T) {
 	}
 
 	camel := regexp.MustCompile(`\b[a-z]+[A-Z][A-Za-z]*\b`)
+	// MongoDB's own words, not arguments of a tool.
+	properties["replicaSet"] = true
+	properties["databaseAdmin"] = true
 	for _, access := range tiers {
 		session := connectAt(t, nil, access)
 		texts := []string{instructionsAt(t, access)}

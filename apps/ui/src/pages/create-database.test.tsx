@@ -199,7 +199,9 @@ describe("CreateDatabasePage", () => {
     expect(await screen.findByLabelText("Name")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Dev" })).toBeInTheDocument();
     expect(
-      screen.getByText("A MySQL or PostgreSQL database on this Kubernetes cluster. On spoke-a."),
+      screen.getByText(
+        "A MySQL, PostgreSQL, or MongoDB database on this Kubernetes cluster. On spoke-a.",
+      ),
     ).toBeInTheDocument();
     expect(
       screen.queryByText("Databases cannot be created until these checks pass."),
