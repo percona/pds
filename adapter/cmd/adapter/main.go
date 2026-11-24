@@ -165,41 +165,8 @@ func run() error {
 			Alerts:           alerts,
 		}
 		if environment != nil {
-			opts.Secrets = newSecretReader(environment, cfg.PodNamespace)
-			opts.MonitoringAddress = monitoringAddress(environment, cfg.PodNamespace)
-			opts.Seed = func(ctx context.Context, namespace, source, backupID, name string) error {
-				return postgresql.Seed(ctx, environment, namespace, source, backupID, name)
-			}
-			opts.Credentials = newUsersSecrets(environment)
-			opts.Support = environment
-			opts.Cleanup = func(ctx context.Context, namespace, name string) (int, error) {
-				return environment.DeleteSecrets(ctx, namespace, postgresql.LeftoverSecrets(name))
-			}
-			opts.Collect = func(ctx context.Context, namespace string, items []engine.Instance) ([]hub.HeartbeatEvent, []hub.HeartbeatUsage) {
-				events, usage, err := environment.SampleDatabases(ctx, namespace, items)
-				if err != nil {
-					logger.Warn("usage sample failed", slog.String("cause", err.Error()))
-
-					return nil, nil
-				}
-				outEvents := make([]hub.HeartbeatEvent, 0, len(events))
-				for _, event := range events {
-					outEvents = append(outEvents, hub.HeartbeatEvent{
-						DatabaseID: event.DatabaseID, At: event.At, Type: event.Type,
-						Reason: event.Reason, Message: event.Message, Count: event.Count,
-					})
-				}
-				outUsage := make([]hub.HeartbeatUsage, 0, len(usage))
-				for _, point := range usage {
-					outUsage = append(outUsage, hub.HeartbeatUsage{
-						DatabaseID: point.DatabaseID, At: point.At,
-						CPUAvg: point.CPUAvg, CPUMax: point.CPUMax,
-						MemoryAvg: point.MemoryAvg, MemoryMax: point.MemoryMax,
-						StorageBytes: point.StorageBytes, MetricsReason: point.MetricsReason,
-					})
-				}
-
-				return outEvents, outUsage
+			if opts, err = environmentOptions(ctx, cfg, environment, logger, opts); err != nil {
+				return err
 			}
 		}
 
@@ -1135,6 +1102,54 @@ func agentMonitor(metrics *service.Metrics, logger *slog.Logger) func(context.Co
 
 		return &out
 	}
+}
+
+// environmentOptions adds to the agent what it does through its own
+// environment's Kubernetes API, the backup key of a managed environment among them.
+func environmentOptions(ctx context.Context, cfg config.Config, environment *kube.Client, logger *slog.Logger, opts agent.Options) (agent.Options, error) {
+	backupKey, err := newBackupKey(ctx, cfg, environment)
+	if err != nil {
+		return opts, err
+	}
+	opts.BackupKey = backupKey
+	opts.Secrets = newSecretReader(environment, cfg.PodNamespace)
+	opts.MonitoringAddress = monitoringAddress(environment, cfg.PodNamespace)
+	opts.Seed = func(ctx context.Context, namespace, source, backupID, name string) error {
+		return postgresql.Seed(ctx, environment, namespace, source, backupID, name)
+	}
+	opts.Credentials = newUsersSecrets(environment)
+	opts.Support = environment
+	opts.Cleanup = func(ctx context.Context, namespace, name string) (int, error) {
+		return environment.DeleteSecrets(ctx, namespace, postgresql.LeftoverSecrets(name))
+	}
+	opts.Collect = func(ctx context.Context, namespace string, items []engine.Instance) ([]hub.HeartbeatEvent, []hub.HeartbeatUsage) {
+		events, usage, err := environment.SampleDatabases(ctx, namespace, items)
+		if err != nil {
+			logger.Warn("usage sample failed", slog.String("cause", err.Error()))
+
+			return nil, nil
+		}
+		outEvents := make([]hub.HeartbeatEvent, 0, len(events))
+		for _, event := range events {
+			outEvents = append(outEvents, hub.HeartbeatEvent{
+				DatabaseID: event.DatabaseID, At: event.At, Type: event.Type,
+				Reason: event.Reason, Message: event.Message, Count: event.Count,
+			})
+		}
+		outUsage := make([]hub.HeartbeatUsage, 0, len(usage))
+		for _, point := range usage {
+			outUsage = append(outUsage, hub.HeartbeatUsage{
+				DatabaseID: point.DatabaseID, At: point.At,
+				CPUAvg: point.CPUAvg, CPUMax: point.CPUMax,
+				MemoryAvg: point.MemoryAvg, MemoryMax: point.MemoryMax,
+				StorageBytes: point.StorageBytes, MetricsReason: point.MetricsReason,
+			})
+		}
+
+		return outEvents, outUsage
+	}
+
+	return opts, nil
 }
 
 // newPMMServices builds the metrics service and the alert reader. The agent

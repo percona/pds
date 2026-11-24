@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 	clientfake "k8s.io/client-go/kubernetes/fake"
 
+	"github.com/percona/pds/adapter/internal/agent"
 	"github.com/percona/pds/adapter/internal/client/backupkey"
 	"github.com/percona/pds/adapter/internal/client/kube"
 	"github.com/percona/pds/adapter/internal/config"
@@ -70,6 +71,21 @@ func TestTheBackupSpecIsWhatTheReleaseAskedFor(t *testing.T) {
 		Name: "pds-k3j9x2m4p1q7-backup", Path: "/pds/aaaaaaaaaaaa/", BoundaryARN: "arn:aws:iam::1:policy/b",
 		Bucket: "pds-123456789012-k3j9x2m4p1q7", EnvironmentTag: "k3j9x2m4p1q7",
 	}, got)
+}
+
+// The release's backup storage job waits for the Secret the agent writes the
+// key to, so an agent the release asks for a key must keep one.
+func TestAnAgentTheReleaseAsksForABackupKeyKeepsIt(t *testing.T) {
+	t.Setenv("AWS_PROFILE", "")
+	cfg := config.Config{AgentBackup: config.AgentBackup{
+		User: "pds-k3j9x2m4p1q7-backup", Path: "/pds/aaaaaaaaaaaa/", BoundaryARN: "arn:aws:iam::1:policy/b",
+		Bucket: "pds-123456789012-k3j9x2m4p1q7", Tag: "k3j9x2m4p1q7", Secret: "pds-s3", Region: "eu-west-1",
+	}}
+
+	opts, err := environmentOptions(t.Context(), cfg, kube.New(clientfake.NewClientset()), testLogger(), agent.Options{})
+
+	require.NoError(t, err)
+	assert.NotNil(t, opts.BackupKey)
 }
 
 func TestAnEnvironmentThatWasNotAskedToKeepAKeyKeepsNone(t *testing.T) {
