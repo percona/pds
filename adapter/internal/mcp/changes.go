@@ -65,7 +65,7 @@ func waitForReady(id string) *nextCall {
 
 type createDatabaseInput struct {
 	Engine                    string   `json:"engine,omitempty" jsonschema:"The database engine. Defaults to mysql."`
-	Name                      string   `json:"name" jsonschema:"Lowercase letters, digits and dashes, at most 63 characters, 37 for postgresql."`
+	Name                      string   `json:"name" jsonschema:"Lowercase letters, digits and dashes, starting with a letter, at most 63 characters, 37 for postgresql."`
 	Environment               string   `json:"environment" jsonschema:"The environment to create it on, from list_environments."`
 	Profile                   string   `json:"profile" jsonschema:"Sets the default size."`
 	CPU                       *int     `json:"cpu,omitempty" jsonschema:"CPU cores."`
@@ -127,7 +127,7 @@ type backupScheduleBody struct {
 type restoreDatabaseInput struct {
 	ID       string `json:"id" jsonschema:"A database id, copied exactly from list_databases."`
 	BackupID string `json:"backupId" jsonschema:"A succeeded backup, from list_backups."`
-	Name     string `json:"name" jsonschema:"The new database name: lowercase letters, digits and dashes, at most 19 characters."`
+	Name     string `json:"name" jsonschema:"The new database name: lowercase letters, digits and dashes, starting with a letter, at most 19 characters."`
 }
 
 type restoreDatabaseBody struct {

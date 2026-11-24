@@ -31,6 +31,13 @@ describe("isRestoreDatabaseName", () => {
     expect(isRestoreDatabaseName("orders-", "mysql")).toBe(false);
     expect(isRestoreDatabaseName("../orders", "mysql")).toBe(false);
   });
+
+  // The engine names a Service after the database, and a Service name must
+  // start with a letter.
+  it("refuses a name that starts with a digit", () => {
+    expect(isRestoreDatabaseName("1st-restore", "mysql")).toBe(false);
+    expect(isRestoreDatabaseName("1st-restore", "postgresql")).toBe(false);
+  });
 });
 
 // A PostgreSQL copy is limited by the labels its members carry, not by a

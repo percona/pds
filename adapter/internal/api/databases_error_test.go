@@ -124,6 +124,13 @@ func TestDatabaseErrorMapsTheHubRefusals(t *testing.T) {
 	}
 }
 
+func TestDatabaseErrorSaysANameStartsWithALetter(t *testing.T) {
+	got := databaseError(fmt.Errorf("%w: %q", engine.ErrInvalidName, "1stbyoc2db"), "1stbyoc2db")
+
+	require.NotNil(t, got)
+	assert.Equal(t, "A database name starts with a letter and uses lowercase letters, numbers, and dashes, up to 63 characters.", got.Message)
+}
+
 func TestDatabaseErrorMapsATimeout(t *testing.T) {
 	got := databaseError(fmt.Errorf("get instance: %w", context.DeadlineExceeded), "orders-dev")
 

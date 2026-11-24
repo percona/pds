@@ -688,7 +688,7 @@ func databaseError(err error, subject string) *AppError {
 		return Validation(longName.UserMessage()).WithCause(err)
 
 	case errors.Is(err, engine.ErrInvalidName):
-		return Validation("A database name is lowercase letters, numbers, and dashes, up to 63 characters.").
+		return Validation("A database name starts with a letter and uses lowercase letters, numbers, and dashes, up to 63 characters.").
 			WithCause(err)
 
 	case errors.Is(err, engine.ErrInvalidNamespace):

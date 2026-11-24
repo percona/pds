@@ -1136,11 +1136,12 @@ func TestRestoreRefusesANameThatIsNotALabel(t *testing.T) {
 	})
 
 	names := map[string]string{
-		"traversal": "../../spoke-b/instances/evil",
-		"slash":     "orders/restore",
-		"space":     "orders restore",
-		"capital":   "OrdersRestore",
-		"empty":     "",
+		"traversal":     "../../spoke-b/instances/evil",
+		"slash":         "orders/restore",
+		"space":         "orders restore",
+		"capital":       "OrdersRestore",
+		"leading digit": "1st-restore",
+		"empty":         "",
 	}
 
 	for label, name := range names {
@@ -1201,12 +1202,13 @@ func TestCreateRefusesANameThatIsNotALabel(t *testing.T) {
 	ctx := context.Background()
 
 	names := map[string]string{
-		"traversal":   "../../spoke-b/instances/evil",
-		"slash":       "orders/dev",
-		"space":       "orders dev",
-		"capital":     "OrdersDev",
-		"leading dot": ".orders",
-		"empty":       "",
+		"traversal":     "../../spoke-b/instances/evil",
+		"slash":         "orders/dev",
+		"space":         "orders dev",
+		"capital":       "OrdersDev",
+		"leading dot":   ".orders",
+		"leading digit": "1stbyoc2db",
+		"empty":         "",
 	}
 
 	for label, name := range names {

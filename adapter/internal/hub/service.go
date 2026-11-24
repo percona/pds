@@ -269,8 +269,8 @@ func (s *Service) Create(ctx context.Context, in engine.CreateInput) (*engine.In
 	}
 	// The HTTP role never reaches a plugin. An unchecked name becomes a path
 	// segment in the desired-state tree and a metadata.name Flux has to apply.
-	if !ValidName(name) {
-		return nil, fmt.Errorf("%w: %q must be lowercase letters, numbers, and dashes", engine.ErrInvalidName, name)
+	if !ValidDatabaseName(name) {
+		return nil, fmt.Errorf("%w: %q must start with a letter and be lowercase letters, numbers, and dashes", engine.ErrInvalidName, name)
 	}
 	if flavor.ID == oe.PostgreSQL.ID && len(name) > maxPostgreSQLName {
 		return nil, &engine.BoundsError{
@@ -514,8 +514,8 @@ func (s *Service) RestoreToNewDatabase(ctx context.Context, id, backupID, name s
 	name = strings.TrimSpace(name)
 	// The name becomes a path segment in the desired-state tree and a
 	// metadata.name Flux applies, so it is checked before anything is read.
-	if !ValidName(name) {
-		return nil, fmt.Errorf("%w: %q must be lowercase letters, numbers, and dashes", engine.ErrInvalidName, name)
+	if !ValidDatabaseName(name) {
+		return nil, fmt.Errorf("%w: %q must start with a letter and be lowercase letters, numbers, and dashes", engine.ErrInvalidName, name)
 	}
 	if err := s.requireConnected(environment); err != nil {
 		return nil, err
