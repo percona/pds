@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
 
 	"sigs.k8s.io/yaml"
 )
@@ -72,12 +73,13 @@ type pmmRule struct {
 const (
 	pmmMySQLGroup      = "MySQL"
 	pmmPostgreSQLGroup = "PostgreSQL"
+	pmmMongoDBGroup    = "MongoDB"
 	// pmmSharedGroup holds the rules about the nodes under a database, which
 	// look the same for every engine.
 	pmmSharedGroup = "Nodes"
 )
 
-// pmmRuleCatalog is the MySQL rules, the PostgreSQL rules and the shared ones.
+// pmmRuleCatalog is the rules of each engine and the shared ones.
 // A rule id is the same across engines for the same failure, because the
 // control plane picks a customer's action from the id.
 var pmmRuleCatalog = []pmmRule{
@@ -149,6 +151,53 @@ var pmmRuleCatalog = []pmmRule{
 		threshold: 90,
 		summary:   "{{ $labels.service_name }} uses over 90% of its allowed connections.",
 	},
+	{
+		// mongodb_up is 1 while the exporter reaches mongod. Like PostgreSQL's,
+		// every expression derives its labels from node_name.
+		group: pmmMongoDBGroup, id: "service_down", title: "MongoDB is down", severity: "critical", hold: "2m",
+		expr:      `min by (cluster, namespace, service_name) (` + byDatabase(MongoDBUpMetric) + `)`,
+		op:        "lt",
+		threshold: 1,
+		summary:   "MongoDB is not responding on {{ $labels.service_name }}.",
+	},
+	{
+		group: pmmMongoDBGroup, id: "disk_used", title: "MongoDB data volume is almost full", severity: "warning", hold: "10m",
+		expr:      diskUsedExpr(MongoDBDataDir),
+		op:        "gt",
+		threshold: 85,
+		summary:   "The data volume on {{ $labels.node_name }} is over 85% full.",
+	},
+	{
+		// A replica set of one member has no lag series, so the rule reads no
+		// data there and stays quiet.
+		group: pmmMongoDBGroup, id: "replication_lag", title: "MongoDB replication is behind", severity: "warning", hold: "5m",
+		expr:      `max by (cluster, namespace, service_name) (` + byDatabase(MongoDBReplicationLagMetric) + `)`,
+		op:        "gt",
+		threshold: 30,
+		summary:   "{{ $labels.service_name }} is more than 30 seconds behind.",
+	},
+	{
+		group: pmmMongoDBGroup, id: "connections_used", title: "MongoDB connections are nearly exhausted", severity: "warning", hold: "5m",
+		expr: `max by (cluster, namespace, service_name) (100 * ` +
+			`sum by (cluster, namespace, service_name) (` +
+			byDatabase(mongoDBConnections(MongoDBConnectionsOpen)) + `) / ` +
+			`sum by (cluster, namespace, service_name) (` +
+			byDatabase(mongoDBConnections(MongoDBConnectionsOpen, MongoDBConnectionsAvailable)) + `))`,
+		op:        "gt",
+		threshold: 90,
+		summary:   "{{ $labels.service_name }} uses over 90% of its allowed connections.",
+	},
+}
+
+// mongoDBConnections selects the connections series in the given states. The
+// states are fixed names, never a customer's input.
+func mongoDBConnections(states ...string) string {
+	matcher := `="` + states[0] + `"`
+	if len(states) > 1 {
+		matcher = `=~"` + strings.Join(states, "|") + `"`
+	}
+
+	return MongoDBConnectionsMetric + `{` + MongoDBConnectionsStateLabel + matcher + `}`
 }
 
 // diskUsedExpr is the percentage of the data volume mounted at dir that is in
@@ -192,10 +241,14 @@ type grafanaRuleFile struct {
 }
 
 // uid keeps the MySQL and shared rules' original uids, so an upgrade replaces
-// them in place, and prefixes the PostgreSQL ones, whose ids repeat MySQL's.
+// them in place, and prefixes the PostgreSQL and MongoDB ones, whose ids repeat
+// MySQL's.
 func (r pmmRule) uid() string {
-	if r.group == pmmPostgreSQLGroup {
+	switch r.group {
+	case pmmPostgreSQLGroup:
 		return "pds-postgresql-" + r.id
+	case pmmMongoDBGroup:
+		return "pds-mongodb-" + r.id
 	}
 
 	return "pds-" + r.id
@@ -259,12 +312,12 @@ func (r pmmRule) toGrafana() grafanaRule {
 }
 
 // pmmRulesYAML is the Grafana alerting provisioning file for the curated
-// MySQL and PostgreSQL rules. Provisioned rules are read-only in PMM. Dollar
+// MySQL, PostgreSQL and MongoDB rules. Provisioned rules are read-only in PMM. Dollar
 // signs stay single: Grafana 12 does not expand them in alert rules, so
 // doubling would load a literal $$1 into the expression.
 func pmmRulesYAML() ([]byte, error) {
 	var groups []grafanaRuleGroup
-	for _, name := range []string{pmmMySQLGroup, pmmPostgreSQLGroup, pmmSharedGroup} {
+	for _, name := range []string{pmmMySQLGroup, pmmPostgreSQLGroup, pmmMongoDBGroup, pmmSharedGroup} {
 		var rules []grafanaRule
 		for _, r := range pmmRuleCatalog {
 			if r.group == name {
