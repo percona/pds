@@ -291,6 +291,32 @@ func TestEksTagsAndDeletesAreScopedByTheNamesPdsGives(t *testing.T) {
 	assert.Equal(t, map[string]any{"StringEquals": region}, remove["Condition"])
 }
 
+// EC2 authorizes CreateNatGateway against the existing subnet and Elastic IP as
+// well as the new gateway, and request tags are only in the context of the
+// resource being created. The subnet and the address are matched by the
+// ownership tag they already carry.
+func TestANatGatewayIsCreatedFromTheOwnedSubnetAndAddress(t *testing.T) {
+	policy := loadCloudTemplate(t).Resources["NetworkPolicy"]
+
+	var owned map[string]any
+	for _, statement := range statements(t, policy.Properties["PolicyDocument"]) {
+		if statement["Effect"] == "Allow" && statement["Sid"] == "CreateNatGatewayFromOwnedParts" {
+			owned = statement
+		}
+	}
+
+	require.NotNil(t, owned, "CloudFormation can use the subnet and the address it made")
+	assert.Equal(t, []string{"ec2:CreateNatGateway"}, asList(owned["Action"]))
+	assert.Equal(t, []any{
+		map[string]any{"Fn::Sub": "arn:aws:ec2:*:${AWS::AccountId}:subnet/*"},
+		map[string]any{"Fn::Sub": "arn:aws:ec2:*:${AWS::AccountId}:elastic-ip/*"},
+	}, owned["Resource"])
+	assert.Equal(t, map[string]any{
+		"Null":         map[string]any{"aws:ResourceTag/percona.com/pds": "false"},
+		"StringEquals": map[string]any{"aws:RequestedRegion": map[string]any{"Ref": "AllowedRegions"}},
+	}, owned["Condition"])
+}
+
 func TestTheServiceLinkedRolesItMayCreateAreNamedNotOpen(t *testing.T) {
 	found := false
 	for _, policy := range loadCloudTemplate(t).ofType("AWS::IAM::ManagedPolicy") {
@@ -591,6 +617,19 @@ func TestTheServiceRoleMayHandTheAgentRoleToPodIdentity(t *testing.T) {
 	}
 	assert.True(t, passed)
 	assert.Contains(t, tpl.Outputs, "AgentRoleArn")
+}
+
+// EKS reads the policies attached to the node role with the caller's
+// credentials before it creates a node group.
+func TestTheServiceRoleMayListThePoliciesOfTheConnectionsRoles(t *testing.T) {
+	var listed bool
+	for _, statement := range statements(t, loadCloudTemplate(t).Resources["IamPolicy"].Properties["PolicyDocument"]) {
+		if statement["Effect"] == "Allow" && contains(asList(statement["Action"]), "iam:ListAttachedRolePolicies") {
+			listed = true
+			assert.Equal(t, map[string]any{"Fn::Sub": "arn:aws:iam::${AWS::AccountId}:role/pds/${ConnectionId}/*"}, statement["Resource"])
+		}
+	}
+	assert.True(t, listed, "CloudFormation can create the node group")
 }
 
 func TestTheGrantsAnAWSRefusalIsComparedWithAreTheTemplatesOwn(t *testing.T) {

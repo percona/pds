@@ -250,6 +250,20 @@ Resources:
               StringEquals:
                 "aws:RequestedRegion":
                   Ref: AllowedRegions
+          # CreateNatGateway is also checked against the subnet and the Elastic
+          # IP it uses, which exist already and carry no request tags.
+          - Sid: CreateNatGatewayFromOwnedParts
+            Effect: Allow
+            Action: "ec2:CreateNatGateway"
+            Resource:
+              - Fn::Sub: "arn:aws:ec2:*:${AWS::AccountId}:subnet/*"
+              - Fn::Sub: "arn:aws:ec2:*:${AWS::AccountId}:elastic-ip/*"
+            Condition:
+              "Null":
+                "aws:ResourceTag/percona.com/pds": "false"
+              StringEquals:
+                "aws:RequestedRegion":
+                  Ref: AllowedRegions
           - Sid: TagOnlyWhileCreating
             Effect: Allow
             Action: "ec2:CreateTags"
@@ -451,9 +465,12 @@ Resources:
             Condition:
               "Null":
                 "aws:ResourceTag/percona.com/pds": "false"
+          # EKS lists the node role's policies before it creates a node group.
           - Sid: ReadRoles
             Effect: Allow
-            Action: "iam:GetRole"
+            Action:
+              - "iam:GetRole"
+              - "iam:ListAttachedRolePolicies"
             Resource:
               Fn::Sub: "arn:aws:iam::${AWS::AccountId}:role/pds/${ConnectionId}/*"
 
