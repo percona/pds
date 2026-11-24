@@ -497,8 +497,17 @@ server accepted it, the agent deletes the `PerconaPGCluster` it made (the one
 whose `dataSource` restores that backup) before reporting the failure.
 
 A MongoDB database is one replica set whose Instance carries the engine
-component alone: no proxy and no monitoring component. The
-heartbeat names the engines the agent serves (`engines`), and the hub refuses a
+component, and a monitoring component on an environment that has a
+monitoring config, as the other engines do: no proxy. Each member pod, named
+`<database>-rs0-<n>`, then carries a pmm-client sidecar. The metrics service
+charts a MongoDB database from `mongodb_exporter`: `sum(mongodb_connections)`
+in state `current` for connections, the largest
+`mongodb_mongod_replset_member_replication_lag` for replication lag (a replica
+set of one member has no such series, and its chart is empty rather than
+failing), `mongodb_up` or node_exporter for the probe, and the volume at
+`/data/db` for disk. The series and label names are one table in
+`adapter/internal/hub/mongodb_metrics.go`. An engine the metrics service has
+no queries for charts CPU and memory only. The heartbeat names the engines the agent serves (`engines`), and the hub refuses a
 MongoDB create on an environment whose last beat does not name it, because that
 environment needs an update to get the provider. MySQL and PostgreSQL need no
 such mark. The hub also refuses, before it writes anything, a MongoDB name over

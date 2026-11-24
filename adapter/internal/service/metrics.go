@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/percona/pds/adapter/internal/client/pmm"
+	"github.com/percona/pds/adapter/internal/engine/mongodb"
+	"github.com/percona/pds/adapter/internal/engine/mysql"
 	"github.com/percona/pds/adapter/internal/engine/postgresql"
 	"github.com/percona/pds/adapter/internal/hub"
 )
@@ -111,7 +113,7 @@ type MetricsRequest struct {
 	// it in front of the pod name in node_name.
 	Namespace string
 	// Engine picks the connection, replication, disk and probe queries. Blank
-	// or unknown means MySQL.
+	// means MySQL, and an engine the service has no queries for gets none.
 	Engine string
 	Window MetricWindow
 	Kinds  []MetricKind
@@ -218,13 +220,15 @@ var metricQueries = []metricQuery{
 
 // engineQueries are the expressions and paths that differ between engines. The
 // shared CPU and memory queries read node_exporter, which every engine's PMM
-// client sidecar runs.
+// client sidecar runs. An empty expression is a chart the engine has no query
+// for, and it is not asked of PMM.
 type engineQueries struct {
 	connections string
 	lag         string
 	probe       string
 	// dataDir is where the provider mounts the data volume, which is the
-	// filesystem the disk chart is about.
+	// filesystem the disk chart is about. Empty means the disk chart has no
+	// volume to read.
 	dataDir string
 }
 
@@ -253,24 +257,81 @@ var postgresqlQueries = engineQueries{
 	dataDir:     hub.PostgreSQLDataDir,
 }
 
-func queriesFor(engine string) engineQueries {
-	if engine == postgresql.EngineID {
-		return postgresqlQueries
-	}
-
-	return mysqlQueries
+// mongodbQueries read mongodb_exporter, with the names in hub, which the alert
+// rules read too. Connections count the open ones across the members. The lag
+// series exists once per secondary, so a one member replica set has none and
+// its chart is an empty series. The probe leaves pending on node_exporter too,
+// as the others do.
+var mongodbQueries = engineQueries{
+	connections: `sum(` + hub.MongoDBConnectionsMetric + `{cluster="$cluster",` +
+		hub.MongoDBConnectionsStateLabel + `="` + hub.MongoDBConnectionsOpen + `"})`,
+	lag:     `max(` + hub.MongoDBReplicationLagMetric + `{cluster="$cluster"})`,
+	probe:   hub.MongoDBUpMetric + `{cluster="$cluster"} or node_uname_info{cluster="$cluster"}`,
+	dataDir: hub.MongoDBDataDir,
 }
 
-// exprFor is the expression behind one chart for this engine.
+// nodeQueries are what an engine the service has no queries for gets: a probe
+// on node_exporter, which every PMM client sidecar runs, and nothing else. It
+// shows no chart another engine's series would have filled with the wrong data.
+var nodeQueries = engineQueries{probe: `node_uname_info{cluster="$cluster"}`}
+
+// queriesFor picks the engine's queries. A blank engine is MySQL, which is what
+// an agent that predates the field reports for.
+func queriesFor(engine string) engineQueries {
+	switch engine {
+	case "", mysql.EngineID:
+		return mysqlQueries
+	case postgresql.EngineID:
+		return postgresqlQueries
+	case mongodb.EngineID:
+		return mongodbQueries
+	default:
+		return nodeQueries
+	}
+}
+
+// exprFor is the expression behind one chart for this engine, empty when the
+// engine has none.
 func (q engineQueries) exprFor(definition metricQuery) string {
 	switch definition.Kind {
 	case MetricConnections:
 		return q.connections
 	case MetricReplicationLag:
 		return q.lag
+	case MetricDisk:
+		if q.dataDir == "" {
+			return ""
+		}
+
+		return definition.Expr
 	default:
 		return definition.Expr
 	}
+}
+
+// queryTarget is what an expression's placeholders are filled with.
+type queryTarget struct {
+	namespace string
+	cluster   string
+	rate      string
+}
+
+// queryChart asks PMM for one chart. An expression the engine has none of is
+// an empty answer, the same as a series PMM has no data for.
+func (m *Metrics) queryChart(
+	ctx context.Context,
+	snapshot *MetricSnapshot,
+	queries engineQueries,
+	definition metricQuery,
+	target queryTarget,
+	step time.Duration,
+) ([]pmm.Series, error) {
+	expr := queries.exprFor(definition)
+	if expr == "" {
+		return nil, nil
+	}
+
+	return m.query(ctx, snapshot, expand(expr, target.namespace, target.cluster, target.rate, queries.dataDir), step)
 }
 
 // ForDatabase reads one snapshot. It never fails because PMM has nothing to
@@ -333,7 +394,7 @@ func (m *Metrics) ForDatabase(ctx context.Context, in MetricsRequest) (*MetricSn
 			return nil, fmt.Errorf("%w: %q", ErrUnknownMetric, kind)
 		}
 
-		points, err := m.query(ctx, snapshot, expand(queries.exprFor(definition), namespace, cluster, rate, queries.dataDir), step)
+		points, err := m.queryChart(ctx, snapshot, queries, definition, queryTarget{namespace, cluster, rate}, step)
 		if err != nil {
 			if reason, ok := pmmNotUp(err); ok {
 				return pending(snapshot, kinds, reason), nil
@@ -557,7 +618,8 @@ func expand(expr, namespace, cluster, rate, dataDir string) string {
 
 // memberPattern matches the node_name PMM 3 gives a member pod of one database:
 // the namespace, a hyphen, then the pod name, which is <database>-pxc-<n> for a
-// PXC member and <database>-<instance set>-<suffix>-<n> for a PostgreSQL one.
+// PXC member, <database>-<instance set>-<suffix>-<n> for a PostgreSQL one and
+// <database>-rs0-<n> for a MongoDB one.
 // It is anchored at both ends and starts at the namespace, so orders does not
 // match the pods of my-orders, or of an orders in another namespace.
 //

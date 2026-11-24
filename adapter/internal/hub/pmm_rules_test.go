@@ -206,7 +206,7 @@ func TestEveryAlertRuleCanBeMappedToADatabase(t *testing.T) {
 func TestNodeDownMapsMembersOfBothEngines(t *testing.T) {
 	query := allRules(t)["Nodes/node_down"].Data[0].Model["expr"].(string)
 
-	for _, node := range []string{"db-orders-pxc-2", "db-orders-instance1-x7k2-0", "db-orders-instance-ab12-1"} {
+	for _, node := range []string{"db-orders-pxc-2", "db-orders-instance1-x7k2-0", "db-orders-instance-ab12-1", "db-orders-rs0-2"} {
 		got := outputLabels(t, query, node)
 		assert.Equal(t, "orders", got["cluster"], node)
 		assert.Equal(t, "db", got["namespace"], node)
@@ -385,8 +385,8 @@ func TestPostgreSQLRuleExpressionsArePinned(t *testing.T) {
 	expr := func(id string) string { return rules[id].Data[0].Model["expr"].(string) }
 	derive := func(selector string) string {
 		return `label_replace(label_replace(` + selector +
-			`, "namespace", "$1", "node_name", "([^-]+)-.+-(?:pxc-[0-9]+|instance[0-9]*-[a-z0-9]{4}-[0-9]+)")` +
-			`, "cluster", "$1", "node_name", "[^-]+-(.+)-(?:pxc-[0-9]+|instance[0-9]*-[a-z0-9]{4}-[0-9]+)")`
+			`, "namespace", "$1", "node_name", "([^-]+)-.+-(?:pxc-[0-9]+|instance[0-9]*-[a-z0-9]{4}-[0-9]+|rs0-[0-9]+)")` +
+			`, "cluster", "$1", "node_name", "[^-]+-(.+)-(?:pxc-[0-9]+|instance[0-9]*-[a-z0-9]{4}-[0-9]+|rs0-[0-9]+)")`
 	}
 
 	assert.Equal(t, `min by (cluster, namespace, service_name) (`+derive(`pg_up`)+`)`,
@@ -413,6 +413,9 @@ func TestByDatabaseDerivesTheDatabaseFromAMemberNodeName(t *testing.T) {
 		"db-orders-instance-ab12-1":  {"db", "orders"},
 		"db-orders-instance2-pxc-0":  {"db", "orders-instance2"},
 		"db-pxc-1-instance1-x7k2-0":  {"db", "pxc-1"},
+		"db-orders-rs0-0":            {"db", "orders"},
+		"db-orders-rs0-11":           {"db", "orders"},
+		"db-orders-rs0-rs0-0":        {"db", "orders-rs0"},
 	}
 	for node, want := range cases {
 		got := outputLabels(t, byDatabase("up"), node)
@@ -431,6 +434,8 @@ func TestByDatabaseLeavesNonMembersAlone(t *testing.T) {
 		"db-orders-instance1-x7k2x-0",
 		"db-orders-instance1-X7K2-0",
 		"db-orders-pgbouncer-7d9c5b6f4-xk2lp",
+		"db-orders-rs0",
+		"db-orders-rs1-0",
 	} {
 		got := outputLabels(t, byDatabase("up"), node)
 		assert.NotContains(t, got, "cluster", node)

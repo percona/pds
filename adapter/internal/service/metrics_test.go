@@ -447,6 +447,15 @@ var memberNodes = map[string]map[string]float64{
 		"db-my-orders-instance1-x7z9-0": 90,
 		"other-orders-instance1-b2c4-0": 90,
 	},
+	"MongoDB members": {
+		"db-orders-rs0-0":      20,
+		"db-orders-rs0-1":      20,
+		"db-my-orders-rs0-0":   90,
+		"other-orders-rs0-0":   90,
+		"db-orders-prod-rs0-0": 90,
+		"db-orders-rs0-rs0-0":  90,
+		"db-orders-rs0-pxc-0":  90,
+	},
 }
 
 func TestForDatabaseChartsOnlyItsOwnMembers(t *testing.T) {

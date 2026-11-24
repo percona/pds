@@ -49,6 +49,8 @@ func TestLongestDatabaseDoesNotShareAPrefix(t *testing.T) {
 	names := []string{"orders", "orders-prod"}
 	assert.Equal(t, "orders-prod", kube.LongestDatabase("Pod/orders-prod-pxc-0", names))
 	assert.Equal(t, "orders", kube.LongestDatabase("Pod/datadir-orders-pxc-0", names))
+	assert.Equal(t, "orders-prod", kube.LongestDatabase("Pod/orders-prod-rs0-0", names))
+	assert.Equal(t, "orders", kube.LongestDatabase("PersistentVolumeClaim/mongod-data-orders-rs0-1", names))
 }
 
 func TestEventsMatchesTheObjectsDerivedFromADatabase(t *testing.T) {

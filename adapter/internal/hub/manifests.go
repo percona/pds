@@ -206,7 +206,7 @@ func buildInstanceYAML(
 			Replicas: everest.Ptr(oe.ProxyReplicasFor(p.members)),
 		}
 	}
-	if targets.MonitoringConfig != "" && !p.flavor.EngineOnly {
+	if targets.MonitoringConfig != "" {
 		monitoring, err := monitoringComponent(targets.MonitoringConfig)
 		if err != nil {
 			return nil, profile{}, err
