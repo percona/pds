@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"testing"
@@ -58,7 +57,7 @@ func TestEachWorkKindReachesTheDatabaseService(t *testing.T) {
 	db := &fakeDatabases{}
 	replicas := 3
 
-	results := applyWork(context.Background(), quietLogger(), db, nil, nil, []hub.Work{
+	results := applyWork(context.Background(), quietLogger(), db, nil, []hub.Work{
 		{ID: "w1", Kind: hub.WorkBackup, Database: "pds.orders-dev", BackupID: "orders-dev-1"},
 		{ID: "w2", Kind: hub.WorkDelete, Database: "pds.orders-old"},
 		{ID: "w3", Kind: hub.WorkScale, Database: "pds.orders-dev", Replicas: &replicas},
@@ -79,7 +78,7 @@ func TestEachWorkKindReachesTheDatabaseService(t *testing.T) {
 func TestAFailedItemIsReportedRatherThanDropped(t *testing.T) {
 	db := &fakeDatabases{backupErr: errors.New("instance is not ready")}
 
-	results := applyWork(context.Background(), quietLogger(), db, nil, nil, []hub.Work{
+	results := applyWork(context.Background(), quietLogger(), db, nil, []hub.Work{
 		{ID: "w1", Kind: hub.WorkBackup, Database: "pds.orders-dev"},
 	})
 
@@ -88,66 +87,12 @@ func TestAFailedItemIsReportedRatherThanDropped(t *testing.T) {
 	assert.Contains(t, results[0].Error, "instance is not ready")
 }
 
-// A seed names the database it seeds from as namespace.name, and carries the
-// copy's name apart from it. The copy lands in the source's namespace.
-func TestASeedReachesTheSeeder(t *testing.T) {
-	var got struct{ namespace, source, backup, name string }
-	seed := func(_ context.Context, namespace, source, backupID, name string) error {
-		got.namespace, got.source, got.backup, got.name = namespace, source, backupID, name
-
-		return nil
-	}
-
-	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, seed, []hub.Work{
-		{ID: "w1", Kind: hub.WorkSeed, Database: "pds.reporting", BackupID: "reporting-1", Name: "reporting-copy"},
-	})
-
-	require.Len(t, results, 1)
-	assert.Empty(t, results[0].Error)
-	assert.Equal(t, "pds", got.namespace)
-	assert.Equal(t, "reporting", got.source)
-	assert.Equal(t, "reporting-1", got.backup)
-	assert.Equal(t, "reporting-copy", got.name)
-}
-
-func TestAFailedSeedIsReported(t *testing.T) {
-	seed := func(context.Context, string, string, string, string) error { return errors.New("backup not found") }
-
-	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, seed, []hub.Work{
-		{ID: "w1", Kind: hub.WorkSeed, Database: "pds.reporting", BackupID: "gone", Name: "copy"},
-	})
-
-	require.Len(t, results, 1)
-	assert.Contains(t, results[0].Error, "backup not found")
-}
-
-// An agent that cannot seed says so, so the hub stops offering the item.
-func TestASeedWithNoSeederIsReportedRatherThanLeftInFlight(t *testing.T) {
-	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, nil, []hub.Work{
-		{ID: "w1", Kind: hub.WorkSeed, Database: "pds.reporting", BackupID: "b", Name: "copy"},
-	})
-
-	require.Len(t, results, 1)
-	assert.Contains(t, results[0].Error, "cannot seed")
-}
-
-func TestASeedWithoutANamespacedSourceIsReported(t *testing.T) {
-	seed := func(context.Context, string, string, string, string) error { return nil }
-
-	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, seed, []hub.Work{
-		{ID: "w1", Kind: hub.WorkSeed, Database: "reporting", BackupID: "b", Name: "copy"},
-	})
-
-	require.Len(t, results, 1)
-	assert.Contains(t, results[0].Error, "namespace")
-}
-
 // A spoke running an older agent than the hub gets kinds it does not know.
 // Reporting one keeps the hub from handing it out forever.
 func TestAnUnknownKindIsReportedAndSkipped(t *testing.T) {
 	db := &fakeDatabases{}
 
-	results := applyWork(context.Background(), quietLogger(), db, nil, nil, []hub.Work{
+	results := applyWork(context.Background(), quietLogger(), db, nil, []hub.Work{
 		{ID: "w1", Kind: "teleport", Database: "pds.orders-dev"},
 	})
 
@@ -164,7 +109,7 @@ func TestCredentialsWorkPreparesTheUsersSecret(t *testing.T) {
 		return nil
 	}
 
-	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, prepare, nil, []hub.Work{
+	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, prepare, []hub.Work{
 		{ID: "w1", Kind: hub.WorkCredentials, Database: "pds.orders"},
 	})
 
@@ -179,7 +124,7 @@ func TestCredentialsWorkPreparesTheUsersSecret(t *testing.T) {
 func TestCredentialsWorkReportsAFailure(t *testing.T) {
 	prepare := func(context.Context, string, string) error { return errors.New("secrets is forbidden") }
 
-	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, prepare, nil, []hub.Work{
+	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, prepare, []hub.Work{
 		{ID: "w1", Kind: hub.WorkCredentials, Database: "pds.orders"},
 	})
 
@@ -188,7 +133,7 @@ func TestCredentialsWorkReportsAFailure(t *testing.T) {
 }
 
 func TestCredentialsWorkWithoutKubernetesIsReported(t *testing.T) {
-	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, nil, []hub.Work{
+	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, []hub.Work{
 		{ID: "w1", Kind: hub.WorkCredentials, Database: "pds.orders"},
 	})
 
@@ -204,7 +149,7 @@ func TestCredentialsWorkRefusesAnIDWithoutANamespace(t *testing.T) {
 		return nil
 	}
 
-	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, prepare, nil, []hub.Work{
+	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, prepare, []hub.Work{
 		{ID: "w1", Kind: hub.WorkCredentials, Database: "orders"},
 	})
 
@@ -213,64 +158,13 @@ func TestCredentialsWorkRefusesAnIDWithoutANamespace(t *testing.T) {
 	assert.False(t, called)
 }
 
-// The hub switches on the reason, not on the error text, so each way a seed
-// can fail carries the reason that names its cause.
-func TestAFailedSeedCarriesTheReasonForItsCause(t *testing.T) {
-	for name, tc := range map[string]struct {
-		err    error
-		reason string
-	}{
-		"backup missing":      {fmt.Errorf("%w: b", engine.ErrBackupNotFound), hub.SeedBackupUnusable},
-		"backup not finished": {fmt.Errorf("%w: b is %q", engine.ErrBackupUnusable, "Running"), hub.SeedBackupUnusable},
-		"source gone":         {fmt.Errorf("%w: reporting", engine.ErrNotFound), hub.SeedSourceGone},
-		"no access":           {fmt.Errorf("%w: %w", engine.ErrSeedUnavailable, errors.New("forbidden")), hub.SeedUnavailable},
-		"name taken":          {fmt.Errorf("%w: copy", engine.ErrExists), hub.SeedOther},
-		"anything else":       {errors.New("api down"), hub.SeedOther},
-	} {
-		t.Run(name, func(t *testing.T) {
-			seed := func(context.Context, string, string, string, string) error { return tc.err }
-
-			results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, seed, []hub.Work{
-				{ID: "w1", Kind: hub.WorkSeed, Database: "pds.reporting", BackupID: "b", Name: "copy"},
-			})
-
-			require.Len(t, results, 1)
-			assert.Equal(t, tc.reason, results[0].Reason)
-			assert.Equal(t, tc.err.Error(), results[0].Error, "the text stays for the log")
-		})
-	}
-}
-
-func TestASeedWithNoSeederReportsItCannotSeed(t *testing.T) {
-	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, nil, []hub.Work{
-		{ID: "w1", Kind: hub.WorkSeed, Database: "pds.reporting", BackupID: "b", Name: "copy"},
+// A seed item queued before the agent stopped seeding is answered as an unknown
+// kind, so the hub acknowledges it and drops it instead of handing it out again.
+func TestALeftoverSeedItemIsReportedAsUnknown(t *testing.T) {
+	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, []hub.Work{
+		{ID: "w1", Kind: "seed", Database: "pds.reporting"},
 	})
 
 	require.Len(t, results, 1)
-	assert.Equal(t, hub.SeedUnavailable, results[0].Reason)
-}
-
-func TestASeedWithoutANamespacedSourceReportsOther(t *testing.T) {
-	seed := func(context.Context, string, string, string, string) error { return nil }
-
-	results := applyWork(context.Background(), quietLogger(), &fakeDatabases{}, nil, seed, []hub.Work{
-		{ID: "w1", Kind: hub.WorkSeed, Database: "reporting", BackupID: "b", Name: "copy"},
-	})
-
-	require.Len(t, results, 1)
-	assert.Equal(t, hub.SeedOther, results[0].Reason)
-}
-
-func TestOnlyAFailedSeedCarriesAReason(t *testing.T) {
-	seed := func(context.Context, string, string, string, string) error { return nil }
-	databases := &fakeDatabases{}
-
-	results := applyWork(context.Background(), quietLogger(), databases, nil, seed, []hub.Work{
-		{ID: "w1", Kind: hub.WorkSeed, Database: "pds.reporting", BackupID: "b", Name: "copy"},
-		{ID: "w2", Kind: hub.WorkDelete, Database: "pds.gone"},
-	})
-
-	require.Len(t, results, 2)
-	assert.Empty(t, results[0].Reason)
-	assert.Empty(t, results[1].Reason)
+	assert.Equal(t, "unknown kind seed", results[0].Error)
 }

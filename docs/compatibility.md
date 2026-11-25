@@ -151,7 +151,7 @@ lifecycle contract before merge:
    and waits for cleanup. The `postgresql` suite runs
    `scripts/hub-smoke.sh --engine postgresql` on a lab of its own: a PostgreSQL
    Dev database through create, Ready, scale, schedule, backup, restore
-   (which seeds a new cluster first) and delete. The alert and unmodeled
+   and delete. The alert and unmodeled
    field steps are MySQL only. Both suites then update the connected environment
    in place with `--update` on the same pin and check the databases they made
    are still Ready. The `mcp` suite brings up a lab with
