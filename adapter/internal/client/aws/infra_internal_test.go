@@ -239,6 +239,17 @@ func TestOpenAccessIsIdempotent(t *testing.T) {
 	assert.Empty(t, kube.updates, "an endpoint already open to those addresses is left alone")
 }
 
+func TestOpenAccessSaysAnEKSControlPlaneThatIsGoneIsMissing(t *testing.T) {
+	// The role may create an access entry only on an EKS cluster tagged
+	// percona.com/pds, and one that is gone has no tags, so IAM refuses before
+	// EKS can say it does not exist.
+	kube := &fakeEKS{describeErr: apiErr("ResourceNotFoundException"), entryErr: apiErr("AccessDeniedException")}
+
+	_, err := newInfra(&fakeCFN{}, kube).OpenAccess(context.Background(), target, []string{"203.0.113.7/32"})
+
+	assert.True(t, EKSMissing(err), "got %v", err)
+}
+
 func TestCloseAccessChecksTheEndpointThenClosesItAndDropsTheEntry(t *testing.T) {
 	cluster := newEKSCluster()
 	cluster.ResourcesVpcConfig.EndpointPublicAccess = true

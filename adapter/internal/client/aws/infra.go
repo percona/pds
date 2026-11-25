@@ -292,6 +292,13 @@ func (i *Infra) OpenAccess(ctx context.Context, t Target, cidrs []string) (Clust
 	}
 	client := i.eks(session)
 
+	// The EKS cluster is read first. The role may create an access entry only on
+	// an EKS cluster tagged percona.com/pds, and one that is gone has no tags, so
+	// IAM would refuse before EKS could say it does not exist.
+	cluster, err := describe(ctx, client, t.EKSName)
+	if err != nil {
+		return ClusterAccess{}, err
+	}
 	if _, err := client.CreateAccessEntry(ctx, &eks.CreateAccessEntryInput{
 		ClusterName:  &t.EKSName,
 		PrincipalArn: &t.RoleARN, Type: sdkaws.String("STANDARD"),
@@ -306,10 +313,6 @@ func (i *Infra) OpenAccess(ctx context.Context, t Target, cidrs []string) (Clust
 		return ClusterAccess{}, fmt.Errorf("associate access policy: %w", err)
 	}
 
-	cluster, err := describe(ctx, client, t.EKSName)
-	if err != nil {
-		return ClusterAccess{}, err
-	}
 	if !openTo(cluster, cidrs) {
 		if err := i.setPublic(ctx, client, t.EKSName, true, cidrs); err != nil {
 			return ClusterAccess{}, err
