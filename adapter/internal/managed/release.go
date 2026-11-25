@@ -7,6 +7,8 @@ import (
 	_ "embed"
 
 	"sigs.k8s.io/yaml"
+
+	"github.com/percona/pds/adapter/internal/hub"
 )
 
 // SpokeValues is the connected-environment overlay a managed environment's
@@ -138,7 +140,7 @@ func RenderRelease(in ReleaseInput) ([]byte, error) {
 		// Every volume a database claims carries the ownership tag, so the delete
 		// finds it by tag after the cluster is gone.
 		managedValues["taggedStorageClass"] = map[string]any{
-			"enabled": true, "tags": map[string]any{OwnershipTag: in.EnvironmentID},
+			"enabled": true, "name": hub.TaggedStorageClass, "tags": map[string]any{OwnershipTag: in.EnvironmentID},
 		}
 	}
 	merge(values, managedValues)
@@ -157,9 +159,16 @@ func RenderRelease(in ReleaseInput) ([]byte, error) {
 				"chart": "pds", "version": in.ChartVersion,
 				"sourceRef": map[string]any{"kind": "HelmRepository", "name": ChartRepository},
 			}},
+			// A new environment's first install waits for monitoring and its
+			// configuration Job, which together can take longer than Helm's
+			// 5 minute default.
+			"timeout": "15m",
+			// A failed install is left in place rather than uninstalled. Flux
+			// uninstalls before every install retry, and an uninstall removes the
+			// agent, so the environment would stop reporting what failed.
 			"install": map[string]any{
 				"createNamespace": true,
-				"remediation":     map[string]any{"retries": 3},
+				"remediation":     map[string]any{"retries": 0, "remediateLastFailure": false},
 			},
 			// A failed upgrade is attempted once, rolled back and not retried.
 			// Retries counts the attempts after the first, and a rollback after

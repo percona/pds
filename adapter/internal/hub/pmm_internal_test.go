@@ -101,7 +101,8 @@ type helmReleaseDoc struct {
 				Annotations map[string]string `json:"annotations"`
 			} `json:"service"`
 			Storage struct {
-				Size string `json:"size"`
+				Size             string `json:"size"`
+				StorageClassName string `json:"storageClassName"`
 			} `json:"storage"`
 			Resources struct {
 				Requests map[string]string `json:"requests"`
@@ -123,6 +124,21 @@ func readHelmRelease(t *testing.T, s PMMSettings, version string) helmReleaseDoc
 	require.NoError(t, yaml.Unmarshal(files[pmmDir("spoke-a")+"/helmrelease.yaml"], &doc))
 
 	return doc
+}
+
+func TestAManagedEnvironmentsPMMClaimsTheTaggedStorageClass(t *testing.T) {
+	files, err := pmmFiles("spoke-a", DefaultPMMSettings(), "1.9.1", "0123456789ab", true)
+	require.NoError(t, err)
+	var doc helmReleaseDoc
+	require.NoError(t, yaml.Unmarshal(files[pmmDir("spoke-a")+"/helmrelease.yaml"], &doc))
+
+	assert.Equal(t, TaggedStorageClass, doc.Spec.Values.Storage.StorageClassName)
+}
+
+func TestAJoinedEnvironmentsPMMUsesTheDefaultStorageClass(t *testing.T) {
+	doc := readHelmRelease(t, DefaultPMMSettings(), "1.9.1")
+
+	assert.Empty(t, doc.Spec.Values.Storage.StorageClassName)
 }
 
 func TestPMMHelmReleasePinsTheChartAndKeepsTheServiceName(t *testing.T) {

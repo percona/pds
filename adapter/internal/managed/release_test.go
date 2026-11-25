@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/yaml"
 
+	"github.com/percona/pds/adapter/internal/hub"
 	"github.com/percona/pds/adapter/internal/managed"
 )
 
@@ -115,6 +116,46 @@ func TestSpokeValuesCopyMatchesTheChart(t *testing.T) {
 	chart, err := os.ReadFile("../../../charts/pds/values-spoke.yaml")
 	require.NoError(t, err)
 	assert.Equal(t, string(chart), managed.SpokeValues, "copy charts/pds/values-spoke.yaml to internal/managed/values-spoke.yaml")
+}
+
+func TestAFailedInstallIsLeftInPlaceSoTheAgentKeepsReporting(t *testing.T) {
+	got, err := managed.RenderRelease(releaseInput())
+	require.NoError(t, err)
+	var release struct {
+		Spec struct {
+			Timeout string `json:"timeout"`
+			Install struct {
+				Remediation struct {
+					Retries              int   `json:"retries"`
+					RemediateLastFailure *bool `json:"remediateLastFailure"`
+				} `json:"remediation"`
+			} `json:"install"`
+		} `json:"spec"`
+	}
+	require.NoError(t, yaml.Unmarshal(got, &release))
+
+	remediation := release.Spec.Install.Remediation
+	assert.Zero(t, remediation.Retries, "every install retry is preceded by an uninstall")
+	require.NotNil(t, remediation.RemediateLastFailure)
+	assert.False(t, *remediation.RemediateLastFailure, "remediating an install uninstalls the agent with it")
+	assert.Equal(t, "15m", release.Spec.Timeout, "a new environment's first install outlasts Helm's 5 minute default")
+}
+
+func TestRenderReleaseNamesTheStorageClassMonitoringClaims(t *testing.T) {
+	got, err := managed.RenderRelease(releaseInput())
+	require.NoError(t, err)
+	var release struct {
+		Spec struct {
+			Values struct {
+				TaggedStorageClass struct {
+					Name string `json:"name"`
+				} `json:"taggedStorageClass"`
+			} `json:"values"`
+		} `json:"spec"`
+	}
+	require.NoError(t, yaml.Unmarshal(got, &release))
+
+	assert.Equal(t, hub.TaggedStorageClass, release.Spec.Values.TaggedStorageClass.Name)
 }
 
 func TestAFailedUpgradeRollsBackAfterOneAttemptAndStops(t *testing.T) {

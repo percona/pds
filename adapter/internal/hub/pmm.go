@@ -27,6 +27,11 @@ const (
 	pmmMaxStorageGi     = 2000
 )
 
+// TaggedStorageClass is the StorageClass a managed environment's pds release
+// installs as the cluster's default, tagging every volume with the
+// environment's ID.
+const TaggedStorageClass = "pds-gp3"
+
 // How far monitoring is reachable. Cluster only is the default: nothing
 // outside the Kubernetes cluster can open it. Private puts it behind an internal cloud
 // load balancer, and public behind an internet-facing one. The names match
@@ -206,6 +211,14 @@ func pmmFiles(environment string, in PMMSettings, chartVersion, ownershipID stri
 		}}
 	}
 
+	storage := map[string]any{"size": fmt.Sprintf("%dGi", s.StorageGi)}
+	if ownershipID != "" {
+		// A managed environment's Kubernetes cluster has no default StorageClass
+		// until the pds release installs this one. A claim that names it binds
+		// as soon as it exists; one that names none waits minutes for a default.
+		storage["storageClassName"] = TaggedStorageClass
+	}
+
 	release := map[string]any{
 		"apiVersion": "helm.toolkit.fluxcd.io/v2",
 		"kind":       "HelmRelease",
@@ -229,7 +242,7 @@ func pmmFiles(environment string, in PMMSettings, chartVersion, ownershipID stri
 				"fullnameOverride":  "pmm",
 				"priorityClassName": "pds-bulk",
 				"service":           service,
-				"storage":           map[string]any{"size": fmt.Sprintf("%dGi", s.StorageGi)},
+				"storage":           storage,
 				"resources": map[string]any{
 					"requests": map[string]any{
 						"cpu":    cpuQuantityMillis(minInt(250, s.CPUMillicores)),
