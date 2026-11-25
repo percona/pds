@@ -68,21 +68,40 @@ describe("connectProgress", () => {
     expect(progress.done).toBe(false);
   });
 
-  it("is done when the check succeeded and the account is ready", () => {
+  it("is done when a check since the command made the account ready", () => {
+    // The Ready check revokes the command's token, so the command's own
+    // "verify succeeded" never arrives and its last signal is minutes old.
     const progress = connectProgress(
       account({
         state: "ready",
+        checkedAt: "2026-11-20T10:03:00Z",
+        signalAt: "2026-11-20T10:02:59Z",
         steps: [
           step("stack", "succeeded"),
           step("protect", "succeeded"),
-          step("verify", "succeeded"),
+          step("verify", "started"),
         ],
+      }),
+      since,
+      new Date("2026-11-20T10:10:00Z"),
+    );
+
+    expect(progress.done).toBe(true);
+    expect(progress.stopped).toBe(false);
+    expect(progress.phases.every((phase) => phase.status === "succeeded")).toBe(true);
+  });
+
+  it("is not done by a Ready check from before the command was made", () => {
+    const progress = connectProgress(
+      account({
+        state: "ready",
+        checkedAt: "2026-11-20T09:00:00Z",
+        steps: [step("verify", "started")],
       }),
       since,
     );
 
-    expect(progress.done).toBe(true);
-    expect(progress.phases.every((phase) => phase.status === "succeeded")).toBe(true);
+    expect(progress.done).toBe(false);
   });
 
   it("does not take the steps of an earlier run for this one", () => {

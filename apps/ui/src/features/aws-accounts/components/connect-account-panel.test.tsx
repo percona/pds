@@ -135,10 +135,11 @@ describe("ConnectAccountPanel", () => {
 
         return account({
           state: "ready",
+          checkedAt: at,
           steps: [
             { step: "stack", status: "succeeded", at },
             { step: "protect", status: "succeeded", at },
-            { step: "verify", status: "succeeded", at },
+            { step: "verify", status: "started", at },
           ],
         });
       },

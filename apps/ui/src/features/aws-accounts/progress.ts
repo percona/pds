@@ -57,8 +57,15 @@ export function connectProgress(
   const succeeded = (names: string[]) =>
     names.every((name) => stack.some((step) => step.step === name && step.status === "succeeded"));
 
-  const roles = phaseOf(stack, succeeded(["stack", "protect"]));
-  const verifyDone = check.some((step) => step.status === "succeeded") && account.state === "ready";
+  // The check that makes an account Ready also revokes the command's token, so
+  // the command can never report its last step. A Ready check since the
+  // command was made is what says it finished, and it proves the roles exist.
+  const checkedReady =
+    account.state === "ready" &&
+    account.checkedAt !== undefined &&
+    Date.parse(account.checkedAt) >= from;
+  const roles = checkedReady ? "succeeded" : phaseOf(stack, succeeded(["stack", "protect"]));
+  const verifyDone = checkedReady;
   let verify = phaseOf(check, verifyDone);
   if (verify === "pending" && roles === "succeeded") {
     verify = "running";
