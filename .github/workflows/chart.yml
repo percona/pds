@@ -12,6 +12,8 @@ on:
       - "scripts/chart-snapshot.sh"
       - "scripts/up.sh"
       - "scripts/lib/hub-install.sh"
+      - "scripts/lib/openeverest-patch.sh"
+      - "scripts/lib/openeverest-patch_test.sh"
       - "scripts/lib/hub-install_test.sh"
       - "scripts/lib/helm-install.sh"
       - "scripts/lib/helm-install_test.sh"
@@ -40,6 +42,8 @@ on:
       - "scripts/chart-snapshot.sh"
       - "scripts/up.sh"
       - "scripts/lib/hub-install.sh"
+      - "scripts/lib/openeverest-patch.sh"
+      - "scripts/lib/openeverest-patch_test.sh"
       - "scripts/lib/hub-install_test.sh"
       - "scripts/lib/helm-install.sh"
       - "scripts/lib/helm-install_test.sh"
@@ -88,6 +92,7 @@ jobs:
       - name: installer unit tests
         run: |
           bash scripts/lib/helm-install_test.sh
+          bash scripts/lib/openeverest-patch_test.sh
           bash scripts/lib/hub-install_test.sh
           bash scripts/lib/lab_test.sh
           bash scripts/lib/flux-environment_test.sh
