@@ -410,6 +410,8 @@ var sdkActions = map[string][]string{
 	"ec2.DeleteSnapshot":                               {"ec2:DeleteSnapshot"},
 	"ec2.DeleteNetworkInterface":                       {"ec2:DeleteNetworkInterface"},
 	"ec2.DeleteSecurityGroup":                          {"ec2:DeleteSecurityGroup"},
+	"ec2.DescribeInstances":                            {"ec2:DescribeInstances"},
+	"ec2.DescribeNatGateways":                          {"ec2:DescribeNatGateways"},
 	"elasticloadbalancingv2.DeleteLoadBalancer":        {"elasticloadbalancing:DeleteLoadBalancer"},
 	"elasticloadbalancingv2.DeleteTargetGroup":         {"elasticloadbalancing:DeleteTargetGroup"},
 	"resourcegroupstaggingapi.GetResources":            {"tag:GetResources"},

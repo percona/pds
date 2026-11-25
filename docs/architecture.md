@@ -896,7 +896,9 @@ connected one. `internal/managed` holds the create run, and
   (`kubernetes.io/cluster/<name>`, `elbv2.k8s.aws/cluster`,
   `aws:eks:cluster-name`). `Release` deletes load balancers, target groups,
   network interfaces, volumes, snapshots and security groups, and never any other
-  kind. A stack that ends `DELETE_FAILED` sweeps and is deleted again. After
+  kind. A terminated EC2 instance and a deleted NAT gateway count as gone: the
+  stack removed them, and the tag search lists them for up to an hour after. A
+  stack that ends `DELETE_FAILED` sweeps and is deleted again. After
   `Settings.DeleteWait` (30 minutes) a step fails with a sentence that starts
   `Delete blocked.` and names the resources; Retry re-runs only that step. There
   is no force delete. `delete-bucket` empties every version and deletes the

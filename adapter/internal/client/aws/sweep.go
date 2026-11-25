@@ -9,6 +9,7 @@ import (
 
 	sdkaws "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
 	"github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi"
 	rgtypes "github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi/types"
@@ -51,6 +52,8 @@ type ec2SweepAPI interface {
 	DeleteSnapshot(context.Context, *ec2.DeleteSnapshotInput, ...func(*ec2.Options)) (*ec2.DeleteSnapshotOutput, error)
 	DeleteNetworkInterface(context.Context, *ec2.DeleteNetworkInterfaceInput, ...func(*ec2.Options)) (*ec2.DeleteNetworkInterfaceOutput, error)
 	DeleteSecurityGroup(context.Context, *ec2.DeleteSecurityGroupInput, ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error)
+	DescribeInstances(context.Context, *ec2.DescribeInstancesInput, ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error)
+	DescribeNatGateways(context.Context, *ec2.DescribeNatGatewaysInput, ...func(*ec2.Options)) (*ec2.DescribeNatGatewaysOutput, error)
 }
 
 type elbAPI interface {
@@ -144,6 +147,10 @@ func parseResource(arn string) (Resource, bool) {
 		return Resource{Type: "network interface", ID: rest, ARN: arn}, true
 	case service == "ec2" && kind == "security-group":
 		return Resource{Type: "security group", ID: rest, ARN: arn}, true
+	case service == "ec2" && kind == "instance":
+		return Resource{Type: "EC2 instance", ID: rest, ARN: arn}, true
+	case service == "ec2" && kind == "natgateway":
+		return Resource{Type: "NAT gateway", ID: rest, ARN: arn}, true
 	case service == "elasticloadbalancing" && kind == "loadbalancer":
 		// An ALB or NLB reads app/<name>/<id> or net/<name>/<id>; a classic one reads <name>.
 		flavor, name, ok := strings.Cut(rest, "/")
@@ -164,7 +171,10 @@ func parseResource(arn string) (Resource, bool) {
 
 // Release deletes one resource that Owned found. One that is already gone is
 // released. A kind the sweep does not delete returns ErrNotRemovable, and one
-// AWS refuses, because it is still in use, returns what AWS said.
+// AWS refuses, because it is still in use, returns what AWS said. An EC2
+// instance or a NAT gateway is never deleted here, because the stack and its
+// node group own them, but the tag search lists one for up to an hour after
+// AWS deleted it, so a terminated instance or a deleted NAT gateway is released.
 func (i *Infra) Release(ctx context.Context, t Target, r Resource) error {
 	session, err := i.assume(ctx, t)
 	if err != nil {
@@ -173,6 +183,14 @@ func (i *Infra) Release(ctx context.Context, t Target, r Resource) error {
 
 	var gone string
 	switch r.Type {
+	case "EC2 instance":
+		state, err := instanceState(ctx, i.ec2(session), r.ID)
+
+		return settled(r, state, err, string(ec2types.InstanceStateNameTerminated), "InvalidInstanceID.NotFound")
+	case "NAT gateway":
+		state, err := natGatewayState(ctx, i.ec2(session), r.ID)
+
+		return settled(r, state, err, string(ec2types.NatGatewayStateDeleted), "NatGatewayNotFound")
 	case "EBS volume":
 		_, err = i.ec2(session).DeleteVolume(ctx, &ec2.DeleteVolumeInput{VolumeId: &r.ID})
 		gone = "InvalidVolume.NotFound"
@@ -199,6 +217,52 @@ func (i *Infra) Release(ctx context.Context, t Target, r Resource) error {
 	}
 
 	return nil
+}
+
+// settled releases a resource the sweep does not delete once AWS reports it in
+// its final state, or no longer knows it. Any other state is not the sweep's to
+// change.
+func settled(r Resource, state string, err error, final, missing string) error {
+	switch {
+	case err != nil && errorCode(err) == missing:
+		return nil
+	case err != nil:
+		return fmt.Errorf("read %s: %w", r, err)
+	case state == "" || state == final:
+		return nil
+	}
+
+	return fmt.Errorf("%w: %s is %s", ErrNotRemovable, r, state)
+}
+
+// instanceState is the instance's state name, or empty when AWS returns none.
+func instanceState(ctx context.Context, client ec2SweepAPI, id string) (string, error) {
+	out, err := client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{InstanceIds: []string{id}})
+	if err != nil {
+		return "", err
+	}
+	for _, reservation := range out.Reservations {
+		for _, instance := range reservation.Instances {
+			if instance.State != nil {
+				return string(instance.State.Name), nil
+			}
+		}
+	}
+
+	return "", nil
+}
+
+// natGatewayState is the NAT gateway's state, or empty when AWS returns none.
+func natGatewayState(ctx context.Context, client ec2SweepAPI, id string) (string, error) {
+	out, err := client.DescribeNatGateways(ctx, &ec2.DescribeNatGatewaysInput{NatGatewayIds: []string{id}})
+	if err != nil {
+		return "", err
+	}
+	if len(out.NatGateways) == 0 {
+		return "", nil
+	}
+
+	return string(out.NatGateways[0].State), nil
 }
 
 // DeleteBucket empties the bucket, every version and delete marker included,

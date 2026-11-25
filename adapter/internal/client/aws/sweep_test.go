@@ -8,6 +8,7 @@ import (
 
 	sdkaws "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
 	"github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi"
 	rgtypes "github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi/types"
@@ -26,6 +27,8 @@ const (
 	tgARN     = "arn:aws:elasticloadbalancing:eu-west-1:111122223333:targetgroup/orders-tg/73e2d6bc24d8a067"
 	vpcARN    = "arn:aws:ec2:eu-west-1:111122223333:vpc/vpc-0e5"
 	bucketARN = "arn:aws:s3:::pds-111122223333-0123456789ab"
+	nodeARN   = "arn:aws:ec2:eu-west-1:111122223333:instance/i-0f6"
+	natARN    = "arn:aws:ec2:eu-west-1:111122223333:natgateway/nat-0a7"
 )
 
 // fakeTagging answers each GetResources call from the tag filter's key, and
@@ -58,12 +61,27 @@ func (f *fakeTagging) GetResources(_ context.Context, in *resourcegroupstagginga
 type fakeEC2Sweep struct {
 	deleted []string
 	errs    map[string]error
+	// states answers DescribeInstances and DescribeNatGateways by ID.
+	states map[string]string
 }
 
 func (f *fakeEC2Sweep) record(id string) error {
 	f.deleted = append(f.deleted, id)
 
 	return f.errs[id]
+}
+
+func (f *fakeEC2Sweep) DescribeInstances(_ context.Context, in *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+	id := in.InstanceIds[0]
+	instance := ec2types.Instance{InstanceId: &id, State: &ec2types.InstanceState{Name: ec2types.InstanceStateName(f.states[id])}}
+
+	return &ec2.DescribeInstancesOutput{Reservations: []ec2types.Reservation{{Instances: []ec2types.Instance{instance}}}}, nil
+}
+
+func (f *fakeEC2Sweep) DescribeNatGateways(_ context.Context, in *ec2.DescribeNatGatewaysInput, _ ...func(*ec2.Options)) (*ec2.DescribeNatGatewaysOutput, error) {
+	id := in.NatGatewayIds[0]
+
+	return &ec2.DescribeNatGatewaysOutput{NatGateways: []ec2types.NatGateway{{NatGatewayId: &id, State: ec2types.NatGatewayState(f.states[id])}}}, nil
 }
 
 func (f *fakeEC2Sweep) DeleteVolume(_ context.Context, in *ec2.DeleteVolumeInput, _ ...func(*ec2.Options)) (*ec2.DeleteVolumeOutput, error) {
@@ -179,6 +197,35 @@ func TestReleaseReportsWhatAWSRefusedAndNeverTouchesAKindItDoesNotKnow(t *testin
 	err = infra.Release(context.Background(), target, Resource{Type: "ec2 vpc", ID: "vpc-0e5", ARN: vpcARN})
 	require.ErrorIs(t, err, ErrNotRemovable)
 	assert.Equal(t, []string{"vol-0a1"}, ec2s.deleted)
+}
+
+func TestReleaseCountsANodeAndANATGatewayTheStackDeletedAsGone(t *testing.T) {
+	// The tag search lists a terminated instance and a deleted NAT gateway for
+	// up to an hour after the stack removed them.
+	tagging := &fakeTagging{byKey: map[string][]string{"percona.com/pds": {nodeARN, natARN}}}
+	ec2s := &fakeEC2Sweep{states: map[string]string{"i-0f6": "terminated", "nat-0a7": "deleted"}}
+	infra := sweepInfra(tagging, ec2s, &fakeELB{})
+
+	found, err := infra.Owned(context.Background(), target, "0123456789ab")
+	require.NoError(t, err)
+	require.Len(t, found, 2)
+	for _, r := range found {
+		assert.NoError(t, infra.Release(context.Background(), target, r), r.String())
+	}
+	assert.Empty(t, ec2s.deleted)
+}
+
+func TestReleaseLeavesANodeOrANATGatewayThatStillRuns(t *testing.T) {
+	tagging := &fakeTagging{byKey: map[string][]string{"percona.com/pds": {nodeARN, natARN}}}
+	ec2s := &fakeEC2Sweep{states: map[string]string{"i-0f6": "running", "nat-0a7": "available"}}
+	infra := sweepInfra(tagging, ec2s, &fakeELB{})
+
+	found, err := infra.Owned(context.Background(), target, "0123456789ab")
+	require.NoError(t, err)
+	for _, r := range found {
+		assert.ErrorIs(t, infra.Release(context.Background(), target, r), ErrNotRemovable, r.String())
+	}
+	assert.Empty(t, ec2s.deleted)
 }
 
 // fakeEmptying is a bucket holding two object versions and a delete marker.
