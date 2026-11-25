@@ -49,7 +49,10 @@ func (d *Drain) RemoveDatabases(ctx context.Context, access KubeAccess) (int, er
 
 // RemoveVolumeUsers deletes every Service that asks for a load balancer and
 // every volume claim, so the cloud removes the load balancers and the volumes.
-// It returns how many are left; it is idempotent.
+// It returns how many load balancers are left; it is idempotent. Claims are
+// not waited on: one a running pod mounts, such as monitoring's, stays until
+// the nodes go, and the sweep deletes its volume by tag once the stack is gone.
+// A load balancer is waited on because it holds the network the stack deletes.
 func (d *Drain) RemoveVolumeUsers(ctx context.Context, access KubeAccess) (int, error) {
 	cluster, err := d.dial(access)
 	if err != nil {
@@ -59,12 +62,11 @@ func (d *Drain) RemoveVolumeUsers(ctx context.Context, access KubeAccess) (int, 
 	if err != nil {
 		return 0, err
 	}
-	claims, err := cluster.DeleteAll(ctx, "v1", "PersistentVolumeClaim", "")
-	if err != nil {
+	if _, err := cluster.DeleteAll(ctx, "v1", "PersistentVolumeClaim", ""); err != nil {
 		return 0, err
 	}
 
-	return services + claims, nil
+	return services, nil
 }
 
 // RemoveBackupUser asks the environment's agent to remove the IAM user it made

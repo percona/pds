@@ -878,7 +878,10 @@ connected one. `internal/managed` holds the create run, and
 - **Delete.** `managed.DeleteKind` is a provisioning run allowed from any state,
   including a failed create; it preempts a run in progress. Steps run inside-out:
   `remove-databases` suspends the three Kustomizations, deletes every Instance
-  and waits; `remove-services` deletes LoadBalancer Services and volume claims;
+  and waits; `remove-services` deletes LoadBalancer Services and volume claims
+  and waits for the load balancers only, because a claim a running pod still
+  mounts, such as monitoring's, stays until the nodes go and `sweep` deletes its
+  volume by tag;
   `remove-backup-user` creates the ConfigMap `pds-backup-user` in the release's
   namespace, which makes the agent delete the IAM user, its keys and policy and
   answer on the same object (the control plane's role cannot, and the user lives

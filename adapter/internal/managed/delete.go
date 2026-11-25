@@ -60,7 +60,7 @@ const DeleteBlocked = "Delete blocked."
 
 // Sentences a person reads while a delete works or when it stops.
 const (
-	stillRemoving = "Delete blocked. Databases or volume claims are still being removed from the environment. Retry in a few minutes."
+	stillRemoving = "Delete blocked. Databases or load balancers are still being removed from the environment. Retry in a few minutes."
 	stackBlocked  = "Delete blocked. AWS could not delete the network and the Kubernetes cluster. Retry. Contact Percona support if it fails again."
 	apiSilent     = "The Kubernetes API did not answer, so the %s were not removed from inside it. The cluster is deleted next and what it leaves is swept by tag."
 	// backupUserStays is for a delete whose environment did not remove its IAM user.
@@ -85,7 +85,8 @@ type Sweeper interface {
 // Drainer removes, from inside the environment, what holds volumes and load
 // balancers in AWS. *Drain is the implementation.
 type Drainer interface {
-	// RemoveDatabases and RemoveVolumeUsers return what is left.
+	// RemoveDatabases returns the databases left, RemoveVolumeUsers the load
+	// balancers left.
 	RemoveDatabases(ctx context.Context, access KubeAccess) (int, error)
 	RemoveVolumeUsers(ctx context.Context, access KubeAccess) (int, error)
 	// RemoveBackupUser asks the environment's agent to remove the IAM user it
@@ -200,7 +201,7 @@ func (d Deps) removeDatabases(ctx context.Context, env provision.Env, s scope) e
 func (d Deps) removeServices(ctx context.Context, env provision.Env, s scope) error {
 	return d.insideEnvironment(ctx, env, s, "load balancers and volume claims", d.Settings.DrainWait, func(a KubeAccess) (int, error) {
 		return d.Drainer.RemoveVolumeUsers(ctx, a)
-	}, stillInEnvironment("load balancers and volume claims"))
+	}, stillInEnvironment("load balancers"))
 }
 
 func stillInEnvironment(what string) func(left int) error {

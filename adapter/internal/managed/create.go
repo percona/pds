@@ -165,7 +165,7 @@ type Settings struct {
 	ReleaseWait time.Duration
 	// DeleteWait bounds how long a delete waits for AWS to release what holds
 	// the environment's network, DrainWait how long it waits for databases and
-	// volume claims to leave the environment, and APIWait how long it keeps
+	// load balancers to leave the environment, and APIWait how long it keeps
 	// trying an environment's Kubernetes API that does not answer.
 	DeleteWait time.Duration
 	DrainWait  time.Duration

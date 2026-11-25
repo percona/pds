@@ -15,9 +15,12 @@ type fakeCleaner struct {
 	suspended []string
 	deleted   []string
 	lbLeft    int
-	failOn    string
-	userDone  bool
-	asked     int
+	// claimsLeft are volume claims that outlive their delete request, the way
+	// pvc-protection keeps a claim a running pod mounts.
+	claimsLeft int
+	failOn     string
+	userDone   bool
+	asked      int
 }
 
 func (f *fakeCleaner) EnsureConfigMap(_ context.Context, namespace, name string, data map[string]string) (map[string]string, error) {
@@ -48,6 +51,9 @@ func (f *fakeCleaner) Suspend(_ context.Context, _, kind, namespace, name string
 
 func (f *fakeCleaner) DeleteAll(_ context.Context, _, kind, namespace string) (int, error) {
 	f.deleted = append(f.deleted, kind+"/"+namespace)
+	if kind == "PersistentVolumeClaim" {
+		return f.claimsLeft, nil
+	}
 
 	return 0, nil
 }
@@ -92,6 +98,15 @@ func TestRemoveVolumeUsersDeletesLoadBalancerServicesAndVolumeClaims(t *testing.
 
 	assert.Equal(t, 1, left)
 	assert.Equal(t, []string{"LoadBalancer Services", "PersistentVolumeClaim/"}, c.deleted)
+}
+
+func TestRemoveVolumeUsersDoesNotWaitForAClaimARunningPodStillMounts(t *testing.T) {
+	c := &fakeCleaner{claimsLeft: 1}
+
+	left, err := drainWith(c, nil).RemoveVolumeUsers(t.Context(), managed.KubeAccess{})
+	require.NoError(t, err)
+
+	assert.Zero(t, left, "monitoring's claim stays until the nodes go, and the sweep deletes its volume by tag")
 }
 
 func TestDrainReportsAnEnvironmentItCannotReach(t *testing.T) {
