@@ -59,9 +59,14 @@ const (
 	busySentence = "AWS is asking the control plane to slow down. The step tries again by itself."
 	// genericSentence is for an AWS error that is none of the typed refusals.
 	genericSentence = "AWS reported an error that PDS cannot fix for you. Retry the step. Contact Percona support if it fails again."
-	stillCreating   = "The network and the Kubernetes cluster are still being created. The step continues by itself."
-	stackFailed     = "AWS could not create the network and the Kubernetes cluster. Retry the step. Contact Percona support if it fails again."
-	notReporting    = "The environment has not reported to the control plane yet. Retry to keep waiting."
+	// controlPlaneSentence is for a failure of the control plane's own records
+	// or of the Git repository it writes an environment's release to.
+	controlPlaneSentence = "The control plane could not finish this step. Retry the step. Contact Percona support if it fails again."
+	// kubernetesSentence is for an error the environment's Kubernetes API returned.
+	kubernetesSentence = "The environment's Kubernetes cluster did not accept the change. Retry the step. Contact Percona support if it fails again."
+	stillCreating      = "The network and the Kubernetes cluster are still being created. The step continues by itself."
+	stackFailed        = "AWS could not create the network and the Kubernetes cluster. Retry the step. Contact Percona support if it fails again."
+	notReporting       = "The environment has not reported to the control plane yet. Retry to keep waiting."
 )
 
 // Records reads the managed environment a run works on.
@@ -243,11 +248,11 @@ func (d Deps) scopeFor(ctx context.Context, team uint, environment, sourceIdenti
 		return scope{}, provision.Permanent(err, "This environment is not a managed environment. Contact Percona support.")
 	}
 	if err != nil {
-		return scope{}, provision.Retryable(err, genericSentence)
+		return scope{}, provision.Retryable(err, controlPlaneSentence)
 	}
 	conn, err := d.Connections.Get(ctx, team, rec.ConnectionID)
 	if err != nil {
-		return scope{}, provision.Retryable(err, genericSentence)
+		return scope{}, provision.Retryable(err, controlPlaneSentence)
 	}
 	cluster := "pds-" + rec.ID
 
@@ -430,7 +435,7 @@ func (d Deps) waitStack(ctx context.Context, _ provision.Env, s scope) error {
 				return s.fail(err)
 			}
 			if err := d.Records.SetStackFailureSeen(ctx, s.rec.TeamID, s.rec.Name, false); err != nil {
-				return provision.Retryable(err, genericSentence)
+				return provision.Retryable(err, controlPlaneSentence)
 			}
 		case state.Complete():
 			return nil
@@ -438,11 +443,11 @@ func (d Deps) waitStack(ctx context.Context, _ provision.Env, s scope) error {
 		case state.Failed():
 			rec, err := d.Records.Get(ctx, s.rec.TeamID, s.rec.Name)
 			if err != nil {
-				return provision.Retryable(err, genericSentence)
+				return provision.Retryable(err, controlPlaneSentence)
 			}
 			if !rec.StackFailureSeen {
 				if err := d.Records.SetStackFailureSeen(ctx, s.rec.TeamID, s.rec.Name, true); err != nil {
-					return provision.Retryable(err, genericSentence)
+					return provision.Retryable(err, controlPlaneSentence)
 				}
 
 				return stackFailure(state, s)
@@ -502,7 +507,7 @@ func (d Deps) installFlux(ctx context.Context, env provision.Env, s scope) error
 		return err
 	}
 	if err := d.Cluster.InstallFlux(ctx, access, d.Settings.FluxVersion); err != nil {
-		return provision.Retryable(err, genericSentence)
+		return provision.Retryable(err, kubernetesSentence)
 	}
 
 	return nil
@@ -518,7 +523,7 @@ func (d Deps) writeRelease(ctx context.Context, _ provision.Env, s scope) error 
 		return err
 	}
 	if err := d.Records.SetChartVersion(ctx, s.rec.TeamID, s.rec.Name, version); err != nil {
-		return provision.Retryable(err, genericSentence)
+		return provision.Retryable(err, controlPlaneSentence)
 	}
 
 	return nil
@@ -535,10 +540,10 @@ func (d Deps) commitRelease(ctx context.Context, s scope, version string) error 
 		BackupBoundaryARN: aws.PolicyARN(s.conn.AccountID, s.conn.ID, "backup-boundary"),
 	})
 	if err != nil {
-		return provision.Permanent(err, genericSentence)
+		return provision.Permanent(err, controlPlaneSentence)
 	}
 	if err := d.Hub.WriteRelease(ctx, s.rec.TeamID, s.rec.Name, files); err != nil {
-		return provision.Retryable(err, genericSentence)
+		return provision.Retryable(err, controlPlaneSentence)
 	}
 
 	return nil
@@ -547,14 +552,14 @@ func (d Deps) commitRelease(ctx context.Context, s scope, version string) error 
 func (d Deps) join(ctx context.Context, env provision.Env, s scope) error {
 	join, err := d.Hub.Join(ctx, s.rec.TeamID, s.rec.Name)
 	if err != nil {
-		return provision.Retryable(err, genericSentence)
+		return provision.Retryable(err, controlPlaneSentence)
 	}
 	access, err := d.open(ctx, env, s)
 	if err != nil {
 		return err
 	}
 	if err := d.Cluster.WriteJoin(ctx, access, join); err != nil {
-		return provision.Retryable(err, genericSentence)
+		return provision.Retryable(err, kubernetesSentence)
 	}
 
 	return nil
@@ -574,11 +579,11 @@ func (d Deps) waitHeartbeat(ctx context.Context, _ provision.Env, s scope) error
 	for {
 		connected, err := d.Hub.Connected(ctx, s.rec.TeamID, s.rec.Name)
 		if err != nil {
-			return provision.Retryable(err, genericSentence)
+			return provision.Retryable(err, controlPlaneSentence)
 		}
 		if connected {
 			if err := d.Records.MarkReady(ctx, s.rec.TeamID, s.rec.Name, time.Now()); err != nil {
-				return provision.Retryable(err, genericSentence)
+				return provision.Retryable(err, controlPlaneSentence)
 			}
 
 			return nil

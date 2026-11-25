@@ -59,7 +59,7 @@ func (d Deps) applyRelease(ctx context.Context, env provision.Env, s scope) erro
 	for {
 		reported, known, err := d.Hub.Release(ctx, s.rec.TeamID, s.rec.Name)
 		if err != nil {
-			return provision.Retryable(err, genericSentence)
+			return provision.Retryable(err, controlPlaneSentence)
 		}
 		if known && reported.At.After(committed) {
 			switch {
@@ -82,10 +82,10 @@ func (d Deps) applyRelease(ctx context.Context, env provision.Env, s scope) erro
 
 func (d Deps) upgraded(ctx context.Context, s scope, params UpgradeParams) error {
 	if err := d.Records.SetChartVersion(ctx, s.rec.TeamID, s.rec.Name, params.Version); err != nil {
-		return provision.Retryable(err, genericSentence)
+		return provision.Retryable(err, controlPlaneSentence)
 	}
 	if err := d.Records.SetSkippedVersion(ctx, s.rec.TeamID, s.rec.Name, ""); err != nil {
-		return provision.Retryable(err, genericSentence)
+		return provision.Retryable(err, controlPlaneSentence)
 	}
 
 	return nil
@@ -98,7 +98,7 @@ func (d Deps) rolledBack(ctx context.Context, s scope, params UpgradeParams) err
 		return err
 	}
 	if err := d.Records.SetSkippedVersion(ctx, s.rec.TeamID, s.rec.Name, params.Version); err != nil {
-		return provision.Retryable(err, genericSentence)
+		return provision.Retryable(err, controlPlaneSentence)
 	}
 
 	return provision.Permanent(fmt.Errorf("flux rolled %s back to %s", params.Version, params.From), fmt.Sprintf(rolledBackSentence, params.From))

@@ -380,10 +380,10 @@ func (d Deps) forget(ctx context.Context, env provision.Env) error {
 		return nil
 	}
 	if err != nil {
-		return provision.Retryable(err, genericSentence)
+		return provision.Retryable(err, controlPlaneSentence)
 	}
 	if err := d.Forget(ctx, env.Run.TeamID, env.Run.Environment); err != nil {
-		return provision.Retryable(err, genericSentence)
+		return provision.Retryable(err, controlPlaneSentence)
 	}
 
 	return nil

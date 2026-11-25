@@ -157,15 +157,19 @@ func (f *fakeCloud) KubeToken(_ context.Context, t aws.Target) (string, error) {
 }
 
 type fakeKube struct {
-	mu     sync.Mutex
-	fluxes []string
-	joins  []managed.Join
-	access []managed.KubeAccess
+	mu      sync.Mutex
+	fluxErr error
+	fluxes  []string
+	joins   []managed.Join
+	access  []managed.KubeAccess
 }
 
 func (f *fakeKube) InstallFlux(_ context.Context, access managed.KubeAccess, version string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.fluxErr != nil {
+		return f.fluxErr
+	}
 	f.fluxes = append(f.fluxes, version)
 	f.access = append(f.access, access)
 
@@ -183,6 +187,7 @@ func (f *fakeKube) WriteJoin(_ context.Context, access managed.KubeAccess, join 
 
 type fakeHub struct {
 	mu        sync.Mutex
+	writeErr  error
 	written   map[string][]byte
 	joins     int
 	connected atomic.Bool
@@ -200,6 +205,9 @@ func (f *fakeHub) Join(_ context.Context, _ uint, environment string) (managed.J
 func (f *fakeHub) WriteRelease(_ context.Context, _ uint, _ string, files map[string][]byte) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.writeErr != nil {
+		return f.writeErr
+	}
 	f.written = files
 
 	return nil
@@ -497,6 +505,43 @@ func TestAnUnknownFailureGetsTheGenericSentence(t *testing.T) {
 	step := l.steps(run.ID)["create-stack"]
 	assert.Equal(t, store.StepFailed, step.Status)
 	assert.Contains(t, step.Failure, "Contact Percona support")
+}
+
+func TestAGitFailureIsNotBlamedOnAWS(t *testing.T) {
+	l := newLab(t)
+	l.hub.writeErr = errors.New("github create repo o/r: HTTP 500")
+	step := l.failAt("write-release")
+
+	assert.NotContains(t, step.Failure, "AWS")
+	assert.Contains(t, step.Failure, "control plane")
+}
+
+func TestAKubernetesFailureIsNotBlamedOnAWS(t *testing.T) {
+	l := newLab(t)
+	l.kube.fluxErr = errors.New("the server could not find the requested resource")
+	step := l.failAt("install-flux")
+
+	assert.NotContains(t, step.Failure, "AWS")
+	assert.Contains(t, step.Failure, "Kubernetes cluster")
+}
+
+// failAt runs a create until the named step has used every attempt.
+func (l *lab) failAt(name string) store.ProvisioningStep {
+	l.t.Helper()
+	e := l.engine()
+	run := l.start(e)
+	for range 10 {
+		if l.steps(run.ID)[name].Status == store.StepFailed {
+			break
+		}
+		_, err := e.RunOnce(l.t.Context())
+		require.NoError(l.t, err)
+		l.requeue(run.ID)
+	}
+	step := l.steps(run.ID)[name]
+	require.Equal(l.t, store.StepFailed, step.Status)
+
+	return step
 }
 
 // requeue makes a backing-off run claimable again without waiting out its backoff.
