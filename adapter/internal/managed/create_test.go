@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,6 +20,7 @@ import (
 	"github.com/percona/pds/adapter/internal/managed"
 	"github.com/percona/pds/adapter/internal/provision"
 	"github.com/percona/pds/adapter/internal/store"
+	"github.com/percona/pds/adapter/internal/testutil"
 )
 
 var counter atomic.Int64
@@ -245,14 +245,7 @@ type lab struct {
 func newLab(t *testing.T) *lab {
 	t.Helper()
 
-	url := strings.TrimSpace(os.Getenv("ADAPTER_TEST_DATABASE_URL"))
-	if url == "" {
-		t.Skip("set ADAPTER_TEST_DATABASE_URL to run managed environment steps against a live PostgreSQL")
-	}
-	db, err := store.Open(t.Context(), store.Options{URL: url})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, db.Migrate(t.Context()))
+	db := testutil.LiveStore(t, "set ADAPTER_TEST_DATABASE_URL to run managed environment steps against a live PostgreSQL")
 
 	n := counter.Add(1)
 	now := time.Now().UTC()
@@ -269,7 +262,7 @@ func newLab(t *testing.T) *lab {
 		State: store.CloudReady, CreatedAt: now, UpdatedAt: now,
 	}
 	require.NoError(t, db.Gorm().WithContext(t.Context()).Create(&conn).Error)
-	_, err = db.ManagedEnvironments().Create(t.Context(), store.NewManagedEnvironment{
+	_, err := db.ManagedEnvironments().Create(t.Context(), store.NewManagedEnvironment{
 		ID: envID, TeamID: team.ID, Name: "orders", ConnectionID: conn.ID, Region: "eu-west-1",
 	}, now)
 	require.NoError(t, err)

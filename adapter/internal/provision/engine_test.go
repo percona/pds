@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/percona/pds/adapter/internal/provision"
 	"github.com/percona/pds/adapter/internal/store"
+	"github.com/percona/pds/adapter/internal/testutil"
 )
 
 // clock is a settable time source, so a lapsed lease, a retry backoff and a
@@ -94,38 +94,32 @@ func (s *steps) step(name string) provision.Step {
 	}}
 }
 
-func liveStore(t *testing.T) *store.Store {
-	t.Helper()
-
-	url := strings.TrimSpace(os.Getenv("ADAPTER_TEST_DATABASE_URL"))
-	if url == "" {
-		t.Skip("set ADAPTER_TEST_DATABASE_URL to run provisioning runs against a live PostgreSQL")
-	}
-	db, err := store.Open(t.Context(), store.Options{URL: url})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, db.Migrate(t.Context()))
-
-	return db
-}
-
 func newLab(t *testing.T) *lab {
 	t.Helper()
 
-	db := liveStore(t)
+	db := testutil.LiveStore(t, "set ADAPTER_TEST_DATABASE_URL to run provisioning runs against a live PostgreSQL")
 	n := counter.Add(1)
 	now := time.Now().UTC()
-	org := store.Organization{Name: fmt.Sprintf("provision-%d-%d", now.UnixNano(), n), CreatedAt: now}
+
+	return &lab{
+		t: t, db: db, prov: db.Provisioning(), clock: newClock(),
+		team: newTeam(t, db), env: "prod",
+		kind:  fmt.Sprintf("create-%d-%d", now.UnixNano(), n),
+		steps: &steps{plan: map[string][]error{}, hooks: map[string]func(context.Context, provision.Env) error{}},
+	}
+}
+
+// newTeam makes an Organization with one Team and returns the Team.
+func newTeam(t *testing.T, db *store.Store) uint {
+	t.Helper()
+
+	now := time.Now().UTC()
+	org := store.Organization{Name: fmt.Sprintf("provision-%d-%d", now.UnixNano(), counter.Add(1)), CreatedAt: now}
 	require.NoError(t, db.Gorm().WithContext(t.Context()).Create(&org).Error)
 	team := store.Team{OrganizationID: org.ID, Name: "default", CreatedAt: now}
 	require.NoError(t, db.Gorm().WithContext(t.Context()).Create(&team).Error)
 
-	return &lab{
-		t: t, db: db, prov: db.Provisioning(), clock: newClock(),
-		team: team.ID, env: "prod",
-		kind:  fmt.Sprintf("create-%d-%d", now.UnixNano(), n),
-		steps: &steps{plan: map[string][]error{}, hooks: map[string]func(context.Context, provision.Env) error{}},
-	}
+	return team.ID
 }
 
 // engine builds an engine whose create kind has the named steps and whose delete
@@ -525,11 +519,11 @@ func TestRunsAreKeptNinetyDaysAfterTheEnvironmentIsDeleted(t *testing.T) {
 
 func TestARunOfAnotherTeamIsNotAffected(t *testing.T) {
 	l := newLab(t)
-	other := newLab(t)
+	other := newTeam(t, l.db)
 	e := l.engine(nil, "role")
 	_, err := e.Start(t.Context(), l.team, l.env, l.kind)
 	require.NoError(t, err)
-	_, err = e.Start(t.Context(), other.team, l.env, l.kind)
+	_, err = e.Start(t.Context(), other, l.env, l.kind)
 	require.NoError(t, err, "two Teams may name an environment the same")
 }
 
