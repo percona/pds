@@ -102,6 +102,7 @@ status=200
 case "${route}" in
   enroll)
     body='{"connectionId":"abc123abc123","externalId":"extsecretextsecretextsecretextsecret","stackName":"pds-abc123abc123","stackRegion":"eu-west-1","allowedRegions":["eu-west-1","us-east-1"],"principalArn":"arn:aws:iam::111122223333:role/pds-control-plane","templateUrl":"https://hub.example/api/internal/cloud-connection/template.yaml","templateVersion":1}'
+    body="${FAKE_ENROLL_BODY:-${body}}"
     [ -n "${FAKE_ENROLL_STATUS:-}" ] && status="${FAKE_ENROLL_STATUS}" && body='{"code":"validation","message":"The account is not allowed."}'
     ;;
   template.yaml) body='AWSTemplateFormatVersion: "2010-09-09"' ;;
@@ -160,6 +161,7 @@ assert_contains "${CALLS}" "ControlPlanePrincipalArn=arn:aws:iam::111122223333:r
 assert_contains "${CALLS}" "AllowedRegions=eu-west-1,us-east-1"
 assert_contains "${CALLS}" "update-termination-protection --region eu-west-1 --stack-name pds-abc123abc123 --enable-termination-protection"
 pass "a healthy account connects"
+pass "all regions reaches the stack as a single wildcard"
 
 ORDER="$(grep -E 'aws cloudformation|curl (enroll|template.yaml|verify)' "${D}/calls.log" | awk '{print $1" "$2" "$3}' | tr '\n' '|')"
 assert_contains "${ORDER}" "curl enroll"
@@ -172,6 +174,13 @@ pass "steps run in order"
 EVENTS="$(grep -E '^curl events' "${D}/calls.log" | grep -v heartbeat | sed -E 's/.*"step":"([a-z]+)","status":"([a-z]+)".*/\1:\2/' | tr '\n' ' ')"
 assert_contains "${EVENTS}" "template:started template:succeeded stack:started stack:succeeded protect:started protect:succeeded verify:started verify:succeeded"
 pass "every step reports its start and its end"
+ALL="${WORK}/allregions"
+make_env "${ALL}"
+ALL_BODY="$(sed -n "s/^    body='\(.*\)'\$/\1/p" "${BASH_SOURCE[0]}" | head -1 | sed 's/"allowedRegions":\[[^]]*\]/"allowedRegions":["*"]/')"
+FAKE_ENROLL_BODY="${ALL_BODY}" run_script "${ALL}" --token ccn_secret
+[ "${CODE}" -eq 0 ] || fail "an account for all regions connects, got ${CODE}: ${OUT}"
+assert_contains "$(cat "${ALL}/calls.log")" "AllowedRegions=*"
+pass "all regions reaches the stack as a single wildcard"
 
 # --- a stack that cannot be created -------------------------------------------
 D="${WORK}/stackfail"

@@ -91,12 +91,25 @@ func TestAnIssuedTokenIsOneHourAndOnlyItsHashIsKept(t *testing.T) {
 func TestATokenNeedsRegionsThatLookLikeRegions(t *testing.T) {
 	f := newCloudFixture(t)
 
-	for _, regions := range [][]string{nil, {}, {"Europe"}, {"eu-west-1", ""}, {"eu-west-1; rm -rf"}} {
+	for _, regions := range [][]string{nil, {}, {"Europe"}, {"eu-west-1", ""}, {"eu-west-1; rm -rf"}, {"eu-west1"}, {"us-east"}, {"*", "eu-west-1"}, {"**"}, {"eu-*"}} {
 		_, err := f.svc.IssueToken(t.Context(), f.scope, regions)
 		assert.ErrorIs(t, err, service.ErrCloudInvalid, "%v", regions)
 	}
 }
 
+func TestATokenAcceptsEveryShapeOfRealRegionName(t *testing.T) {
+	f := newCloudFixture(t)
+	for _, region := range []string{"us-east-1", "eu-west-1", "ap-southeast-2", "us-gov-west-1", "cn-north-1", "il-central-1"} {
+		_, err := f.svc.IssueToken(t.Context(), f.scope, []string{region})
+		assert.NoError(t, err, region)
+	}
+}
+func TestATokenForAllRegionsIsTheSingleWildcard(t *testing.T) {
+	f := newCloudFixture(t)
+	issued, err := f.svc.IssueToken(t.Context(), f.scope, []string{"*"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"*"}, issued.AllowedRegions)
+}
 func TestEnrollingNamesTheStackTheRolesAndTheSecretTheScriptNeeds(t *testing.T) {
 	f := newCloudFixture(t)
 
@@ -310,6 +323,26 @@ func TestAScriptMayNarrowTheTokensRegionsButNeverWidenThem(t *testing.T) {
 	assert.ErrorIs(t, err, service.ErrCloudInvalid)
 }
 
+func TestAScriptMayNarrowAnAllRegionsTokenToRealRegionsOnly(t *testing.T) {
+	f := newCloudFixture(t)
+	issued, err := f.svc.IssueToken(t.Context(), f.scope, []string{"*"})
+	require.NoError(t, err)
+	narrowed, err := f.svc.Enroll(t.Context(), issued.Token, service.CloudAccount{ID: "123456789012", Region: "eu-west-1", Regions: []string{"eu-central-1", "us-east-1"}})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"eu-central-1", "us-east-1"}, narrowed.AllowedRegions)
+	for _, asked := range [][]string{{"eu-west1"}, {"Europe"}, {"eu-west-1", "*"}} {
+		_, err = f.svc.Enroll(t.Context(), issued.Token, service.CloudAccount{ID: "123456789012", Region: "eu-west-1", Regions: asked})
+		assert.ErrorIs(t, err, service.ErrCloudInvalid, "%v", asked)
+	}
+}
+func TestAnExplicitTokenCannotBeWidenedToAllRegions(t *testing.T) {
+	f := newCloudFixture(t)
+	issued, err := f.svc.IssueToken(t.Context(), f.scope, []string{"eu-west-1"})
+	require.NoError(t, err)
+	_, err = f.svc.Enroll(t.Context(), issued.Token, service.CloudAccount{ID: "123456789012", Region: "eu-west-1", Regions: []string{"*"}})
+	assert.ErrorIs(t, err, service.ErrCloudInvalid)
+}
+
 type environmentsOf []store.ManagedEnvironment
 
 func (e environmentsOf) List(context.Context, uint) ([]store.ManagedEnvironment, error) {
@@ -372,9 +405,9 @@ func TestCancellingATokenWhoseConnectionIsReadyKeepsTheConnection(t *testing.T) 
 func TestTheTypedAccountPathMakesAPendingConnectionAndLeavesNoLiveToken(t *testing.T) {
 	f := newCloudFixture(t)
 
-	first, err := f.svc.CreateTyped(t.Context(), f.scope, "123456789012", []string{"eu-west-1", "us-east-1"})
+	first, err := f.svc.CreateTyped(t.Context(), f.scope, "123456789012", "", []string{"eu-west-1", "us-east-1"})
 	require.NoError(t, err)
-	again, err := f.svc.CreateTyped(t.Context(), f.scope, "123456789012", []string{"eu-west-1"})
+	again, err := f.svc.CreateTyped(t.Context(), f.scope, "123456789012", "", []string{"eu-west-1"})
 	require.NoError(t, err)
 
 	assert.Equal(t, first.ConnectionID, again.ConnectionID, "the same account in the same Team is the same connection")
@@ -389,10 +422,27 @@ func TestTheTypedAccountPathMakesAPendingConnectionAndLeavesNoLiveToken(t *testi
 	}
 }
 
+func TestTheTypedPathForAllRegionsNeedsAHomeRegionForTheStack(t *testing.T) {
+	f := newCloudFixture(t)
+	_, err := f.svc.CreateTyped(t.Context(), f.scope, "123456789012", "", []string{"*"})
+	require.ErrorIs(t, err, service.ErrCloudInvalid)
+	_, err = f.svc.CreateTyped(t.Context(), f.scope, "123456789012", "eu-west1", []string{"*"})
+	require.ErrorIs(t, err, service.ErrCloudInvalid)
+	made, err := f.svc.CreateTyped(t.Context(), f.scope, "123456789012", "eu-central-1", []string{"*"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"*"}, made.AllowedRegions)
+	assert.Equal(t, "eu-central-1", made.StackRegion)
+}
+func TestTheTypedPathUsesTheFirstRegionAsHomeWhenNoneIsGiven(t *testing.T) {
+	f := newCloudFixture(t)
+	made, err := f.svc.CreateTyped(t.Context(), f.scope, "123456789012", "", []string{"us-east-1", "eu-west-1"})
+	require.NoError(t, err)
+	assert.Equal(t, "us-east-1", made.StackRegion)
+}
 func TestTheTypedAccountPathRefusesWhatCannotBeAnAccount(t *testing.T) {
 	f := newCloudFixture(t)
 
-	_, err := f.svc.CreateTyped(t.Context(), f.scope, "not-an-account", []string{"eu-west-1"})
+	_, err := f.svc.CreateTyped(t.Context(), f.scope, "not-an-account", "", []string{"eu-west-1"})
 
 	require.ErrorIs(t, err, service.ErrCloudInvalid)
 }

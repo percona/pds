@@ -43,7 +43,7 @@ var (
 
 var (
 	cloudAccountID = regexp.MustCompile(`^[0-9]{12}$`)
-	cloudRegion    = regexp.MustCompile(`^[a-z]{2}(-[a-z0-9]+)+$`)
+	cloudRegion    = regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-[0-9]+$`)
 	cloudAlias     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 	cloudStep      = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 )
@@ -161,19 +161,37 @@ func UserSourceIdentity(userID uint) string {
 // JobSourceIdentity is the SourceIdentity of a call made by a background job.
 func JobSourceIdentity(job string) string { return "pds-job-" + job }
 
+// AllRegions is the one value that lets a connection act in every region. The
+// IAM conditions read it as a wildcard, so it stands alone: no list is ever
+// empty, and none mixes it with named regions.
+const AllRegions = "*"
+
+func checkRegions(regions []string) error {
+	if len(regions) == 0 {
+		return fmt.Errorf("%w: choose at least one region", ErrCloudInvalid)
+	}
+	if slices.Contains(regions, AllRegions) {
+		if len(regions) > 1 {
+			return fmt.Errorf("%w: choose all regions or a list of regions, not both", ErrCloudInvalid)
+		}
+		return nil
+	}
+	for _, region := range regions {
+		if !cloudRegion.MatchString(region) {
+			return fmt.Errorf("%w: %q is not a region", ErrCloudInvalid, region)
+		}
+	}
+	return nil
+}
+
 // IssueToken makes a one hour token for the scope's Team. Any User of the Team
 // may, the same rights as minting a join token.
 func (c *CloudConnections) IssueToken(ctx context.Context, scope auth.Scope, regions []string) (CloudToken, error) {
 	if c.opts.PrincipalARN == "" {
 		return CloudToken{}, ErrCloudUnavailable
 	}
-	if len(regions) == 0 {
-		return CloudToken{}, fmt.Errorf("%w: choose at least one region", ErrCloudInvalid)
-	}
-	for _, region := range regions {
-		if !cloudRegion.MatchString(region) {
-			return CloudToken{}, fmt.Errorf("%w: %q is not a region", ErrCloudInvalid, region)
-		}
+	if err := checkRegions(regions); err != nil {
+		return CloudToken{}, err
 	}
 	raw, _, err := auth.NewToken()
 	if err != nil {
@@ -256,10 +274,20 @@ func (c *CloudConnections) CancelToken(ctx context.Context, scope auth.Scope, id
 }
 
 // CreateTyped makes a Pending connection for an account the person typed, for
-// the path that needs no script. The connection's home region is the first of
-// the regions. It enrolls through a token of its own that ends at once, so the
-// rules of enrolling stay in one place.
-func (c *CloudConnections) CreateTyped(ctx context.Context, scope auth.Scope, accountID string, regions []string) (CloudEnrollment, error) {
+// the path that needs no script. The home region is where the stack lives. It
+// defaults to the first of the regions, so all regions needs one named. It
+// enrolls through a token of its own that ends at once, so the rules of
+// enrolling stay in one place.
+func (c *CloudConnections) CreateTyped(ctx context.Context, scope auth.Scope, accountID, home string, regions []string) (CloudEnrollment, error) {
+	if err := checkRegions(regions); err != nil {
+		return CloudEnrollment{}, err
+	}
+	if home == "" && regions[0] != AllRegions {
+		home = regions[0]
+	}
+	if !cloudRegion.MatchString(home) {
+		return CloudEnrollment{}, fmt.Errorf("%w: choose the region to create the stack in", ErrCloudInvalid)
+	}
 	issued, err := c.IssueToken(ctx, scope, regions)
 	if err != nil {
 		return CloudEnrollment{}, err
@@ -270,7 +298,7 @@ func (c *CloudConnections) CreateTyped(ctx context.Context, scope auth.Scope, ac
 		}
 	}()
 
-	return c.Enroll(ctx, issued.Token, CloudAccount{ID: accountID, Region: regions[0]})
+	return c.Enroll(ctx, issued.Token, CloudAccount{ID: accountID, Region: home})
 }
 
 // Remove forgets one of the scope's Team's connections and touches nothing in
@@ -354,6 +382,12 @@ func (c *CloudConnections) narrowRegions(ctx context.Context, hash string, asked
 	token, err := c.store.TokenTeam(ctx, hash, c.opts.Now())
 	if err != nil {
 		return nil, err
+	}
+	if slices.Contains(token.AllowedRegions, AllRegions) {
+		if err := checkRegions(asked); err != nil {
+			return nil, err
+		}
+		return asked, nil
 	}
 	for _, region := range asked {
 		if !slices.Contains(token.AllowedRegions, region) {

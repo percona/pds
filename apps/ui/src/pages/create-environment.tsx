@@ -13,6 +13,7 @@ import {
   accountName,
   awsAccountsKey,
   ConnectAccountPanel,
+  regionChoices,
   useAwsAccounts,
   type AwsAccount,
 } from "@/features/aws-accounts";
@@ -56,7 +57,7 @@ function ManagedCreate() {
   const rows = accounts.data ?? [];
   const chosen = rows.find((row) => row.id === choice);
   const usable = chosen?.state === "ready" ? chosen : undefined;
-  const regions = usable?.allowedRegions ?? [];
+  const regions = regionChoices(usable?.allowedRegions ?? []);
   const selectedRegion =
     region !== null && regions.includes(region)
       ? region

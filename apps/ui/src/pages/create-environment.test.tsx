@@ -175,6 +175,26 @@ describe("Create an environment", () => {
     ).toBeInTheDocument();
   });
 
+  it("offers every region for an account that may build anywhere", async () => {
+    const calls = stubApi([account({ allowedRegions: ["*"] })]);
+    const user = userEvent.setup();
+    renderWithProviders(<AppRoutes />, { route: "/environments/new" });
+    await name(user, "orders");
+    await user.click(await screen.findByRole("radio", { name: /payments/ }));
+    expect(screen.getByRole("option", { name: "ap-southeast-2" })).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Region"), "ap-southeast-2");
+    await user.click(screen.getByRole("button", { name: "Create environment" }));
+    await waitFor(() =>
+      expect(calls.some((call) => call.path === "/api/cloud-connections/cc_1/environments")).toBe(
+        true,
+      ),
+    );
+    const post = calls.find((call) => call.path === "/api/cloud-connections/cc_1/environments");
+    expect(JSON.parse(String(post?.init?.body))).toEqual({
+      name: "orders",
+      region: "ap-southeast-2",
+    });
+  });
   it("starts from the account a connect page handed over", async () => {
     stubApi([account(), account({ id: "cc_2", alias: "labs", accountId: "210987654321" })]);
 

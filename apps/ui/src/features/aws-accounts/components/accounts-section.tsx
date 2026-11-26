@@ -20,6 +20,7 @@ import { isNameConfirmed, StatusPill, type StatusKind } from "@/features/databas
 import { removeAwsAccount } from "../api";
 import { awsAccountsKey, useAwsAccounts } from "../hooks";
 import type { AwsAccount, AwsAccountState } from "../types";
+import { regionsLabel } from "../regions";
 import { ConnectAccountPanel } from "./connect-account-panel";
 
 export const connectAccountPath = "/environments/aws-accounts/new";
@@ -176,7 +177,7 @@ function AccountDetails({ account }: { account: AwsAccount }) {
       <dt className="text-muted-foreground">Account ID</dt>
       <dd className="font-mono">{account.accountId}</dd>
       <dt className="text-muted-foreground">Regions</dt>
-      <dd className="font-mono">{account.allowedRegions.join(", ")}</dd>
+      <dd className="font-mono">{regionsLabel(account.allowedRegions)}</dd>
       <dt className="text-muted-foreground">Environments</dt>
       <dd>
         {account.environments.length === 0

@@ -16,8 +16,8 @@ export function fetchAwsAccount(id: string, signal?: AbortSignal): Promise<AwsAc
 
 /**
  * Makes the one command that connects an AWS account. It holds a token the
- * control plane shows only now, so nothing reads it back. An empty list leaves
- * the regions to the control plane's default.
+ * control plane shows only now, so nothing reads it back. The regions are always
+ * named: a list of region names, or the wildcard for all regions.
  */
 export function issueAwsConnectCommand(
   allowedRegions: string[],
@@ -26,7 +26,7 @@ export function issueAwsConnectCommand(
 ): Promise<AwsConnectCommand> {
   return requestJson<AwsConnectCommand>("/api/cloud-connection-tokens", {
     method: "POST",
-    body: allowedRegions.length > 0 ? { allowedRegions } : {},
+    body: { allowedRegions },
     team,
     signal,
   });

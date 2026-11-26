@@ -459,6 +459,35 @@ func TestTheTypedAccountPathGivesTheSecretOnceAndLeavesTheConnectionPending(t *t
 	assert.Equal(t, http.StatusBadRequest, bad.Code)
 }
 
+// An empty list used to become the control plane's default region, so a person
+// who chose no limit got one region they never named.
+func TestNoRegionsIsRefusedNotTurnedIntoTheControlPlanesDefault(t *testing.T) {
+	h := newManagedHTTP(t)
+	for _, regions := range []string{``, `,"allowedRegions":[]`, `,"allowedRegions":null`} {
+		token := h.do(t, 0, http.MethodPost, "/api/cloud-connection-tokens", `{`+strings.TrimPrefix(regions, ",")+`}`)
+		assert.Equal(t, http.StatusBadRequest, token.Code, "token%s", regions)
+		typed := h.do(t, 0, http.MethodPost, "/api/cloud-connections", `{"accountId":"210987654321"`+regions+`}`)
+		assert.Equal(t, http.StatusBadRequest, typed.Code, "typed%s", regions)
+	}
+}
+func TestAllRegionsIsAskedForByTheWildcardAlone(t *testing.T) {
+	h := newManagedHTTP(t)
+	rec := h.do(t, 0, http.MethodPost, "/api/cloud-connection-tokens", `{"allowedRegions":["*"]}`)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	assert.Equal(t, []any{"*"}, jsonOf(t, rec)["allowedRegions"])
+	mixed := h.do(t, 0, http.MethodPost, "/api/cloud-connection-tokens", `{"allowedRegions":["*","eu-west-1"]}`)
+	assert.Equal(t, http.StatusBadRequest, mixed.Code)
+}
+func TestTheTypedPathForAllRegionsNeedsTheRegionOfTheStack(t *testing.T) {
+	h := newManagedHTTP(t)
+	missing := h.do(t, 0, http.MethodPost, "/api/cloud-connections", `{"accountId":"210987654321","allowedRegions":["*"]}`)
+	assert.Equal(t, http.StatusBadRequest, missing.Code)
+	rec := h.do(t, 0, http.MethodPost, "/api/cloud-connections", `{"accountId":"210987654321","region":"eu-central-1","allowedRegions":["*"]}`)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	got := jsonOf(t, rec)
+	assert.Equal(t, "eu-central-1", got["stackRegion"])
+	assert.Equal(t, []any{"*"}, got["allowedRegions"])
+}
 func TestRemovingAConnectionNeedsItsNameAndNoEnvironments(t *testing.T) {
 	h := newManagedHTTP(t)
 	h.create(t, "orders")

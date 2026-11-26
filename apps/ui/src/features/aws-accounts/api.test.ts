@@ -58,16 +58,13 @@ describe("AWS account calls", () => {
     expect(JSON.parse(String(init?.body))).toEqual({ allowedRegions: ["eu-west-1"] });
   });
 
-  it("leaves the regions out when none are limited", async () => {
-    const fetchMock = reply({ id: "tok", command: "c", expiresAt: "", allowedRegions: [] }, 201);
+  it("asks for all regions with the wildcard alone", async () => {
+    const fetchMock = reply({ id: "tok", command: "c", expiresAt: "", allowedRegions: ["*"] }, 201);
     vi.stubGlobal("fetch", fetchMock);
-
-    await issueAwsConnectCommand([]);
-
+    await issueAwsConnectCommand(["*"]);
     const [, init] = fetchMock.mock.calls[0];
-    expect(JSON.parse(String(init?.body))).toEqual({});
+    expect(JSON.parse(String(init?.body))).toEqual({ allowedRegions: ["*"] });
   });
-
   it("cancels a connect command", async () => {
     const fetchMock = reply(null, 204);
     vi.stubGlobal("fetch", fetchMock);

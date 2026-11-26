@@ -277,8 +277,8 @@ func TestEksTagsAndDeletesAreScopedByTheNamesPdsGives(t *testing.T) {
 	assert.Equal(t, []string{"eks:TagResource"}, asList(tag["Action"]))
 	assert.Equal(t, names, tag["Resource"])
 	assert.Equal(t, map[string]any{
-		"Null":         map[string]any{"aws:RequestTag/percona.com/pds": "false"},
-		"StringEquals": region,
+		"Null":       map[string]any{"aws:RequestTag/percona.com/pds": "false"},
+		"StringLike": region,
 	}, tag["Condition"], "a tag request always carries the ownership tag")
 
 	require.NotNil(t, remove, "CloudFormation can delete what was never made")
@@ -288,7 +288,7 @@ func TestEksTagsAndDeletesAreScopedByTheNamesPdsGives(t *testing.T) {
 		assert.True(t, strings.HasPrefix(action, "eks:Delete"), "%s: only deletes are scoped by name alone", action)
 	}
 	assert.Equal(t, names, remove["Resource"])
-	assert.Equal(t, map[string]any{"StringEquals": region}, remove["Condition"])
+	assert.Equal(t, map[string]any{"StringLike": region}, remove["Condition"])
 }
 
 // EC2 authorizes CreateNatGateway against the existing subnet and Elastic IP as
@@ -312,8 +312,8 @@ func TestANatGatewayIsCreatedFromTheOwnedSubnetAndAddress(t *testing.T) {
 		map[string]any{"Fn::Sub": "arn:aws:ec2:*:${AWS::AccountId}:elastic-ip/*"},
 	}, owned["Resource"])
 	assert.Equal(t, map[string]any{
-		"Null":         map[string]any{"aws:ResourceTag/percona.com/pds": "false"},
-		"StringEquals": map[string]any{"aws:RequestedRegion": map[string]any{"Ref": "AllowedRegions"}},
+		"Null":       map[string]any{"aws:ResourceTag/percona.com/pds": "false"},
+		"StringLike": map[string]any{"aws:RequestedRegion": map[string]any{"Ref": "AllowedRegions"}},
 	}, owned["Condition"])
 }
 
@@ -669,4 +669,50 @@ func TestTheGrantsAnAWSRefusalIsComparedWithAreTheTemplatesOwn(t *testing.T) {
 	assert.False(t, granted("ec2:RunInstances"), "nothing grants it, so a refusal is an account policy's doing")
 	assert.False(t, granted("iam:CreateRole"))
 	assert.False(t, granted(""))
+}
+
+// holdsAllowedRegions reports whether a condition operator's map names the
+// AllowedRegions parameter.
+func holdsAllowedRegions(keys map[string]any) bool {
+	ref, ok := keys["aws:RequestedRegion"].(map[string]any)
+	return ok && ref["Ref"] == "AllowedRegions"
+}
+
+// walkConditions calls visit for every condition operator map in the template.
+func walkConditions(node any, visit func(operator string, keys map[string]any)) {
+	switch v := node.(type) {
+	case map[string]any:
+		if condition, ok := v["Condition"].(map[string]any); ok {
+			for operator, keys := range condition {
+				if m, ok := keys.(map[string]any); ok {
+					visit(operator, m)
+				}
+			}
+		}
+		for _, child := range v {
+			walkConditions(child, visit)
+		}
+	case []any:
+		for _, child := range v {
+			walkConditions(child, visit)
+		}
+	}
+}
+
+// The regions can be the single value "*", and StringEquals does not read a
+// wildcard, so a region condition has to use StringLike. Exact region names
+// match the same way under either.
+func TestEveryRegionConditionMatchesWildcardsSoAllRegionsCanBeAllowed(t *testing.T) {
+	tpl := loadCloudTemplate(t)
+	found := 0
+	for name, resource := range tpl.Resources {
+		walkConditions(resource.Properties, func(operator string, keys map[string]any) {
+			if !holdsAllowedRegions(keys) {
+				return
+			}
+			found++
+			assert.Equal(t, "StringLike", operator, "%s: aws:RequestedRegion needs StringLike", name)
+		})
+	}
+	assert.Positive(t, found, "the template limits what it grants by region")
 }

@@ -36,6 +36,10 @@ _Avoid_: BYOC cluster, hosted environment, push cluster
 A team's standing permission for the control plane to act in one of the customer's cloud accounts, which the customer grants and can revoke. A managed environment is created through one.
 _Avoid_: Cloud account, account, credentials, integration
 
+**Allowed regions**:
+The AWS regions a cloud connection lets the control plane act in, either a chosen list or all regions. Never empty.
+_Avoid_: Region limit, region scope
+
 **Provisioning run**:
 One ordered attempt to create, upgrade, rebuild or delete a managed environment, kept as steps the control plane can resume.
 _Avoid_: Job, task, workflow

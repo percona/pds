@@ -41,6 +41,9 @@ function stubApi(onToken: () => unknown, onOne: () => unknown) {
         return json(onOne());
       }
 
+      if (path === "/api/connect") {
+        return json({ clusterRegion: "eu-central-1" });
+      }
       return json({});
     }),
   );
@@ -103,23 +106,72 @@ describe("ConnectAccountPanel", () => {
     expect(screen.getByText("Check that PDS can use them")).toBeInTheDocument();
   });
 
-  it("limits the regions the command may use", async () => {
+  it("starts with the control plane's default region chosen and sends it", async () => {
     const calls = stubApi(
       () => tokenStatus(),
       () => ({}),
     );
     const user = userEvent.setup();
-
     renderWithProviders(<ConnectAccountPanel pollMs={20} />);
-    await user.click(screen.getByRole("checkbox", { name: "Limit the regions" }));
-    await user.type(screen.getByLabelText("Regions"), "eu-west-1, us-east-1");
+    await waitFor(() =>
+      expect(screen.getByRole("checkbox", { name: "eu-central-1" })).toBeChecked(),
+    );
+    expect(screen.getByRole("checkbox", { name: "eu-west-1" })).not.toBeChecked();
     await user.click(screen.getByRole("button", { name: "Create command" }));
+    await screen.findByText(/--token/);
+    const mint = calls.find((call) => call.path === "/api/cloud-connection-tokens");
+    expect(JSON.parse(String(mint?.init?.body))).toEqual({ allowedRegions: ["eu-central-1"] });
+  });
 
+  it("limits the command to the regions chosen", async () => {
+    const calls = stubApi(
+      () => tokenStatus(),
+      () => ({}),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<ConnectAccountPanel pollMs={20} />);
+    await waitFor(() =>
+      expect(screen.getByRole("checkbox", { name: "eu-central-1" })).toBeChecked(),
+    );
+    await user.click(screen.getByRole("checkbox", { name: "eu-central-1" }));
+    await user.click(screen.getByRole("checkbox", { name: "eu-west-1" }));
+    await user.click(screen.getByRole("checkbox", { name: "us-east-1" }));
+    await user.click(screen.getByRole("button", { name: "Create command" }));
     await screen.findByText(/--token/);
     const mint = calls.find((call) => call.path === "/api/cloud-connection-tokens");
     expect(JSON.parse(String(mint?.init?.body))).toEqual({
       allowedRegions: ["eu-west-1", "us-east-1"],
     });
+  });
+
+  it("will not make a command with no region chosen", async () => {
+    stubApi(
+      () => tokenStatus(),
+      () => ({}),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<ConnectAccountPanel pollMs={20} />);
+    await waitFor(() =>
+      expect(screen.getByRole("checkbox", { name: "eu-central-1" })).toBeChecked(),
+    );
+    await user.click(screen.getByRole("checkbox", { name: "eu-central-1" }));
+    expect(screen.getByText("Choose at least one region.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create command" })).toBeDisabled();
+  });
+
+  it("asks for all regions only when that is chosen, and says what it allows", async () => {
+    const calls = stubApi(
+      () => tokenStatus(),
+      () => ({}),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<ConnectAccountPanel pollMs={20} />);
+    await user.click(screen.getByRole("radio", { name: "All regions" }));
+    expect(screen.getByText(/any region of this AWS account/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Create command" }));
+    await screen.findByText(/--token/);
+    const mint = calls.find((call) => call.path === "/api/cloud-connection-tokens");
+    expect(JSON.parse(String(mint?.init?.body))).toEqual({ allowedRegions: ["*"] });
   });
 
   it("follows the command to a connected account and says so once", async () => {

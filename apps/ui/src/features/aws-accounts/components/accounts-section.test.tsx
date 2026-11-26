@@ -134,6 +134,14 @@ describe("AwsAccountsSection", () => {
     expect(screen.getByText("orders")).toBeInTheDocument();
   });
 
+  it("says all regions for an account that may build anywhere", async () => {
+    stubApi([account({ allowedRegions: ["*"] })]);
+    const user = userEvent.setup();
+    renderWithProviders(<AwsAccountsSection />);
+    await user.click(await screen.findByRole("button", { name: "Details" }));
+    expect(screen.getByText("All regions")).toBeInTheDocument();
+    expect(screen.queryByText("*")).not.toBeInTheDocument();
+  });
   it("removes an account after its alias is typed", async () => {
     const calls = stubApi([account({ environments: [] })]);
     const user = userEvent.setup();

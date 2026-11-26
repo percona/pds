@@ -26,7 +26,10 @@ type cloudTokenResponse struct {
 }
 
 type cloudTypedRequest struct {
-	AccountID      string   `json:"accountId" validate:"required"`
+	AccountID string `json:"accountId" validate:"required"`
+	// Region is where the stack is created. It is required when AllowedRegions
+	// is all regions, and otherwise defaults to the first of them.
+	Region         string   `json:"region"`
 	AllowedRegions []string `json:"allowedRegions"`
 }
 
@@ -92,9 +95,6 @@ func (s *Server) handleIssueCloudToken(w http.ResponseWriter, r *http.Request) {
 		Respond(w, r, nil, err)
 
 		return
-	}
-	if len(req.AllowedRegions) == 0 {
-		req.AllowedRegions = []string{s.clusterRegion()}
 	}
 	hubURL, err := s.scriptOrigin(r)
 	if err != nil {
@@ -184,16 +184,13 @@ func (s *Server) handleCreateCloudConnection(w http.ResponseWriter, r *http.Requ
 
 		return
 	}
-	if len(req.AllowedRegions) == 0 {
-		req.AllowedRegions = []string{s.clusterRegion()}
-	}
 	hubURL, err := s.scriptOrigin(r)
 	if err != nil {
 		Respond(w, r, nil, err)
 
 		return
 	}
-	got, err := cloud.CreateTyped(r.Context(), scope, req.AccountID, req.AllowedRegions)
+	got, err := cloud.CreateTyped(r.Context(), scope, req.AccountID, req.Region, req.AllowedRegions)
 	if err != nil {
 		Respond(w, r, nil, cloudError(err))
 

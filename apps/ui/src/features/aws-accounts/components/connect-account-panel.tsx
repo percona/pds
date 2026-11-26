@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CircleAlert,
   CircleCheck,
@@ -7,25 +7,19 @@ import {
   ExternalLink,
   Loader,
 } from "lucide-react";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Field } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
-import { CommandBlock } from "@/features/environments";
+import { CommandBlock, fetchConnectGuide } from "@/features/environments";
 import { cancelAwsConnectCommand, issueAwsConnectCommand } from "../api";
 import { awsAccountsKey, useAwsAccount, useAwsConnectStatus } from "../hooks";
 import { connectProgress, type ConnectPhaseStatus } from "../progress";
+import { allRegions, awsRegions } from "../regions";
 import type { AwsAccount, AwsConnectCommand } from "../types";
 
 const cloudShellUrl = "https://console.aws.amazon.com/cloudshell/home";
 
-/** Splits "eu-west-1, us-east-1" into region names, dropping blanks. */
-function regionList(text: string): string[] {
-  return text
-    .split(",")
-    .map((region) => region.trim())
-    .filter((region) => region !== "");
-}
+/** The region the control plane names when the person has not chosen one yet. */
+const fallbackRegion = "us-west-2";
 
 type ConnectAccountPanelProps = {
   /** Called once, when the command has connected the account and PDS can use it. */
@@ -46,13 +40,19 @@ export function ConnectAccountPanel({
   team,
 }: ConnectAccountPanelProps) {
   const queryClient = useQueryClient();
-  const regionsId = useId();
-  const [limit, setLimit] = useState(false);
-  const [regions, setRegions] = useState("");
+  const guide = useQuery({
+    queryKey: ["environments", "connect-guide"],
+    queryFn: ({ signal }) => fetchConnectGuide(signal),
+  });
+  const defaultRegion = guide.data?.clusterRegion?.trim() || fallbackRegion;
+  const [scope, setScope] = useState<"selected" | "all">("selected");
+  const [picked, setPicked] = useState<string[] | null>(null);
+  const regions = picked ?? [defaultRegion];
+  const choices = awsRegions.includes(defaultRegion) ? awsRegions : [defaultRegion, ...awsRegions];
   const [issued, setIssued] = useState<{ command: AwsConnectCommand; since: Date } | null>(null);
 
   const issue = useMutation({
-    mutationFn: () => issueAwsConnectCommand(limit ? regionList(regions) : [], team),
+    mutationFn: () => issueAwsConnectCommand(scope === "all" ? [allRegions] : regions, team),
     onSuccess: (command) => setIssued({ command, since: new Date() }),
   });
   const cancel = useMutation({
@@ -82,7 +82,7 @@ export function ConnectAccountPanel({
     // The account object changes on every poll. The id is what says it finished.
   }, [connectedId]);
 
-  const regionsInvalid = limit && regionList(regions).length === 0;
+  const regionsInvalid = scope === "selected" && regions.length === 0;
 
   return (
     <div className="space-y-4">
@@ -92,36 +92,63 @@ export function ConnectAccountPanel({
             One command in your AWS account connects it here. It finds the account by itself, so you
             do not type an account ID. Run it again at any time to repair or update the connection.
           </p>
-          <div className="space-y-3">
-            <label className="flex items-center gap-2 text-sm font-medium">
+          <fieldset className="space-y-3">
+            <legend className="text-sm font-medium">Regions</legend>
+            <label className="flex items-center gap-2 text-sm">
               <input
-                type="checkbox"
+                type="radio"
+                name="region-scope"
                 className="size-4 accent-primary"
-                checked={limit}
-                onChange={(event) => setLimit(event.target.checked)}
+                checked={scope === "selected"}
+                onChange={() => setScope("selected")}
               />
-              Limit the regions
+              Selected regions
             </label>
-            {limit ? (
-              <Field
-                id={regionsId}
-                label="Regions"
-                help="Environments can be built only in these regions. Separate them with commas."
-              >
-                {(props) => (
-                  <Input
-                    {...props}
-                    className="font-mono"
-                    value={regions}
-                    placeholder="eu-west-1, us-east-1"
-                    autoComplete="off"
-                    spellCheck={false}
-                    onChange={(event) => setRegions(event.target.value)}
-                  />
-                )}
-              </Field>
+            {scope === "selected" ? (
+              <div className="space-y-2 pl-6">
+                <p className="text-sm text-muted-foreground">
+                  Environments can be built only in the regions you choose.
+                </p>
+                <div className="grid max-h-56 grid-cols-2 gap-x-4 gap-y-1 overflow-y-auto sm:grid-cols-3">
+                  {choices.map((region) => (
+                    <label key={region} className="flex items-center gap-2 font-mono text-sm">
+                      <input
+                        type="checkbox"
+                        className="size-4 accent-primary"
+                        checked={regions.includes(region)}
+                        onChange={(event) =>
+                          setPicked(
+                            event.target.checked
+                              ? [...regions, region]
+                              : regions.filter((chosen) => chosen !== region),
+                          )
+                        }
+                      />
+                      {region}
+                    </label>
+                  ))}
+                </div>
+                {regionsInvalid ? (
+                  <p className="text-sm text-destructive">Choose at least one region.</p>
+                ) : null}
+              </div>
             ) : null}
-          </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="region-scope"
+                className="size-4 accent-primary"
+                checked={scope === "all"}
+                onChange={() => setScope("all")}
+              />
+              All regions
+            </label>
+            {scope === "all" ? (
+              <p className="pl-6 text-sm text-muted-foreground">
+                PDS can build environments in any region of this AWS account.
+              </p>
+            ) : null}
+          </fieldset>
           <Button
             type="button"
             disabled={regionsInvalid || issue.isPending}
