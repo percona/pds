@@ -484,19 +484,9 @@ approval.
 
 The hub does not call OpenEverest. Create, scale, delete, and restore into a
 new database are commits. Backup runs on the connected environment through the
-heartbeat, and so does the seed that a PostgreSQL restore needs: the provider
-refuses to restore into a new Instance, so the agent creates the
-`PerconaPGCluster` first, with a `dataSource` that reads the source's pgBackRest
-repository. The hub commits the Instance only when the agent reports the seed
-done, and commits nothing if it failed. That Instance carries the annotation
-`pds.percona.com/restored-from`, and the hub refuses to delete it until a
-heartbeat lists the Instance, because removing the manifest earlier would leave
-the seeded database running with nothing to delete it. A failed seed reports a typed reason
-(backup unusable, source gone, environment cannot seed, other), and the hub
-shows the copy a sentence for that reason.
-When the create errors after the API
-server accepted it, the agent deletes the `PerconaPGCluster` it made (the one
-whose `dataSource` restores that backup) before reporting the failure.
+heartbeat. A PostgreSQL restore is a commit like a MySQL one: the new Instance
+carries a `dataSource` naming the source's backup, and the provider bootstraps
+the new cluster from that backup's repository.
 
 The agent calls OpenEverest with the hand written client in
 `adapter/internal/client/everest`. It scopes calls to cluster `main`
@@ -1182,7 +1172,7 @@ On join the hub writes `clusters/<environment>/cluster.yaml` and
 `clusters/<environment>/instances/kustomization.yaml`. The directory keeps the name
 `clusters/` because Flux on each connected environment reads that path. Create adds an Instance file
 and lists it in the index, scale edits it, delete removes it. A restore into a
-new database is also a new file, which for PostgreSQL waits for the agent's seed.
+new database is also a new file.
 
 The hub writes desired state to one of two places, never both:
 

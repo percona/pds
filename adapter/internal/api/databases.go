@@ -603,10 +603,6 @@ func databaseError(err error, subject string) *AppError {
 		return Conflict("That environment is unreachable. Try again after it reports in.").
 			WithCause(err)
 
-	case errors.Is(err, hub.ErrRestoring):
-		return Conflict("This database is still being restored. Try again once the restore finishes.").
-			WithCause(err)
-
 	case errors.Is(err, hub.ErrRestoreNotSupported):
 		return NotImplemented("Restoring into a new database is not available for that engine. Contact Percona support to restore this backup.").
 			WithCause(err)

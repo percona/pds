@@ -80,10 +80,6 @@ type Options struct {
 	// platform outage does not turn monitoring off for new databases. Nil
 	// trusts MonitoringConfig as configured.
 	MonitoringExists func(ctx context.Context) (bool, error)
-	// Seed creates the PostgreSQL database a restore will adopt, in namespace,
-	// ready to restore backupID of source. Nil means this agent cannot, and
-	// reports a seed as failed rather than leaving it in flight.
-	Seed SeedFunc
 	// Cleanup removes the Secrets the database platform leaves behind for a
 	// database that is gone, and returns how many it removed. Nil means this
 	// agent cannot, and leaves them.
@@ -146,9 +142,6 @@ type Options struct {
 	// rollout. After that, unreadyAfter consecutive failures take it down.
 	Ready *atomic.Bool
 }
-
-// SeedFunc runs one seed work item.
-type SeedFunc func(ctx context.Context, namespace, source, backupID, name string) error
 
 // Serve listens for Kubernetes probes and heartbeats until ctx is done.
 func Serve(ctx context.Context, cfg config.Config, logger *slog.Logger, opts Options) error {
@@ -676,7 +669,7 @@ func beat(ctx context.Context, opts Options, pending []hub.WorkResult) ([]hub.Wo
 		return results, nil
 	}
 
-	return append(results, applyWork(ctx, opts.Logger, opts.Databases, opts.Credentials, opts.Seed, databaseItems)...), nil
+	return append(results, applyWork(ctx, opts.Logger, opts.Databases, opts.Credentials, databaseItems)...), nil
 }
 
 // applyWork runs what the hub asked for and reports on each item, so the hub
@@ -695,7 +688,6 @@ func applyWork(
 	logger *slog.Logger,
 	databases workDatabases,
 	credentials func(ctx context.Context, namespace, name string) error,
-	seed SeedFunc,
 	items []hub.Work,
 ) []hub.WorkResult {
 	if len(items) == 0 {
@@ -737,8 +729,6 @@ func applyWork(
 				StorageGB: item.StorageGB,
 				Replicas:  item.Replicas,
 			})
-		case hub.WorkSeed:
-			err = runSeed(ctx, seed, item)
 		default:
 			logger.WarnContext(ctx, "unknown hub work", slog.String("kind", item.Kind))
 			results = append(results, hub.WorkResult{ID: item.ID, Error: "unknown kind " + item.Kind})
@@ -755,41 +745,11 @@ func applyWork(
 				slog.String("err", err.Error()),
 			)
 			result.Error = err.Error()
-			if item.Kind == hub.WorkSeed {
-				result.Reason = seedReason(err)
-			}
 		}
 		results = append(results, result)
 	}
 
 	return results
-}
-
-// seedReason is the typed cause of a failed seed, which the hub shows the
-// developer in place of the error text.
-func seedReason(err error) string {
-	switch {
-	case errors.Is(err, engine.ErrBackupNotFound), errors.Is(err, engine.ErrBackupUnusable):
-		return hub.SeedBackupUnusable
-	case errors.Is(err, engine.ErrNotFound):
-		return hub.SeedSourceGone
-	case errors.Is(err, engine.ErrSeedUnavailable):
-		return hub.SeedUnavailable
-	default:
-		return hub.SeedOther
-	}
-}
-
-func runSeed(ctx context.Context, seed SeedFunc, item hub.Work) error {
-	if seed == nil {
-		return engine.ErrSeedUnavailable
-	}
-	namespace, source, ok := strings.Cut(item.Database, ".")
-	if !ok || namespace == "" || source == "" {
-		return fmt.Errorf("seed source %q does not name a namespace", item.Database)
-	}
-
-	return seed(ctx, namespace, source, item.BackupID, item.Name)
 }
 
 // prepareCredentials writes the users Secret for one "namespace.name"

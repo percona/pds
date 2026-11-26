@@ -296,38 +296,6 @@ func presetAnnotation(p profile) map[string]string {
 	return map[string]string{"openeverest.io/instance-preset": p.preset}
 }
 
-// annotationRestoredFrom marks the Instance of a PostgreSQL copy whose database
-// the agent seeded from a backup of the named source. It stays on the committed
-// manifest, so the hub can tell such a copy after a restart.
-const annotationRestoredFrom = "pds.percona.com/restored-from"
-
-// markRestored stamps the restore marker on a freshly built Instance manifest.
-func markRestored(body []byte, source string) ([]byte, error) {
-	var doc objectDoc
-	if err := yaml.Unmarshal(body, &doc); err != nil {
-		return nil, err
-	}
-	if doc.Metadata.Annotations == nil {
-		doc.Metadata.Annotations = map[string]string{}
-	}
-	doc.Metadata.Annotations[annotationRestoredFrom] = source
-
-	return yaml.Marshal(doc)
-}
-
-// restoredFromYAML reports whether the manifest carries the restore marker.
-func restoredFromYAML(body []byte) bool {
-	var doc struct {
-		Metadata everest.ObjectMeta `json:"metadata"`
-	}
-	if err := yaml.Unmarshal(body, &doc); err != nil {
-		return false
-	}
-	_, ok := doc.Metadata.Annotations[annotationRestoredFrom]
-
-	return ok
-}
-
 // mutateInstanceYAML reads a manifest the hub wrote, hands it to fn, and
 // gives back the rewritten document. Editing the parsed spec rather than
 // rebuilding it keeps whatever the manifest already carries: the labels, the
