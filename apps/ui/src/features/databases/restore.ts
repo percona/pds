@@ -47,13 +47,16 @@ export function restoreNameRule(engine: DatabaseEngine): RestoreNameRule {
   return restoreNameRules[engine];
 }
 
-/** DNS-1123 label, short enough for the engine's restore to build on. */
+/**
+ * DNS-1035 label, short enough for the engine's restore to build on. It starts
+ * with a letter because the engine names a Service after the database.
+ */
 export function isRestoreDatabaseName(value: string, engine: DatabaseEngine): boolean {
   const trimmed = value.trim();
 
   return (
     trimmed.length <= restoreNameRule(engine).limit &&
-    /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(trimmed)
+    /^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$/.test(trimmed)
   );
 }
 

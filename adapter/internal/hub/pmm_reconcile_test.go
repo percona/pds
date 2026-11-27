@@ -52,7 +52,7 @@ func (w *writeCountingStore) count() int {
 func seedTreeBeforeAlertRules(t *testing.T, store Store, environment string, in PMMSettings, chartVersion string) {
 	t.Helper()
 	ctx := context.Background()
-	files, err := pmmFiles(environment, in, chartVersion, true)
+	files, err := pmmFiles(environment, in, chartVersion, "", true)
 	require.NoError(t, err)
 	dir := pmmDir(environment)
 
@@ -109,7 +109,7 @@ func TestReconcileGivesAnEnvironmentWithoutRulesTheRules(t *testing.T) {
 	assert.Empty(t, report.Failed)
 	assert.Equal(t, 1, store.count())
 
-	want, err := pmmFiles("spoke-a", DefaultPMMSettings(), DefaultPMMChartVersion, true)
+	want, err := pmmFiles("spoke-a", DefaultPMMSettings(), DefaultPMMChartVersion, "", true)
 	require.NoError(t, err)
 	for path, body := range want {
 		got, err := store.Get(ctx, path)
@@ -518,7 +518,7 @@ func TestABeatWithoutTheMarkMakesTheNextOneWithItReconcileAgain(t *testing.T) {
 
 func mustPMMFiles(t *testing.T, environment string, withRules bool) map[string][]byte {
 	t.Helper()
-	files, err := pmmFiles(environment, DefaultPMMSettings(), DefaultPMMChartVersion, withRules)
+	files, err := pmmFiles(environment, DefaultPMMSettings(), DefaultPMMChartVersion, "", withRules)
 	require.NoError(t, err)
 
 	return files

@@ -36,11 +36,12 @@ function quote(value: string): string {
 }
 
 /**
- * Names the router would swallow. /environments/new is the create page, and
- * /environments/connect would be an environment named connect, so either name
- * has a row that cannot open its databases.
+ * Names the router would swallow. /environments/new is the create page,
+ * /environments/aws-accounts/new connects an AWS account, and
+ * /environments/connect would be an environment named connect, so each of these
+ * names has a row that cannot open its databases.
  */
-const reserved = new Set(["connect", "new"]);
+const reserved = new Set(["connect", "new", "aws-accounts"]);
 
 export function reservedEnvironmentName(value: string): boolean {
   return reserved.has(value.trim());

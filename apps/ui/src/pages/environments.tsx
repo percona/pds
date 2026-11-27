@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CircleAlert, Server } from "lucide-react";
+import { CircleAlert, CircleArrowUp, Server, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
@@ -11,13 +11,25 @@ import {
   awsCleanupPath,
   environmentsKey,
   disconnectEnvironment,
+  lifecycleNotes,
+  LifecyclePanel,
+  LostPanel,
+  managedPill,
+  ManagedDeleteDialog,
   MonitoringPanel,
   openEverestPath,
+  ProvisioningPanel,
   updatePath,
   useEnvironments,
   type Environment,
 } from "@/features/environments";
 import { ConnectionsPanel } from "@/features/connections";
+import {
+  accountName,
+  AwsAccountsSection,
+  useAwsAccounts,
+  type AwsAccount,
+} from "@/features/aws-accounts";
 import { engineChoicePhrase, StatusPill } from "@/features/databases";
 import { useIsAdmin } from "@/features/auth";
 import { SupportAccessPanel, SupportAccessStatus } from "@/features/support-access";
@@ -28,6 +40,7 @@ import { cn } from "@/lib/utils";
 
 export function EnvironmentsPage() {
   const { isPending, environments, error, resolved } = useEnvironments();
+  const accounts = useAwsAccounts().data ?? [];
 
   // A failed first read is an error. A later blip keeps the last list.
   if (error && !resolved) {
@@ -54,11 +67,17 @@ export function EnvironmentsPage() {
         <Card className="overflow-hidden">
           <ul className="divide-y divide-border">
             {environments.map((environment) => (
-              <EnvironmentRow key={environment.name} environment={environment} />
+              <EnvironmentRow
+                key={environment.name}
+                environment={environment}
+                account={accounts.find((candidate) => candidate.id === environment.connectionId)}
+              />
             ))}
           </ul>
         </Card>
       ) : null}
+
+      <AwsAccountsSection />
 
       <Feature name="connections">
         <ConnectionsPanel />
@@ -67,12 +86,20 @@ export function EnvironmentsPage() {
   );
 }
 
-function EnvironmentRow({ environment }: { environment: Environment }) {
+function EnvironmentRow({
+  environment,
+  account,
+}: {
+  environment: Environment;
+  account: AwsAccount | undefined;
+}) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [confirming, setConfirming] = useState(false);
   const [monitoringOpen, setMonitoringOpen] = useState(false);
   const [supportOpen, setSupportOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [lifecycleOpen, setLifecycleOpen] = useState(false);
   const isAdmin = useIsAdmin();
   const supportAccess = useFeature("support-access");
   const cleanup = awsCleanupPath(environment.name, environment.namespace);
@@ -89,7 +116,12 @@ function EnvironmentRow({ environment }: { environment: Environment }) {
     onError: (error: Error) => toast.error(error.message),
   });
 
-  const unreachable = environment.status === "unreachable";
+  const managed = environment.origin === "managed";
+  const lost = managed && environment.state === "lost";
+  const operable = !managed || environment.state === "ready";
+  const notes = managed && !lost ? lifecycleNotes(environment.lifecycle) : [];
+  const pill = managedPill(environment.state);
+  const unreachable = !managed && environment.status === "unreachable";
   // A row appears the moment a token is minted, so most of the time an
   // unreachable environment with no heartbeat is one still being built, not one
   // that failed. The red pill said otherwise for the whole 15 minutes.
@@ -113,8 +145,45 @@ function EnvironmentRow({ environment }: { environment: Environment }) {
           <div className="min-w-0 space-y-1">
             <p className="truncate font-mono text-sm font-medium">{environment.name}</p>
             {environment.team ? <TeamLabel name={environment.team} /> : null}
+            {managed ? (
+              <p className="text-xs text-muted-foreground">
+                Created by PDS in AWS account{" "}
+                <span className="font-mono">
+                  {account ? accountName(account) : environment.connectionId}
+                </span>
+                {environment.region ? (
+                  <>
+                    {" "}
+                    in <span className="font-mono">{environment.region}</span>
+                  </>
+                ) : null}
+              </p>
+            ) : null}
+            {notes.length > 0 ? (
+              <ul className="flex flex-wrap gap-x-4 gap-y-1">
+                {notes.map((note) => (
+                  <li
+                    key={note.kind}
+                    className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                  >
+                    {note.kind === "update" ? (
+                      <CircleArrowUp className="size-3.5" strokeWidth={1.5} aria-hidden="true" />
+                    ) : (
+                      <TriangleAlert
+                        className="size-3.5 text-warning"
+                        strokeWidth={1.5}
+                        aria-hidden="true"
+                      />
+                    )}
+                    {note.label}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </div>
-          {joining ? (
+          {managed ? (
+            <StatusPill kind={pill.kind} label={pill.label} />
+          ) : joining ? (
             <StatusPill kind="creating" label="Joining" />
           ) : unreachable ? (
             <StatusPill kind="degraded" label="Unreachable" />
@@ -125,7 +194,7 @@ function EnvironmentRow({ environment }: { environment: Environment }) {
             className="text-xs text-muted-foreground sm:text-right"
             title={formatTimestamp(environment.lastSeen) ?? undefined}
           >
-            {lastSeen ? `Last seen ${lastSeen}` : "No heartbeat yet"}
+            {managed && !lastSeen ? "" : lastSeen ? `Last seen ${lastSeen}` : "No heartbeat yet"}
           </p>
         </Link>
         <div className="absolute top-1/2 right-5 -translate-y-1/2">
@@ -152,38 +221,104 @@ function EnvironmentRow({ environment }: { environment: Environment }) {
             </div>
           ) : (
             <div className="flex items-center gap-1">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                aria-expanded={monitoringOpen}
-                onClick={() => setMonitoringOpen((open) => !open)}
-              >
-                Monitoring
-              </Button>
-              {supportAccess ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  aria-expanded={supportOpen}
-                  onClick={() => setSupportOpen((open) => !open)}
-                >
-                  Support access
-                </Button>
+              {operable ? (
+                <>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-expanded={monitoringOpen}
+                    onClick={() => setMonitoringOpen((open) => !open)}
+                  >
+                    Monitoring
+                  </Button>
+                  {managed && environment.lifecycle ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-expanded={lifecycleOpen}
+                      onClick={() => setLifecycleOpen((open) => !open)}
+                    >
+                      Updates
+                    </Button>
+                  ) : null}
+                  {supportAccess ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-expanded={supportOpen}
+                      onClick={() => setSupportOpen((open) => !open)}
+                    >
+                      Support access
+                    </Button>
+                  ) : null}
+                </>
               ) : null}
-              {joining ? null : (
+              {joining || managed ? null : (
                 <Button asChild variant="ghost" size="sm">
                   <Link to={updatePath(environment.name, environment.team)}>Update</Link>
                 </Button>
               )}
-              <Button type="button" variant="ghost" size="sm" onClick={() => setConfirming(true)}>
-                Disconnect
-              </Button>
+              {managed ? (
+                lost ? null : (
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setDeleting(true)}>
+                    Delete
+                  </Button>
+                )
+              ) : (
+                <Button type="button" variant="ghost" size="sm" onClick={() => setConfirming(true)}>
+                  Disconnect
+                </Button>
+              )}
             </div>
           )}
         </div>
       </div>
+      {managed && account?.state === "unreachable" ? (
+        <p className="border-t border-border px-5 py-3 text-sm text-muted-foreground">
+          PDS cannot reach AWS account <span className="font-mono">{accountName(account)}</span>.{" "}
+          <Link
+            to={`/environments?fix=${encodeURIComponent(account.id)}#aws-accounts`}
+            className="rounded-md font-medium text-primary hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          >
+            Fix the AWS account
+          </Link>
+        </p>
+      ) : null}
+      {managed && environment.provisioning && environment.provisioning.progress !== "ready" ? (
+        <div className="border-t border-border px-5 py-5">
+          <ProvisioningPanel
+            environment={environment.name}
+            provisioning={environment.provisioning}
+          />
+        </div>
+      ) : null}
+      {lost && environment.lifecycle ? (
+        <div className="border-t border-border px-5 py-5">
+          <LostPanel
+            environment={environment.name}
+            lifecycle={environment.lifecycle}
+            onRemove={() => setDeleting(true)}
+          />
+        </div>
+      ) : null}
+      {managed && !lost && lifecycleOpen && environment.lifecycle ? (
+        <div className="border-t border-border px-5 py-5">
+          <LifecyclePanel environment={environment.name} lifecycle={environment.lifecycle} />
+        </div>
+      ) : null}
+      {managed ? (
+        <ManagedDeleteDialog
+          environment={environment.name}
+          account={account ? accountName(account) : (environment.connectionId ?? "")}
+          accountUnreachable={account?.state === "unreachable"}
+          lost={lost}
+          open={deleting}
+          onOpenChange={setDeleting}
+        />
+      ) : null}
       {supportAccess && environment.supportAccess && !confirming ? (
         <SupportAccessStatus summary={environment.supportAccess} />
       ) : null}

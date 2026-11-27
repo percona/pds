@@ -1,10 +1,103 @@
-export type EnvironmentStatus = "connected" | "unreachable";
+export type EnvironmentStatus = "connected" | "unreachable" | "pending";
+
+/** Whether the customer connected the environment or PDS built it in their AWS account. */
+export type EnvironmentOrigin = "connected" | "managed";
+
+/** How an environment is as a whole. A connected one is only ready or degraded. */
+export type EnvironmentState = "creating" | "ready" | "degraded" | "failed" | "deleting" | "lost";
+
+export type PhaseStatus = "pending" | "running" | "waiting" | "succeeded" | "failed";
+
+export type RunProgress = "in_progress" | "waiting" | "failed" | "blocked" | "ready" | "cancelled";
+
+/** One of the four phases of a create. A delete has none. */
+export type Phase = { name: string; status: PhaseStatus };
+
+/** An AWS refusal, in the shape every surface shares. */
+export type Refusal = { reason: string; service?: string; item?: string; region?: string };
+
+/** Why a run stopped, as one safe sentence and the one thing to do about it. */
+export type RunFailure = { sentence: string; action: string; refusal?: Refusal };
+
+export type Provisioning = {
+  run: { id: number; kind: string; status: string; startedAt: string; finishedAt?: string };
+  progress: RunProgress;
+  /** The sentence of a run paused on an AWS account that does not work. */
+  message?: string;
+  phases: Phase[];
+  failure?: RunFailure;
+};
+
+/** What starting or retrying a run, or deleting an environment, answers. */
+export type RunStarted = { run: Provisioning["run"]; provisioning: Provisioning };
+
+export type ManagedCreated = { environment: Environment; run: Provisioning["run"] };
 
 /** What the list says about a support access window that is opening or open. */
 export type SupportSummary = {
   state: "opening" | "open";
   level: "readOnly" | "admin";
   expiresAt: string;
+};
+
+/** One resource found changed in AWS outside PDS. PDS reports it and changes nothing. */
+export type Drift = { resource: string; detail: string };
+
+/** When upgrades may start: a day (0 is Sunday) and hour in a time zone, and the next open window. */
+export type MaintenanceWindow = {
+  day: number;
+  hour: number;
+  timeZone: string;
+  nextStart: string;
+  nextEnd: string;
+};
+
+/** What the control plane knows about a managed environment's upgrades, drift and loss. */
+export type Lifecycle = {
+  chartVersion?: string;
+  pendingChartVersion?: string;
+  skippedChartVersion?: string;
+  deferred: boolean;
+  deferredUntil?: string;
+  maintenanceWindow: MaintenanceWindow;
+  templateRevision: number;
+  latestTemplateRevision: number;
+  templateOutOfDate: boolean;
+  templateSummary?: string;
+  kubernetesVersion?: string;
+  kubernetesUpgradeAvailable: boolean;
+  drift: Drift[];
+  driftCheckedAt?: string;
+  lost: boolean;
+  lostReason?: string;
+  lostAt?: string;
+};
+
+export type RunKind = "upgrade_pds" | "upgrade_kubernetes" | "rebuild";
+
+export type StartRunInput = {
+  kind: RunKind;
+  kubernetesVersion?: string;
+  confirmNodeGroupReplace?: boolean;
+};
+
+/** One change an update would make to the stack. */
+export type UpdateChange = { resource: string; type: string; action: string; replacement: string };
+
+/** What an update would do. One that replaces the network or the Kubernetes cluster is never started. */
+export type UpdatePreview = {
+  replacesNetwork: boolean;
+  replacesNodeGroup: boolean;
+  changes: UpdateChange[];
+};
+
+/** What Remove from PDS only leaves in the AWS account. */
+export type Remains = {
+  accountId?: string;
+  region: string;
+  stackName: string;
+  eksName: string;
+  bucket?: string;
 };
 
 export type Environment = {
@@ -16,6 +109,13 @@ export type Environment = {
   team?: string;
   /** The support access window while one is opening or open. */
   supportAccess?: SupportSummary;
+  origin?: EnvironmentOrigin;
+  state?: EnvironmentState;
+  /** The AWS account a managed environment was built through. */
+  connectionId?: string;
+  region?: string;
+  provisioning?: Provisioning;
+  lifecycle?: Lifecycle;
 };
 
 /**

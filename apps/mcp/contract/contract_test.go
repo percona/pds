@@ -19,18 +19,19 @@ import (
 )
 
 var readTools = []string{
-	"get_activity", "get_database", "get_database_alerts", "get_database_history", "get_database_usage",
-	"get_environment_history", "get_metrics", "get_support_ticket", "list_activity", "list_alerts",
-	"list_backups", "list_databases", "list_environments", "list_support_tickets", "wait_for_backup",
+	"get_activity", "get_cloud_connection", "get_database", "get_database_alerts", "get_database_history", "get_database_usage",
+	"get_environment", "get_environment_history", "get_metrics", "get_support_ticket", "list_activity", "list_alerts",
+	"list_backups", "list_cloud_connections", "list_databases", "list_environments", "list_support_tickets", "wait_for_backup",
 	"wait_for_database", "wait_for_environment",
 }
 
 var changeTools = []string{
 	"backup_database", "create_database", "create_environment", "create_support_ticket",
 	"reply_to_support_ticket", "restore_database", "scale_database", "set_backup_schedule",
+	"create_managed_environment", "retry_environment_run", "start_cloud_connection", "upgrade_environment",
 }
 
-var deleteTools = []string{"delete_database"}
+var deleteTools = []string{"delete_database", "delete_managed_environment", "rebuild_environment", "remove_cloud_connection"}
 
 // tiers maps what the person allows on the consent screen to the flag that asks for it and the
 // tools an agent then sees.

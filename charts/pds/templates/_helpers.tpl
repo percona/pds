@@ -692,6 +692,41 @@ in the Secret.
 {{- end }}
 - name: HUB_AGENT_IMAGE
   value: {{ $agentImage | quote }}
+{{- with .Values.adapter.backupKey.user }}
+{{- if not (and $.Values.stack.s3.enabled $.Values.stack.s3.bucket $.Values.stack.s3.region $.Values.stack.s3.existingSecret) }}
+{{- fail "adapter.backupKey.user needs stack.s3.enabled with a bucket, a region and an existingSecret for the key to go into." }}
+{{- end }}
+- name: AGENT_BACKUP_USER
+  value: {{ . | quote }}
+- name: AGENT_BACKUP_USER_PATH
+  value: {{ $.Values.adapter.backupKey.path | quote }}
+- name: AGENT_BACKUP_BOUNDARY_ARN
+  value: {{ $.Values.adapter.backupKey.boundaryArn | quote }}
+- name: AGENT_BACKUP_BUCKET
+  value: {{ $.Values.stack.s3.bucket | quote }}
+- name: AGENT_BACKUP_SECRET
+  value: {{ $.Values.stack.s3.existingSecret | quote }}
+- name: AGENT_BACKUP_TAG
+  value: {{ $.Values.adapter.backupKey.tag | quote }}
+- name: AWS_REGION
+  value: {{ $.Values.stack.s3.region | quote }}
+{{- end }}
+{{- with .Values.adapter.hub.releaseRef }}
+- name: AGENT_RELEASE_REF
+  value: {{ . | quote }}
+{{- end }}
+{{- with .Values.adapter.hub.managedChartVersion }}
+- name: HUB_MANAGED_CHART_VERSION
+  value: {{ . | quote }}
+{{- end }}
+{{- with .Values.adapter.hub.managedChartURL }}
+- name: HUB_MANAGED_CHART_URL
+  value: {{ . | quote }}
+{{- end }}
+{{- with .Values.adapter.hub.managedOutgoingCIDRs }}
+- name: HUB_MANAGED_OUTGOING_CIDRS
+  value: {{ join "," . | quote }}
+{{- end }}
 {{- with .Values.adapter.hub.url }}
 - name: HUB_URL
   value: {{ . | quote }}

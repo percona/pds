@@ -132,7 +132,7 @@ test.describe("All teams", () => {
       });
     });
 
-    await page.goto("environments/new");
+    await page.goto("environments/new?mode=command");
     await page.getByLabel("Environment name").fill("spoke-new");
     await expect(page.getByLabel("Team", { exact: true })).toHaveValue("default");
     await page.getByLabel("Team", { exact: true }).selectOption("payments");
@@ -168,7 +168,7 @@ test.describe("All teams", () => {
     await stubAdmin(page);
     await chooseAllTeams(page);
 
-    await page.goto("environments/new");
+    await page.goto("environments/new?mode=command");
     await page.getByLabel("Environment name").fill("spoke-pay");
     await expect(page.getByLabel("Team", { exact: true })).toHaveValue("default");
     await expect(page.getByText("spoke-pay is already connected.")).toHaveCount(0);

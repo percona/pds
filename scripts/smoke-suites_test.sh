@@ -23,10 +23,11 @@ expect_refused() {
   pass "${name}"
 }
 
-expect_list all "mysql,postgresql,mcp" '["mysql","postgresql","mcp"]'
+expect_list all "mysql,postgresql,mcp,flux" '["mysql","postgresql","mcp","flux"]'
+expect_list flux "flux" '["flux"]'
 expect_list one "mcp" '["mcp"]'
 expect_list spaces-and-case " MySQL , mcp " '["mysql","mcp"]'
-expect_list order-is-fixed "mcp,mysql" '["mysql","mcp"]'
+expect_list order-is-fixed "flux,mcp,mysql" '["mysql","mcp","flux"]'
 expect_list duplicate "mcp,mcp" '["mcp"]'
 expect_refused typo "mysql,postgres"
 expect_refused unknown "oracle"

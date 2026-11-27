@@ -92,6 +92,18 @@ type Options struct {
 	// Support runs support access windows on this environment. Nil means this
 	// agent cannot, and says nothing about them.
 	Support SupportWorkloads
+	// Release reads the pds HelmRelease the control plane keeps in Git for this
+	// environment. Nil means the environment has none, as a connected one does,
+	// and the beat carries no release.
+	Release func(ctx context.Context) (*hub.HeartbeatRelease, error)
+	// BackupKey keeps the environment's backup key. Nil means this environment
+	// keeps its key some other way, as a connected one does.
+	BackupKey func(ctx context.Context) error
+	// backupKeyErr is the last error BackupKey returned, logged once.
+	backupKeyErr *string
+	// releaseErr is the last error Release returned, so a read that keeps
+	// failing is logged once, not on every beat.
+	releaseErr *string
 	// supportConfirmations is what this agent did to windows that the hub has
 	// not yet taken.
 	supportConfirmations *supportConfirmations
@@ -238,6 +250,12 @@ func Run(ctx context.Context, opts Options) error {
 	if opts.lastAddress == nil {
 		opts.lastAddress = new(string)
 	}
+	if opts.releaseErr == nil {
+		opts.releaseErr = new(string)
+	}
+	if opts.backupKeyErr == nil {
+		opts.backupKeyErr = new(string)
+	}
 	if opts.monitoring == nil {
 		opts.monitoring = &monitoringSeen{}
 	}
@@ -262,6 +280,7 @@ func Run(ctx context.Context, opts Options) error {
 
 	for {
 		expireSupport(ctx, opts, time.Now())
+		reconcileBackupKey(ctx, opts)
 		var err error
 		results, err = beat(ctx, opts, results)
 		if err != nil {
@@ -587,6 +606,7 @@ func beat(ctx context.Context, opts Options, pending []hub.WorkResult) ([]hub.Wo
 		Alerts:            alerts,
 		Events:            events,
 		Usage:             usage,
+		Release:           reportedRelease(ctx, opts),
 	})
 	if err != nil {
 		return pending, err
@@ -847,4 +867,24 @@ func reportedAddress(ctx context.Context, opts Options) string {
 	*last = address
 
 	return address
+}
+
+// reportedRelease reads the environment's pds release for the beat. A read that
+// fails reports nothing, so the hub keeps what it last heard.
+func reportedRelease(ctx context.Context, opts Options) *hub.HeartbeatRelease {
+	if opts.Release == nil {
+		return nil
+	}
+	release, err := opts.Release(ctx)
+	if err != nil {
+		if err.Error() != *opts.releaseErr {
+			*opts.releaseErr = err.Error()
+			opts.Logger.WarnContext(ctx, "heartbeat release read failed", slog.String("err", err.Error()))
+		}
+
+		return nil
+	}
+	*opts.releaseErr = ""
+
+	return release
 }

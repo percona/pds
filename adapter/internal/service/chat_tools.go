@@ -307,6 +307,10 @@ func chatToolLabel(name string) string {
 		return "Reading environment history"
 	case "list_environments":
 		return "Listing environments"
+	case "get_environment":
+		return "Reading an environment"
+	case "list_cloud_connections", "get_cloud_connection":
+		return "Reading AWS accounts"
 	case "list_activity", "get_activity":
 		return "Reading activity"
 	case "list_alerts", "get_database_alerts":

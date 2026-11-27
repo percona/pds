@@ -86,6 +86,11 @@ type Options struct {
 	// background work a heartbeat starts. Nil means work that is never
 	// cancelled.
 	Context context.Context
+	// OwnershipID returns the ID a managed environment's AWS resources are
+	// tagged with, and empty for an environment the control plane did not build.
+	// The load balancers the hub asks for carry it. Nil means no environment has
+	// one.
+	OwnershipID func(ctx context.Context, environment string) (string, error)
 }
 
 // Service is the hub-mode database backend.
@@ -118,6 +123,7 @@ type Service struct {
 	cloneKeys        map[string]CloneKey
 	cloneUnpersisted map[string]bool
 	pmmVersion       string
+	ownership        func(ctx context.Context, environment string) (string, error)
 	rulesGate        *alertRulesGate
 	// supportEvents are what beats did to support access windows, until the
 	// heartbeat route takes them to write up.
@@ -174,6 +180,7 @@ func NewService(store Store, inv *Inventory, opts Options) *Service {
 		cloneKeys:        map[string]CloneKey{},
 		cloneUnpersisted: map[string]bool{},
 		pmmVersion:       strings.TrimSpace(opts.PMMChartVersion),
+		ownership:        opts.OwnershipID,
 		rulesGate:        newAlertRulesGate(),
 		supportEvents:    map[string][]SupportEvent{},
 	}
@@ -225,6 +232,16 @@ func (s *Service) targetsFor(environment string) environmentTargets {
 	}
 }
 
+// ownershipID is the ID that tags what a managed environment owns in AWS, and
+// empty for an environment the control plane did not build.
+func (s *Service) ownershipID(ctx context.Context, environment string) (string, error) {
+	if s.ownership == nil {
+		return "", nil
+	}
+
+	return s.ownership(ctx, environment)
+}
+
 // Create writes an Instance manifest for a connected environment.
 func (s *Service) Create(ctx context.Context, in engine.CreateInput) (*engine.Instance, error) {
 	environment := strings.TrimSpace(in.Environment)
@@ -240,8 +257,8 @@ func (s *Service) Create(ctx context.Context, in engine.CreateInput) (*engine.In
 	}
 	// The HTTP role never reaches a plugin. An unchecked name becomes a path
 	// segment in the desired-state tree and a metadata.name Flux has to apply.
-	if !ValidName(name) {
-		return nil, fmt.Errorf("%w: %q must be lowercase letters, numbers, and dashes", engine.ErrInvalidName, name)
+	if !ValidDatabaseName(name) {
+		return nil, fmt.Errorf("%w: %q must start with a letter and be lowercase letters, numbers, and dashes", engine.ErrInvalidName, name)
 	}
 	if flavor.ID == oe.PostgreSQL.ID && len(name) > maxPostgreSQLName {
 		return nil, &engine.BoundsError{
@@ -270,9 +287,17 @@ func (s *Service) Create(ctx context.Context, in engine.CreateInput) (*engine.In
 		return nil, err
 	}
 
+	targets := s.targetsFor(environment)
+	if exposure.External {
+		// A database that cannot be tagged would leave a load balancer the delete
+		// never finds, so a failed lookup refuses the create.
+		if targets.OwnershipID, err = s.ownershipID(ctx, environment); err != nil {
+			return nil, fmt.Errorf("read the environment's ownership tag: %w", err)
+		}
+	}
 	ns := s.namespaceFor(environment)
 	body, p, err := instanceYAML(name, ns, environment, flavor, strings.ToLower(strings.TrimSpace(in.Profile)),
-		s.targetsFor(environment), in.Overrides, exposure)
+		targets, in.Overrides, exposure)
 	if err != nil {
 		return nil, err
 	}
@@ -453,8 +478,8 @@ func (s *Service) RestoreToNewDatabase(ctx context.Context, id, backupID, name s
 	name = strings.TrimSpace(name)
 	// The name becomes a path segment in the desired-state tree and a
 	// metadata.name Flux applies, so it is checked before anything is read.
-	if !ValidName(name) {
-		return nil, fmt.Errorf("%w: %q must be lowercase letters, numbers, and dashes", engine.ErrInvalidName, name)
+	if !ValidDatabaseName(name) {
+		return nil, fmt.Errorf("%w: %q must start with a letter and be lowercase letters, numbers, and dashes", engine.ErrInvalidName, name)
 	}
 	if err := s.requireConnected(environment); err != nil {
 		return nil, err
@@ -1334,6 +1359,23 @@ func (s *Service) SetBackupSchedule(ctx context.Context, id string, in *engine.S
 	return result, nil
 }
 
+// assignNewRepoLocked claims the repository of an environment the inventory does
+// not list yet, so whichever writes to Git first, the join or a managed
+// environment's release, settles the name the other uses. It reports whether the
+// inventory listed the environment. The caller holds the environment's lock.
+func (s *Service) assignNewRepoLocked(ctx context.Context, name string) (known bool, err error) {
+	if _, known = s.inv.Get(name, s.now()); known {
+		return true, nil
+	}
+	if assigner, ok := s.git.(repoAssigner); ok {
+		if err := assigner.Assign(ctx, name); err != nil {
+			return false, fmt.Errorf("%w: %w", ErrGitHost, err)
+		}
+	}
+
+	return false, nil
+}
+
 // IssueJoin mints a token bound to one environment name and writes empty Flux
 // kustomize dirs so the spoke can pull before the first create. The environment
 // is registered so a hub restart still lists it as unreachable until a beat.
@@ -1346,13 +1388,9 @@ func (s *Service) IssueJoin(ctx context.Context, name string) (string, error) {
 	defer s.life.Unlock()
 	unlock := s.spokes.lock(name)
 	defer unlock()
-	_, alreadyKnown := s.inv.Get(name, s.now())
-	if !alreadyKnown {
-		if assigner, ok := s.git.(repoAssigner); ok {
-			if err := assigner.Assign(ctx, name); err != nil {
-				return "", fmt.Errorf("%w: %w", ErrGitHost, err)
-			}
-		}
+	alreadyKnown, err := s.assignNewRepoLocked(ctx, name)
+	if err != nil {
+		return "", err
 	}
 	if s.git != nil {
 		if err := s.git.EnsureRepo(ctx, name); err != nil {
@@ -1614,7 +1652,11 @@ func (s *Service) seedPMM(ctx context.Context, environment string) error {
 	if _, err := s.store.Get(ctx, pmmDir(environment)+"/kustomization.yaml"); err == nil {
 		return nil
 	}
-	files, err := pmmFiles(environment, DefaultPMMSettings(), s.pmmVersion, true)
+	ownershipID, err := s.ownershipID(ctx, environment)
+	if err != nil {
+		return fmt.Errorf("read the environment's ownership tag: %w", err)
+	}
+	files, err := pmmFiles(environment, DefaultPMMSettings(), s.pmmVersion, ownershipID, true)
 	if err != nil {
 		return err
 	}

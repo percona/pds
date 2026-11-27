@@ -55,10 +55,11 @@ STALE_ENVIRONMENT='/api/(internal/)?clusters([/?" `]|$)|[?&]cluster=|hub_cluster
 # ones below name the infrastructure or an outside system and are let through:
 # Kubernetes terms, OpenEverest's own cluster, the access value that means
 # reachable only inside the Kubernetes cluster, the topology of a database,
-# and the copy lint that bans the bare word.
+# the copy lint that bans the bare word, and the names the AWS SDK gives its EKS
+# calls and constants.
 IDENTIFIER_FILES='\.(go|ts|tsx)$'
 CLUSTER_IDENTIFIER='\b[A-Za-z0-9_]*([a-z0-9_]Clusters?|Cluster(s[A-Za-z0-9_]|[A-Za-rt-z0-9_]))[A-Za-z0-9_]*|\b(cluster|clusters)[A-Z_][A-Za-z0-9_]*'
-ALLOWED_IDENTIFIER='InCluster|inCluster|ClusterIP|ClusterRole|ClusterConfig|PerconaPGCluster|ClusterAccess|ClusterEvent|clusterEvent|ClusterRegion|clusterRegion|ClusterType|clusterType|EverestCluster|DefaultCluster|TopologyCluster|VisibilityCluster|PMMAccessCluster|LegacyClusters|bareCluster|clusterWord|collectClusterLabels|DefaultsTheClusterName|XtraDBCluster|PostgresCluster|pgCluster'
+ALLOWED_IDENTIFIER='InCluster|inCluster|ClusterIP|ClusterRole|ClusterConfig|PerconaPGCluster|ClusterAccess|ClusterEvent|clusterEvent|ClusterRegion|clusterRegion|ClusterType|clusterType|EverestCluster|DefaultCluster|TopologyCluster|VisibilityCluster|PMMAccessCluster|LegacyClusters|bareCluster|clusterWord|collectClusterLabels|DefaultsTheClusterName|XtraDBCluster|PostgresCluster|pgCluster|BootstrapClusterCreatorAdminPermissions|AccessScopeTypeCluster|AmazonEKSClusterAdminPolicy|ClusterStatusActive|DescribeCluster|UpdateClusterConfig|^ClusterName$|^CreateCluster$'
 
 # Files whose subject is the rename itself.
 ALLOWED_FILE='^(AGENTS\.md|scripts/check-naming\.sh|scripts/check-naming_test\.sh|package-lock\.json)$'
@@ -189,9 +190,10 @@ if [ "${environment_status}" -ne 0 ]; then
   cat >&2 <<'EOF'
 
 A cluster connected to PDS is an environment. Rename the route, field, setting
-or identifier. If the line means the Kubernetes cluster under an environment, or
-reads what an older release wrote, mark it allow-legacy-name, or name the
-infrastructure outright (Kubernetes cluster, EKS cluster).
+or identifier. If the line reads what an older release wrote, mark it
+allow-legacy-name. If it means the Kubernetes cluster under an environment, name
+the infrastructure outright (Kubernetes cluster, EKS cluster), or add an
+identifier that an outside system owns to ALLOWED_IDENTIFIER.
 EOF
   status=1
 fi

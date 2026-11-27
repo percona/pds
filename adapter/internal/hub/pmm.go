@@ -27,6 +27,11 @@ const (
 	pmmMaxStorageGi     = 2000
 )
 
+// TaggedStorageClass is the StorageClass a managed environment's pds release
+// installs as the cluster's default, tagging every volume with the
+// environment's ID.
+const TaggedStorageClass = "pds-gp3"
+
 // How far monitoring is reachable. Cluster only is the default: nothing
 // outside the Kubernetes cluster can open it. Private puts it behind an internal cloud
 // load balancer, and public behind an internet-facing one. The names match
@@ -166,7 +171,7 @@ func minInt(a, b int) int {
 // withRules adds the alert rules ConfigMap and its mount. An environment whose
 // agent cannot apply a ConfigMap gets a tree without them, because Flux drops
 // the whole apply when one resource is refused.
-func pmmFiles(environment string, in PMMSettings, chartVersion string, withRules bool) (map[string][]byte, error) {
+func pmmFiles(environment string, in PMMSettings, chartVersion, ownershipID string, withRules bool) (map[string][]byte, error) {
 	s, err := in.Normalize()
 	if err != nil {
 		return nil, err
@@ -183,7 +188,7 @@ func pmmFiles(environment string, in PMMSettings, chartVersion string, withRules
 	if s.Access != PMMAccessCluster {
 		// The annotations come from the same place a database's do, so the two
 		// cannot drift on what private and public mean to a cloud.
-		lb := oe.LoadBalancerServiceFor(engine.Exposure{External: true, Private: s.Access == PMMAccessPrivate})
+		lb := oe.LoadBalancerServiceFor(engine.Exposure{External: true, Private: s.Access == PMMAccessPrivate}, ownershipID)
 		service["type"] = lb.ServiceType
 		service["annotations"] = lb.Annotations
 		// The chart renders no loadBalancerSourceRanges, so the list is added
@@ -204,6 +209,14 @@ func pmmFiles(environment string, in PMMSettings, chartVersion string, withRules
 				}},
 			},
 		}}
+	}
+
+	storage := map[string]any{"size": fmt.Sprintf("%dGi", s.StorageGi)}
+	if ownershipID != "" {
+		// A managed environment's Kubernetes cluster has no default StorageClass
+		// until the pds release installs this one. A claim that names it binds
+		// as soon as it exists; one that names none waits minutes for a default.
+		storage["storageClassName"] = TaggedStorageClass
 	}
 
 	release := map[string]any{
@@ -229,7 +242,7 @@ func pmmFiles(environment string, in PMMSettings, chartVersion string, withRules
 				"fullnameOverride":  "pmm",
 				"priorityClassName": "pds-bulk",
 				"service":           service,
-				"storage":           map[string]any{"size": fmt.Sprintf("%dGi", s.StorageGi)},
+				"storage":           storage,
 				"resources": map[string]any{
 					"requests": map[string]any{
 						"cpu":    cpuQuantityMillis(minInt(250, s.CPUMillicores)),

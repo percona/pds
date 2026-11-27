@@ -11,6 +11,11 @@
 #                                              hub with a connected environment
 #                                              for the MCP binary's contract
 #                                              tests
+#   scripts/hub-smoke.sh --flux                lab whose environment is connected the
+#                                              way the control plane does it, with
+#                                              Flux and a rendered HelmRelease and
+#                                              no join script, then a database
+#                                              created, Ready and deleted
 #   scripts/hub-smoke.sh --dump                kubectl, adapter, agent, Flux, and
 #                                              Gitea logs
 #
@@ -36,9 +41,10 @@
 #   none of it
 #
 # The lifecycle below is the pin contract. The smoke workflow runs it as two
-# suites, mysql and postgresql, and a third, mcp, that brings the lab up with
+# suites, mysql and postgresql, a third, mcp, that brings the lab up with
 # --lab-only and runs the MCP binary's contract tests against it, signed in as
-# the organization the lab seeds. Each suite brings up its own lab. Dispatch the
+# the organization the lab seeds, and a fourth, flux, that connects the
+# environment through scripts/lib/flux-environment.sh. Each suite brings up its own lab. Dispatch the
 # smoke workflow on the branch to run them. It does not gate a pull request.
 #
 # The lab stays up when this command exits. The workflow collects logs and then
@@ -95,14 +101,16 @@ LAB_SPOKE_WORKERS="${LAB_SPOKE_WORKERS:-4}"
 ENGINE="${ENGINE:-mysql}"
 DUMP=false
 LAB_ONLY=false
+FLUX=false
 usage() {
-  echo "usage: $(basename "$0") [--engine mysql|postgresql] [--lab-only] [--dump]" >&2
+  echo "usage: $(basename "$0") [--engine mysql|postgresql] [--lab-only | --flux] [--dump]" >&2
   exit 2
 }
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dump) DUMP=true ;;
     --lab-only) LAB_ONLY=true ;;
+    --flux) FLUX=true ;;
     --engine)
       [[ $# -ge 2 ]] || usage
       ENGINE="$2"
@@ -112,6 +120,7 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+[[ "${FLUX}" == true && "${LAB_ONLY}" == true ]] && usage
 PROVIDER="$(lifecycle_provider "${ENGINE}")" || usage
 PRESET="$(lifecycle_preset "${ENGINE}")"
 ENGINE_LABEL="$(lifecycle_engine_label "${ENGINE}")"
@@ -352,6 +361,9 @@ docker pull "${GITEA_IMAGE}"
 
 step "lab"
 export LAB_SPOKE_WORKERS
+if [[ "${FLUX}" == true ]]; then
+  export LAB_CONNECT=flux
+fi
 "${REPO_ROOT}/scripts/up.sh"
 
 step "sign in"
@@ -959,7 +971,11 @@ wait_stay_gone() {
 }
 
 step "create a ${ENGINE_LABEL} Dev database"
-wait_environment_monitored "${SPOKE_CLUSTER}"
+# The managed release leaves monitoring to Git, which this suite does not
+# render, so the environment never reports it.
+if [[ "${FLUX}" != true ]]; then
+  wait_environment_monitored "${SPOKE_CLUSTER}"
+fi
 stamp="$(date +%s)"
 db_name="hub-${stamp}"
 api_call POST /api/databases "$(lifecycle_create_body "${db_name}" "${SPOKE_CLUSTER}" "${ENGINE}")"
@@ -980,6 +996,20 @@ assert_dev_instance "${db_name}"
 step "wait for Ready"
 wait_ready "${db_id}"
 echo "${db_id} is ready"
+
+if [[ "${FLUX}" == true ]]; then
+  step "delete the database"
+  api_call DELETE "/api/databases/${db_id}"
+  require_code "${API_CODE}" 204 "DELETE ${db_id}"
+  wait_git_absent "${db_name}"
+  wait_gone "${db_name}"
+  step "summary"
+  echo "hub:       kind-${HUB_CLUSTER}"
+  echo "cluster:   kind-${SPOKE_CLUSTER} (Flux and the pds HelmRelease, no join script)"
+  echo "created:   ${db_id}, Ready, then deleted"
+  echo "hub smoke passed"
+  exit 0
+fi
 
 # The monitor login goes first: one MySQL's exporter cannot use would
 # otherwise show only as a monitoring wait that times out.

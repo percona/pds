@@ -55,6 +55,21 @@ rules:
     resourceNames:
       - "monitoring-service"
     verbs: ["get"]
+  {{- if .Values.adapter.backupKey.user }}
+  # The agent writes the backup key it makes to this Secret, and the control
+  # plane asks it to remove the IAM user through this ConfigMap when the
+  # environment is deleted.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - {{ .Values.stack.s3.existingSecret | quote }}
+    verbs: ["get", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames:
+      - "pds-backup-user"
+    verbs: ["get", "update", "patch"]
+  {{- end }}
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create"]
@@ -207,6 +222,49 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "pds.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
+{{- with .Values.adapter.hub.releaseRef }}
+---
+# The agent reports the state of the one HelmRelease that holds this release,
+# and reads nothing else of Flux. resourceNames limits get to that name in
+# whichever namespace it lives in.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}-release
+  labels:
+    {{- include "pds.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: adapter
+  {{- with $.Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources: ["helmreleases"]
+    resourceNames:
+      - {{ index (splitList "/" .) 1 | quote }}
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-release
+  labels:
+    {{- include "pds.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: adapter
+  {{- with $.Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}-release
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "pds.serviceAccountName" $ }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

@@ -13,12 +13,14 @@ another module needs to import something. Tests sit next to the code.
 | Package | Owns |
 |---------|------|
 | `cmd/adapter` | The binary: configuration, wiring, roles, and the `adapter organization` command |
-| `internal/api` | HTTP: the chi router in `server.go`, handlers, `AppError` and `Respond`, the session guard, and the embedded join scripts |
+| `internal/api` | HTTP: the chi router in `server.go`, handlers, `AppError` and `Respond`, the session guard, and the embedded join scripts and cloud connection template |
 | `internal/service` | Business logic. Services decide, call clients and return domain errors |
-| `internal/client/*` | One package per downstream: `everest`, `pmm`, `servicenow`, `github`, `claude`, `cursor`, `ses`, and `kube`, the only package that talks to the Kubernetes API, and `clientmeta`, which fetches an OAuth client's metadata document |
+| `internal/client/*` | One package per downstream: `everest`, `pmm`, `servicenow`, `github`, `claude`, `cursor`, `ses`, and `kube`, the only package that talks to the Kubernetes API, `clientmeta`, which fetches an OAuth client's metadata document, `aws`, which assumes a cloud connection's role and makes, reads, changes and sweeps what a managed environment owns, and `backupkey`, which the agent runs inside the environment to make its backup IAM user |
 | `internal/engine` | The engine plugin contract, the registry, and engine errors. `oe` is the shared OpenEverest implementation; `mysql` and `postgresql` are its two flavors |
 | `internal/hub` | Hub state: environment inventory, join tokens, the work queue, and the two Git stores (GitHub, or a local directory) |
 | `internal/agent` | The `agent` role: the heartbeat loop and the work it runs locally |
+| `internal/provision` | Provisioning runs: the lease-based worker, step retry and backoff, pause and resume, the Access window sweeper and run retention. It knows no cloud: a run kind brings its steps |
+| `internal/managed` | Managed environments: the create, delete, upgrade and rebuild runs' steps, the requests that start them, drift and loss, the embedded network and cluster template, and the pds HelmRelease render under its golden. AWS, Kubernetes and the hub come in through interfaces |
 | `internal/store` | The adapter's own PostgreSQL: GORM models, migration, sealing |
 | `internal/auth` | Password hashing, invite and session tokens, the signed cookie, request identity |
 | `internal/config` | Environment configuration: every setting is read and validated here |
