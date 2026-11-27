@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CircleAlert } from "lucide-react";
+import { Check, CircleAlert } from "lucide-react";
 import { useEffect, useId, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -27,11 +27,11 @@ import {
 } from "@/features/environments";
 import { useTeamToCreateIn } from "@/features/teams";
 import { cn } from "@/lib/utils";
-import { ConnectEnvironmentPage, Step } from "./connect-environment";
+import { ConnectEnvironmentPage, CostNotice, ModeSwitch, Step } from "./connect-environment";
 
 /**
- * Create an environment. PDS builds it in one of the Team's AWS accounts, or the
- * person runs a command themselves, which is the page the product had before.
+ * Create an environment. PDS builds it in one of the Team's AWS accounts by
+ * default, or the person runs a command themselves.
  */
 export function CreateEnvironmentPage() {
   const [params] = useSearchParams();
@@ -85,7 +85,8 @@ function ManagedCreate() {
     onSuccess: async () => {
       toast.success(`Creating ${name}`);
       await queryClient.invalidateQueries({ queryKey: environmentsKey });
-      void navigate("/environments");
+      // The environment's page follows the run phase by phase until it is ready.
+      void navigate(`/environments/${encodeURIComponent(name)}`);
     },
   });
 
@@ -93,8 +94,10 @@ function ManagedCreate() {
     <div className="space-y-6">
       <PageHeader
         title="Create an environment"
-        description="PDS builds a Kubernetes cluster in your AWS account and connects it here as an environment."
+        description="PDS builds an EKS cluster in your AWS account and connects it here as an environment."
       />
+
+      <ModeSwitch mode="managed" name={name} />
 
       <div className="space-y-6">
         <Step n={1} title="Name this environment">
@@ -121,20 +124,7 @@ function ManagedCreate() {
           {inTeam.field}
         </Step>
 
-        <Step n={2} title="Choose how to create it">
-          <p className="text-sm">
-            PDS creates the network, the Kubernetes cluster and its worker nodes in your AWS
-            account, installs the platform, and connects it here.
-          </p>
-          <Link
-            to={`/environments/new?mode=command${name ? `&name=${encodeURIComponent(name)}` : ""}`}
-            className="inline-block rounded-md text-sm font-medium text-primary hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-          >
-            Run a command yourself instead
-          </Link>
-        </Step>
-
-        <Step n={3} title="Choose the AWS account">
+        <Step n={2} title="Choose the AWS account">
           <AccountChoice
             accounts={rows}
             loading={accounts.isPending}
@@ -154,7 +144,7 @@ function ManagedCreate() {
           />
         </Step>
 
-        <Step n={4} title="Choose the region">
+        <Step n={3} title="Choose the region">
           {usable ? (
             <Field
               id={regionId}
@@ -177,15 +167,20 @@ function ManagedCreate() {
               )}
             </Field>
           ) : (
-            <p className="text-sm text-muted-foreground">Choose an AWS account to pick a region.</p>
+            <p className="text-sm text-muted-foreground">
+              Choose a connected AWS account to pick a region.
+            </p>
           )}
         </Step>
 
-        <Step n={5} title="Create the environment">
-          <p className="text-sm text-muted-foreground">
-            The Kubernetes cluster and its worker nodes cost money in your AWS account until you
-            delete the environment.
-          </p>
+        <Step n={4} title="Review and create">
+          {usable ? (
+            <WhatPdsBuilds account={accountName(usable)} region={selectedRegion} />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Choose a connected AWS account to see what PDS will create.
+            </p>
+          )}
           <Button
             type="button"
             disabled={!ready || create.isPending}
@@ -209,6 +204,42 @@ function ManagedCreate() {
           ) : null}
         </Step>
       </div>
+    </div>
+  );
+}
+
+/** What a create builds, in the words of the template it runs. */
+const builtThings = [
+  "A dedicated network: a VPC with public and private subnets, an internet gateway and a NAT gateway.",
+  "An EKS cluster with a private endpoint, and a node group of worker nodes.",
+  "The EBS CSI driver for storage, CoreDNS, and the Pod Identity agent.",
+  "An S3 bucket for backups, and the IAM user the backups write as.",
+  "PDS on the Kubernetes cluster, which then reports here as an environment.",
+];
+
+function WhatPdsBuilds({ account, region }: { account: string; region: string }) {
+  return (
+    <div className="space-y-3">
+      <p className="text-sm">
+        PDS will build this in AWS account <span className="font-mono">{account}</span>, region{" "}
+        <span className="font-mono">{region}</span>:
+      </p>
+      <ul aria-label="What PDS builds" className="space-y-1.5 text-sm">
+        {builtThings.map((thing) => (
+          <li key={thing} className="flex items-start gap-2">
+            <Check
+              className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+              strokeWidth={1.5}
+              aria-hidden="true"
+            />
+            <span>{thing}</span>
+          </li>
+        ))}
+      </ul>
+      <CostNotice>
+        Everything is created in your AWS account, and AWS bills you for it until you delete the
+        environment.
+      </CostNotice>
     </div>
   );
 }

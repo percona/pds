@@ -79,6 +79,14 @@ const schema = z
 
 type CreateDatabaseFormValues = z.infer<typeof schema>;
 
+// The limit is stated before anything is typed, so a PostgreSQL name is not
+// first learned to be too long from an error.
+function nameLimitHelp(engine: DatabaseEngine): string {
+  return engine === "postgresql"
+    ? `Up to ${postgresqlNameLimit} characters for PostgreSQL.`
+    : "Up to 63 characters.";
+}
+
 // Overrides arrive as text. An empty field means "keep the profile value", so
 // it passes; anything else has to be a whole number inside the bounds.
 function boundedInteger(field: string, unit: string, min: number, max: number) {
@@ -230,7 +238,7 @@ export function CreateDatabaseForm({
         <Field
           id="database-name"
           label="Name"
-          help="Apps resolve this as the hostname. It cannot be changed later."
+          help={`Apps resolve this as the hostname. It cannot be changed later. ${nameLimitHelp(engine)}`}
           error={errors.name?.message}
         >
           {(props) => (

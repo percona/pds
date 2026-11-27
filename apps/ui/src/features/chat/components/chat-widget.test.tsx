@@ -2,7 +2,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ChatUiProvider, ChatWidget } from "@/features/chat";
+import { ChatUiProvider, ChatWidget, useChatUi } from "@/features/chat";
 import type { FeatureFlags } from "@/features/flags";
 import { renderWithProviders } from "@/test/utils";
 
@@ -1057,7 +1057,7 @@ describe("ChatWidget saved conversations", () => {
     });
 
     await renderOpenChat();
-    await userEvent.click(await screen.findByRole("button", { name: "Show chats" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Chat history" }));
 
     const list = await screen.findByRole("list", { name: "Saved chats" });
     const titles = Array.from(list.querySelectorAll("li")).map(
@@ -1073,7 +1073,7 @@ describe("ChatWidget saved conversations", () => {
     });
 
     await renderOpenChat();
-    await userEvent.click(await screen.findByRole("button", { name: "Show chats" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Chat history" }));
     await userEvent.click(await screen.findByRole("button", { name: /^Why did the backup fail/ }));
 
     expect(await screen.findByText("The storage bucket refused the upload.")).toBeInTheDocument();
@@ -1096,7 +1096,7 @@ describe("ChatWidget saved conversations", () => {
     });
 
     await renderOpenChat();
-    await userEvent.click(await screen.findByRole("button", { name: "Show chats" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Chat history" }));
     await userEvent.click(await screen.findByRole("button", { name: /^Why did the backup fail/ }));
 
     expect(await screen.findByText("The storage bucket refused the upload.")).toBeInTheDocument();
@@ -1128,7 +1128,7 @@ describe("ChatWidget saved conversations", () => {
     });
 
     await renderOpenChat();
-    await userEvent.click(await screen.findByRole("button", { name: "Show chats" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Chat history" }));
     await userEvent.click(await screen.findByRole("button", { name: /^Why did the backup fail/ }));
     expect(await screen.findByText("The storage bucket refused the upload.")).toBeInTheDocument();
 
@@ -1172,7 +1172,7 @@ describe("ChatWidget saved conversations", () => {
     });
 
     await renderOpenChat();
-    await userEvent.click(await screen.findByRole("button", { name: "Show chats" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Chat history" }));
     await userEvent.click(
       await screen.findByRole("button", { name: "Delete chat Why did the backup fail?" }),
     );
@@ -1200,7 +1200,7 @@ describe("ChatWidget saved conversations", () => {
     });
 
     await renderOpenChat();
-    await userEvent.click(await screen.findByRole("button", { name: "Show chats" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Chat history" }));
     await userEvent.click(
       await screen.findByRole("button", { name: "Delete chat Why did the backup fail?" }),
     );
@@ -1221,7 +1221,7 @@ describe("ChatWidget saved conversations", () => {
 
     expect(chatBodies(fetchMock)[0]).toMatchObject({ databaseId: "spoke-a/pds.orders-dev" });
 
-    await userEvent.click(screen.getByRole("button", { name: "Show chats" }));
+    await userEvent.click(screen.getByRole("button", { name: "Chat history" }));
     const list = await screen.findByRole("list", { name: "Saved chats" });
     expect(list).toHaveTextContent("orders-dev");
   });
@@ -1236,7 +1236,7 @@ describe("ChatWidget saved conversations", () => {
     stubChatApi({ connections: anthropicOnly, conversations: [savedConversation({ messages })] });
 
     await renderOpenChat();
-    await userEvent.click(await screen.findByRole("button", { name: "Show chats" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Chat history" }));
     await userEvent.click(await screen.findByRole("button", { name: /^Why did the backup fail/ }));
 
     const note = await screen.findByRole("note");
@@ -1250,7 +1250,7 @@ describe("ChatWidget saved conversations", () => {
     stubChatApi({ connections: anthropicOnly, conversations: [savedConversation()] });
 
     await renderOpenChat();
-    await userEvent.click(await screen.findByRole("button", { name: "Show chats" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Chat history" }));
     await userEvent.click(await screen.findByRole("button", { name: /^Why did the backup fail/ }));
     await screen.findByText("The storage bucket refused the upload.");
 
@@ -1270,7 +1270,7 @@ describe("ChatWidget saved conversations", () => {
     });
 
     await renderOpenChat();
-    await userEvent.click(await screen.findByRole("button", { name: "Show chats" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Chat history" }));
 
     expect(
       await screen.findByText("Saved chats are not available yet. Try again in a moment."),
@@ -1330,7 +1330,9 @@ describe("ChatWidget saved conversations", () => {
     await userEvent.type(screen.getByLabelText("Message"), "Slow question");
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
 
-    expect(screen.getByRole("button", { name: "Show chats" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "New chat" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Chat history" }));
+    expect(await screen.findByRole("button", { name: /^Why did the backup fail/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: "New chat" })).toBeDisabled();
   });
 
@@ -1348,7 +1350,7 @@ describe("ChatWidget saved conversations", () => {
     });
 
     await renderOpenChat();
-    await userEvent.click(await screen.findByRole("button", { name: "Show chats" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Chat history" }));
     await userEvent.click(await screen.findByRole("button", { name: /^Why did the backup fail/ }));
     await screen.findByText("The storage bucket refused the upload.");
     await waitForModel();
@@ -1442,7 +1444,7 @@ describe("ChatWidget saved conversations", () => {
     });
 
     await renderOpenChat();
-    await userEvent.click(await screen.findByRole("button", { name: "Show chats" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Chat history" }));
     await userEvent.click(await screen.findByRole("button", { name: /^Why did the backup fail/ }));
     await screen.findByText("The storage bucket refused the upload.");
 
@@ -1461,7 +1463,7 @@ describe("ChatWidget saved conversations", () => {
     });
 
     await renderOpenChat();
-    await userEvent.click(await screen.findByRole("button", { name: "Show chats" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Chat history" }));
     await userEvent.click(await screen.findByRole("button", { name: /^Why did the backup fail/ }));
     await screen.findByText("The storage bucket refused the upload.");
     await waitForModel();
@@ -1563,5 +1565,150 @@ describe("ChatWidget retries of a first message", () => {
     const [first, second] = chatBodies(fetchMock);
     expect(second?.requestKey).toMatch(/^[0-9a-f]{32}$/);
     expect(second?.requestKey).not.toBe(first?.requestKey);
+  });
+});
+
+describe("ChatWidget chat history", () => {
+  it("expands in place to list the chats beside the open one, and collapses again", async () => {
+    stubChatApi({ connections: anthropicOnly, conversations: [savedConversation()] });
+
+    await renderOpenChat();
+    const toggle = await screen.findByRole("button", { name: "Chat history" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("complementary", { name: "Chat history" })).not.toBeInTheDocument();
+
+    await userEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const history = screen.getByRole("complementary", { name: "Chat history" });
+    expect(history).toBeVisible();
+    expect(screen.getByRole("region", { name: "Chat" })).toContainElement(history);
+    expect(await screen.findByRole("list", { name: "Saved chats" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "New chat" })).toHaveLength(1);
+
+    await userEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("complementary", { name: "Chat history" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Message")).toBeInTheDocument();
+  });
+
+  it("offers no history before a key is pasted", async () => {
+    stubChatApi();
+
+    await renderOpenChat();
+    await screen.findByText("Paste a Claude or Cursor key to start chatting.");
+
+    expect(screen.queryByRole("button", { name: "Chat history" })).not.toBeInTheDocument();
+  });
+
+  it("closes on Escape", async () => {
+    stubChatApi({ connections: anthropicOnly });
+
+    await renderOpenChat();
+    await userEvent.keyboard("{Escape}");
+
+    expect(screen.queryByRole("region", { name: "Chat" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ask PDS" })).toBeInTheDocument();
+  });
+});
+
+describe("ChatWidget context", () => {
+  it("reads across everything away from a database page", async () => {
+    stubChatApi({ connections: anthropicOnly });
+
+    await renderOpenChat();
+
+    expect(await screen.findByText("Across everything you can see")).toBeInTheDocument();
+  });
+
+  it("says a new chat on a database page starts from that database", async () => {
+    stubChatApi({ connections: anthropicOnly });
+
+    await renderOpenChat(undefined, "/databases/spoke-a/pds.orders-dev");
+
+    expect(await screen.findByText(/Starts from/)).toHaveTextContent("Starts from orders-dev");
+  });
+
+  it("names the database a saved chat is about", async () => {
+    stubChatApi({
+      connections: anthropicOnly,
+      conversations: [savedConversation({ databaseId: "spoke-a/pds.orders-dev" })],
+    });
+
+    await renderOpenChat();
+    await userEvent.click(await screen.findByRole("button", { name: "Chat history" }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Why did the backup fail/ }));
+
+    expect(await screen.findByText(/^About/)).toHaveTextContent("About orders-dev");
+  });
+});
+
+/** Stands in for a page that asks Ask PDS about something on it. */
+function AskButton({ question, databaseId }: { question: string; databaseId?: string }) {
+  const { ask } = useChatUi();
+
+  return (
+    <button type="button" onClick={() => ask(question, { databaseId })}>
+      Ask about it
+    </button>
+  );
+}
+
+function renderWithAsk(props: { question: string; databaseId?: string }) {
+  return renderWithProviders(
+    <ChatUiProvider>
+      <AskButton {...props} />
+      <ChatWidget />
+    </ChatUiProvider>,
+  );
+}
+
+describe("useChatUi().ask", () => {
+  it("opens Ask PDS on a new chat with the question in the box and sends nothing", async () => {
+    const fetchMock = stubChatApi({ connections: anthropicOnly });
+    renderWithAsk({ question: "Why is orders-dev short on disk?" });
+
+    await userEvent.click(screen.getByRole("button", { name: "Ask about it" }));
+
+    expect(screen.getByRole("region", { name: "Chat" })).toBeInTheDocument();
+    const message = await screen.findByLabelText("Message");
+    expect(message).toHaveValue("Why is orders-dev short on disk?");
+    await waitFor(() => expect(message).toHaveFocus());
+    expect(chatBodies(fetchMock)).toEqual([]);
+  });
+
+  it("records the database it was asked about on the chat it starts", async () => {
+    const fetchMock = stubChatApi({ connections: anthropicOnly });
+    renderWithAsk({ question: "Why is this alert firing?", databaseId: "spoke-a/pds.orders-dev" });
+
+    await userEvent.click(screen.getByRole("button", { name: "Ask about it" }));
+    expect(await screen.findByText(/Starts from/)).toHaveTextContent("Starts from orders-dev");
+    await waitForModel();
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => expect(chatBodies(fetchMock)).toHaveLength(1));
+    expect(chatBodies(fetchMock)[0]).toMatchObject({
+      message: "Why is this alert firing?",
+      databaseId: "spoke-a/pds.orders-dev",
+    });
+    expect(chatBodies(fetchMock)[0]).not.toHaveProperty("conversationId");
+  });
+
+  it("leaves the open chat for a new one", async () => {
+    stubChatApi({ connections: anthropicOnly, conversations: [savedConversation()] });
+    renderWithAsk({ question: "What changed?" });
+
+    await userEvent.click(screen.getByRole("button", { name: "Ask PDS" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Chat history" }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Why did the backup fail/ }));
+    expect(await screen.findByText("The storage bucket refused the upload.")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Ask about it" }));
+
+    await waitFor(() =>
+      expect(screen.queryByText("The storage bucket refused the upload.")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByLabelText("Message")).toHaveValue("What changed?");
   });
 });

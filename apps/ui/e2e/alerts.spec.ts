@@ -111,6 +111,23 @@ test("Open database leads to the database", async ({ page }) => {
   await expect(page).toHaveURL(/databases\/spoke-a\/pds\.orders-dev/);
 });
 
+test("a row opens a panel with its labels and the ways to act on it", async ({ page }) => {
+  await stubAlerts(page);
+
+  await page.goto("alerts");
+  await page.getByRole("button", { name: "orders-dev is down" }).click();
+
+  const panel = page.getByRole("dialog", { name: "orders-dev is down" });
+  await expect(panel.getByTestId("alert-labels")).toContainText("namespace");
+  await expect(panel.getByText("Opens the database.")).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Ask PDS about this alert" })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Contact support" })).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "orders-dev is down" })).toBeFocused();
+});
+
 test("an empty report with every environment live says nothing is firing", async ({ page }) => {
   await stubAlerts(page, {
     environments: [report.environments[0]],
@@ -135,6 +152,19 @@ for (const theme of ["light", "dark"] as const) {
     // The page fades in, and a capture mid-fade is washed out.
     await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)));
     await page.screenshot({ path: `test-results/alerts-${theme}.png`, fullPage: true });
+  });
+
+  test(`the alert panel renders in ${theme} mode`, async ({ page }) => {
+    await useTheme(page, theme);
+    await stubAlerts(page);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+
+    await page.goto("alerts");
+    await page.getByRole("button", { name: "orders-dev is down" }).click();
+    await expect(page.getByRole("dialog", { name: "orders-dev is down" })).toBeVisible();
+
+    await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)));
+    await page.screenshot({ path: `test-results/alert-panel-${theme}.png` });
   });
 }
 

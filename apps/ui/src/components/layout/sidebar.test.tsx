@@ -5,11 +5,12 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { SidebarPreferenceProvider } from "@/components/layout/sidebar-preference";
 import { renderWithProviders } from "@/test/utils";
 
-function renderSidebar() {
+function renderSidebar(route = "/") {
   return renderWithProviders(
     <SidebarPreferenceProvider>
       <Sidebar />
     </SidebarPreferenceProvider>,
+    { route },
   );
 }
 
@@ -22,6 +23,14 @@ function jsonResponse(body: unknown, status = 200) {
 
 const acme = { id: 1, name: "Acme", role: "admin", current: true };
 const initech = { id: 2, name: "Initech", role: "user", current: false };
+
+const adminSession = {
+  username: "acme",
+  user: "Ada",
+  organization: "Acme",
+  role: "admin",
+  organizations: [acme],
+};
 
 function stubSession(session: Record<string, unknown>) {
   vi.stubGlobal(
@@ -41,6 +50,7 @@ function stubSession(session: Record<string, unknown>) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  window.localStorage.clear();
 });
 
 describe("Sidebar organization", () => {
@@ -143,5 +153,65 @@ describe("Sidebar organization", () => {
     renderSidebar();
 
     expect(await screen.findByRole("button", { name: /Experimental/ })).toBeVisible();
+  });
+
+  it.each(["/teams", "/users", "/settings"])(
+    "opens the Organization group on %s so the current page shows",
+    async (route) => {
+      stubSession(adminSession);
+
+      renderSidebar(route);
+
+      const toggle = await screen.findByRole("button", { name: "Organization" });
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      const group = screen.getByRole("group", { name: "Organization" });
+      expect(within(group).getByRole("link", { current: "page" })).toHaveAttribute("href", route);
+    },
+  );
+
+  it("marks Organization as the current place in the collapsed rail", async () => {
+    stubSession(adminSession);
+    window.localStorage.setItem("pds-sidebar", "collapsed");
+
+    renderSidebar("/users");
+
+    const toggle = await screen.findByRole("button", { name: "Organization" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle.className).toContain("bg-accent text-foreground");
+  });
+
+  it("leaves Organization closed and plain on another page", async () => {
+    stubSession(adminSession);
+
+    renderSidebar("/environments");
+
+    const toggle = await screen.findByRole("button", { name: "Organization" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle.className).not.toContain("bg-accent text-foreground");
+  });
+});
+
+describe("Sidebar rail tooltips", () => {
+  it("places a tooltip outside the rail on hover and on keyboard focus", async () => {
+    stubSession(adminSession);
+    window.localStorage.setItem("pds-sidebar", "collapsed");
+
+    renderSidebar();
+
+    const link = screen.getByRole("link", { name: "Alerts" });
+    const tip = within(link).getByRole("tooltip", { hidden: true });
+    expect(tip).not.toBeVisible();
+
+    await userEvent.hover(link);
+    expect(tip).toBeVisible();
+    // Fixed to the viewport, so the scrolling nav cannot clip it.
+    expect(tip.className).toContain("fixed");
+    expect(tip.style.left).not.toBe("");
+
+    await userEvent.unhover(link);
+    expect(tip).not.toBeVisible();
+
+    link.focus();
+    expect(await within(link).findByRole("tooltip", { hidden: true })).toBeVisible();
   });
 });

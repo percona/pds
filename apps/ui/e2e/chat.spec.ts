@@ -528,7 +528,10 @@ for (const theme of ["light", "dark"] as const) {
     await stubChat(page);
 
     await openChat(page);
-    await page.getByRole("button", { name: "Show chats" }).click();
+    const history = page.getByRole("button", { name: "Chat history" });
+    await history.click();
+    await expect(history).toHaveAttribute("aria-expanded", "true");
+    await expect(page).not.toHaveURL(/\/chat$/);
     const list = page.getByRole("list", { name: "Saved chats" });
     await expect(list).toContainText("what databases exist?");
 
@@ -537,5 +540,27 @@ for (const theme of ["light", "dark"] as const) {
     await expect(page.getByRole("button", { name: "View status" })).toBeVisible();
     await expect(page.getByText("Changing the provider or model starts a new chat.")).toBeVisible();
     await expect(page.getByText(/not saved/)).toHaveCount(0);
+    await page.screenshot({ path: `test-results/chat-history-${theme}.png`, fullPage: true });
+  });
+
+  test(`the expanded chat fits a phone in ${theme} mode`, async ({ page }) => {
+    await useTheme(page, theme);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await stubConnections(page, { assistant: true });
+    await stubChatModels(page, "anthropic");
+    await stubChat(page);
+
+    await openChat(page);
+    await page.getByRole("button", { name: "Chat history" }).click();
+
+    const panel = page.getByRole("region", { name: "Chat" });
+    await expect(panel.getByRole("complementary", { name: "Chat history" })).toBeVisible();
+    await expect(panel.getByLabel("Message")).toBeVisible();
+    const box = await panel.boundingBox();
+    expect(box && box.x >= 0 && box.x + box.width <= 390).toBe(true);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/chat-history-phone-${theme}.png` });
   });
 }

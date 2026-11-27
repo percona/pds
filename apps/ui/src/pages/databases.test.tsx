@@ -72,7 +72,12 @@ describe("DatabasesPage", () => {
 
     expect(await screen.findByText("orders-dev")).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "spoke-a" })).toBeInTheDocument();
-    expect(screen.getByText("MySQL or PostgreSQL on spoke-a.")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === "P" && element.textContent === "MySQL or PostgreSQL on spoke-a.",
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Create database" })).toHaveAttribute(
       "href",
       "/environments/spoke-a/new",

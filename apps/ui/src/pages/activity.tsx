@@ -12,9 +12,12 @@ export function ActivityPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Activity" description="Every change this platform made, newest first." />
+      <PageHeader
+        title="Activity"
+        description="Every change made through the console, Chat, AI agents and the API, newest first."
+      />
 
-      <ActivityFeed live={live} onLiveChange={setLive} />
+      <ActivityFeed live={live} onLiveChange={setLive} filterable />
     </div>
   );
 }

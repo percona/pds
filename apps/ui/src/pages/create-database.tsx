@@ -92,8 +92,7 @@ export function CreateDatabasePage() {
             environment={routeEnvironment}
             onSubmit={(input) =>
               create.mutate(input, {
-                onSuccess: (database) =>
-                  void navigate(databaseHref(database.id), { state: { created: true } }),
+                onSuccess: (database) => void navigate(databaseHref(database.id)),
               })
             }
           />

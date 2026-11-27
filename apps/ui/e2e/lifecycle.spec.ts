@@ -222,8 +222,8 @@ test("Rebuild and Remove from PDS only on a lost environment", async ({ page }) 
     return route.fulfill({ status: 204 });
   });
 
-  await page.goto("environments");
-  const lost = row(page, "legacy");
+  await page.goto("environments/legacy");
+  const lost = page.getByTestId("lost-panel");
   await expect(lost.getByText("Infrastructure missing")).toBeVisible();
   await expect(lost.getByRole("button", { name: "Delete" })).toHaveCount(0);
 
@@ -299,8 +299,8 @@ for (const theme of ["light", "dark"] as const) {
     await stubList(page);
     await page.setViewportSize({ width: 1440, height: 1100 });
 
-    await page.goto("environments");
-    await expect(row(page, "legacy").getByText("Infrastructure missing")).toBeVisible();
+    await page.goto("environments/legacy");
+    await expect(page.getByTestId("lost-panel")).toContainText("Infrastructure missing");
 
     await shoot(page, "lifecycle-lost", theme);
   });
@@ -321,8 +321,11 @@ for (const theme of ["light", "dark"] as const) {
     );
     await page.setViewportSize({ width: 1440, height: 900 });
 
-    await page.goto("environments");
-    await row(page, "legacy").getByRole("button", { name: "Remove from PDS only" }).click();
+    await page.goto("environments/legacy");
+    await page
+      .getByTestId("lost-panel")
+      .getByRole("button", { name: "Remove from PDS only" })
+      .click();
     await expect(page.getByRole("list", { name: "What stays in AWS" })).toBeVisible();
     await page.getByLabel("Environment name").fill("legacy");
 

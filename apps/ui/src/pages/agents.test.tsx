@@ -58,34 +58,46 @@ async function copied(user: ReturnType<typeof userEvent.setup>, button: string) 
 
 const origin = window.location.origin;
 
-function headings() {
-  return screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+function headings(level: number) {
+  return screen.getAllByRole("heading", { level }).map((h) => h.textContent);
+}
+
+/** Opens a disclosure by its summary text. */
+async function disclose(user: ReturnType<typeof userEvent.setup>, summary: string) {
+  await user.click(screen.getByText(summary));
 }
 
 describe("AgentsPage", () => {
-  it("offers the plugins first, then the address, then the bridge", async () => {
+  it("offers the plugins first, then any MCP client, then the agents signed in", async () => {
     await openPage();
     await screen.findByRole("heading", { level: 2, name: "Connected agents" });
 
-    expect(headings()).toEqual([
-      "Claude Code plugin",
-      "Cursor plugin",
-      "Other clients with remote servers",
-      "Clients that only run a local command",
-      "Connected agents",
-    ]);
+    expect(headings(2)).toEqual(["Plugins", "Any MCP client", "Connected agents"]);
+    const plugins = screen.getByRole("region", { name: "Plugins" });
+    expect(
+      within(plugins)
+        .getAllByRole("heading", { level: 3 })
+        .map((h) => h.textContent),
+    ).toEqual(["Claude Code", "Cursor"]);
   });
 
-  it("copies the exact Claude Code install commands and the update commands", async () => {
+  it("copies the exact Claude Code install commands and, opened, the update commands", async () => {
     const user = await openPage();
 
     expect(await copied(user, "Copy install commands")).toBe(
       "claude plugin marketplace add percona/pds\nclaude plugin install pds@percona-pds",
     );
     expect(toast.success).toHaveBeenLastCalledWith("Install commands copied");
+
+    const claude = screen.getByRole("region", { name: "Claude Code" });
+    expect(within(claude).getByText("Update the plugin").closest("details")).not.toHaveAttribute(
+      "open",
+    );
+    await disclose(user, "Update the plugin");
     expect(await copied(user, "Copy update commands")).toBe(
       "claude plugin marketplace update percona-pds\nclaude plugin update pds@percona-pds",
     );
+    expect(within(claude).getByText("Restart Claude Code after the update.")).toBeVisible();
   });
 
   it("starts Claude Code with this control plane's address when it is not the default", async () => {
@@ -97,7 +109,7 @@ describe("AgentsPage", () => {
   it("gives this control plane's /mcp address to add by hand in Cursor", async () => {
     const user = await openPage();
 
-    const cursor = screen.getByRole("region", { name: "Cursor plugin" });
+    const cursor = screen.getByRole("region", { name: "Cursor" });
     expect(within(cursor).getByText("percona-pds")).toBeInTheDocument();
     await user.click(within(cursor).getByRole("button", { name: "Copy address" }));
 
@@ -109,26 +121,38 @@ describe("AgentsPage", () => {
     vi.stubGlobal("location", { ...window.location, origin: "https://pds.percona.com" });
     await openPage();
 
-    const cursor = screen.getByRole("region", { name: "Cursor plugin" });
+    const cursor = screen.getByRole("region", { name: "Cursor" });
     expect(within(cursor).queryByRole("button", { name: "Copy address" })).not.toBeInTheDocument();
+    expect(within(cursor).getByText(/It already points at/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Copy start command" })).not.toBeInTheDocument();
-    const others = screen.getByRole("region", { name: "Other clients with remote servers" });
+    const claude = screen.getByRole("region", { name: "Claude Code" });
+    expect(within(claude).getByText(/so there is no address to set/)).toBeInTheDocument();
+    const others = screen.getByRole("region", { name: "Any MCP client" });
     expect(within(others).getByText("https://pds.percona.com/mcp")).toBeInTheDocument();
   });
 
-  it("shows the address for other clients and copies it", async () => {
+  it("shows the address for any MCP client and copies it", async () => {
     const user = await openPage();
 
-    const others = screen.getByRole("region", { name: "Other clients with remote servers" });
+    const others = screen.getByRole("region", { name: "Any MCP client" });
     expect(within(others).getByText(`${origin}/mcp`)).toBeInTheDocument();
-    expect(within(others).getByText(/Claude Desktop/)).toBeInTheDocument();
+    expect(within(others).getAllByText(/Claude Desktop/).length).toBeGreaterThan(0);
     await user.click(within(others).getByRole("button", { name: "Copy address" }));
 
     expect(await navigator.clipboard.readText()).toBe(`${origin}/mcp`);
   });
 
+  it("keeps the local command behind a disclosure", async () => {
+    await openPage();
+
+    const local = screen.getByText("My client only runs a local command").closest("details");
+    expect(local).not.toHaveAttribute("open");
+    expect(local).toContainElement(screen.getByRole("button", { name: "Copy login command" }));
+  });
+
   it("copies the bridge login and config with no password or environment sign in", async () => {
     const user = await openPage();
+    await disclose(user, "My client only runs a local command");
 
     const login = await copied(user, "Copy login command");
     const config = await copied(user, "Copy config");
@@ -149,6 +173,7 @@ describe("AgentsPage", () => {
 
   it("names the access the person chose in the login command, with more than color", async () => {
     const user = await openPage();
+    await disclose(user, "My client only runs a local command");
 
     expect(screen.getByRole("button", { name: /Read only/ })).toHaveAttribute(
       "aria-pressed",

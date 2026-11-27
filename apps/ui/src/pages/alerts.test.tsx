@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { useLocation } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AlertReport } from "@/features/alerts";
+import { ChatUiProvider, useChatUi } from "@/features/chat";
 import {
   createMockAlert,
   createMockAlertEnvironment,
@@ -33,13 +34,25 @@ function Probe() {
   return <span data-testid="url">{location.pathname + location.search}</span>;
 }
 
-function renderPage(route = "/alerts") {
+/** What Ask PDS was asked to open with, since the widget is not on this page. */
+function ChatProbe() {
+  const { open, pendingAsk } = useChatUi();
+
+  return (
+    <span data-testid="chat">
+      {open ? "open" : "closed"} {pendingAsk?.question ?? ""} {pendingAsk?.databaseId ?? ""}
+    </span>
+  );
+}
+
+function renderPage(route = "/alerts", flags?: { chat: boolean }) {
   return renderWithProviders(
-    <>
+    <ChatUiProvider>
       <AlertsPage />
       <Probe />
-    </>,
-    { route },
+      <ChatProbe />
+    </ChatUiProvider>,
+    { route, flags },
   );
 }
 
@@ -400,5 +413,89 @@ describe("AlertsPage", () => {
     await screen.findByText("orders-dev is down");
     expect(rowSummaries()).toHaveLength(2);
     expect(screen.getByLabelText("Environment")).toHaveValue("");
+  });
+
+  describe("the alert panel", () => {
+    const labelled = createMockAlert({
+      id: "a1",
+      summary: "orders-dev is down",
+      labels: { instance: "orders-dev-0", service: "mysql" },
+    });
+
+    async function openPanel() {
+      stubAlerts(createMockAlertReport({ alerts: [labelled] }));
+      const user = userEvent.setup();
+      renderPage();
+      await user.click(await screen.findByRole("button", { name: "orders-dev is down" }));
+
+      return { user, panel: await screen.findByRole("dialog", { name: "orders-dev is down" }) };
+    }
+
+    it("opens from a row with the labels monitoring sent", async () => {
+      const { panel } = await openPanel();
+
+      const labels = within(panel).getByTestId("alert-labels");
+      expect(labels).toHaveTextContent("instance");
+      expect(labels).toHaveTextContent("orders-dev-0");
+      expect(labels).toHaveTextContent("service");
+      expect(within(panel).getByText("Critical")).toBeInTheDocument();
+    });
+
+    it("says what the alert's action does before it is followed", async () => {
+      const { panel } = await openPanel();
+
+      expect(within(panel).getByRole("link", { name: "Open database" })).toHaveAttribute(
+        "href",
+        "/databases/spoke-a/pds.orders-dev",
+      );
+      expect(within(panel).getByText("Opens the database.")).toBeInTheDocument();
+    });
+
+    it("closes on Escape and returns focus to the row", async () => {
+      const { user } = await openPanel();
+
+      await user.keyboard("{Escape}");
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "orders-dev is down" })).toHaveFocus(),
+      );
+    });
+
+    it("asks PDS about the alert in a new chat, with its database", async () => {
+      const { user, panel } = await openPanel();
+
+      await user.click(within(panel).getByRole("button", { name: "Ask PDS about this alert" }));
+
+      expect(screen.getByTestId("chat")).toHaveTextContent(
+        'open Why is spoke-a/pds.orders-dev showing "orders-dev is down"? spoke-a/pds.orders-dev',
+      );
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    });
+
+    it("hides Ask PDS when Chat is off", async () => {
+      stubAlerts(createMockAlertReport({ alerts: [labelled] }));
+      const user = userEvent.setup();
+      renderPage("/alerts", { chat: false });
+      await user.click(await screen.findByRole("button", { name: "orders-dev is down" }));
+
+      const panel = await screen.findByRole("dialog", { name: "orders-dev is down" });
+      expect(
+        within(panel).queryByRole("button", { name: "Ask PDS about this alert" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("opens a support case with the alert attached", async () => {
+      const { user, panel } = await openPanel();
+
+      await user.click(within(panel).getByRole("button", { name: "Contact support" }));
+
+      const dialog = await screen.findByRole("dialog", { name: "Contact support" });
+      expect(within(dialog).getByLabelText("Subject")).toHaveValue("orders-dev is down");
+      const description = (within(dialog).getByLabelText("Description") as HTMLTextAreaElement)
+        .value;
+      expect(description).toContain("Database: spoke-a/pds.orders-dev\nAlert: orders-dev is down");
+      expect(description).toContain("instance: orders-dev-0");
+    });
   });
 });

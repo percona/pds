@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createMockAlert } from "@/test/utils";
-import { alertActionTarget, alertTarget } from "./actions";
+import { alertActionSummary, alertActionTarget, alertTarget } from "./actions";
 import type { AlertActionKind } from "./types";
 
 const databaseId = "spoke-a/pds.orders-dev";
@@ -98,5 +98,28 @@ describe("alertActionTarget", () => {
     const alert = createMockAlert({ action: { kind: "scale_storage", label: "Scale storage" } });
 
     expect(alertTarget(alert).to).toBe(databasePath);
+  });
+});
+
+describe("alertActionSummary", () => {
+  it("says the storage action opens the database where Scale changes storage", () => {
+    const alert = createMockAlert({ action: { kind: "scale_storage", label: "Scale storage" } });
+
+    expect(alertActionSummary(alert)).toBe("Opens the database, where Scale changes its storage.");
+  });
+
+  it("says a retry only opens the Backups tab and changes nothing", () => {
+    const alert = createMockAlert({ action: { kind: "retry_backup", label: "Retry backup" } });
+
+    expect(alertActionSummary(alert)).toMatch(/so following this link changes nothing/);
+  });
+
+  it("says the environment opens when the alert names no database", () => {
+    const alert = createMockAlert({
+      databaseId: undefined,
+      action: { kind: "scale_storage", label: "Scale storage" },
+    });
+
+    expect(alertActionSummary(alert)).toBe("Opens the environment.");
   });
 });

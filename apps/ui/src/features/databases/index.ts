@@ -46,8 +46,7 @@ export type { ScheduleFormPeriod, ScheduleFormValues, WallTime } from "./schedul
 export { BackupList } from "./components/backup-list";
 export { BackupScheduleEditor } from "./components/backup-schedule-editor";
 export { BackupsTab } from "./components/backups-tab";
-export { ConnectCard } from "./components/connect-card";
-export { ConnectDialog } from "./components/connect-dialog";
+export { ConnectSection } from "./components/connect-section";
 export {
   cliCommand,
   forwardedUri,
@@ -80,7 +79,6 @@ export { SettingsTab } from "./components/settings-tab";
 export { MetricsPendingPill, StatusPill } from "./components/status-pill";
 export { isNameConfirmed } from "./confirm";
 export { backupsKey, backupsPollMs, backupsRefetchInterval, useBackups } from "./hooks/use-backups";
-export { useConnectionCopied } from "./hooks/use-connection-copied";
 export { useCreateBackup } from "./hooks/use-create-backup";
 export {
   databaseKey,

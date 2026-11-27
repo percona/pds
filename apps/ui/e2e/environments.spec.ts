@@ -32,37 +32,29 @@ test("the environment list tells joining apart from gone quiet", async ({ page }
   await expect(page.getByText("Joining", { exact: true })).toBeVisible();
 });
 
-// The environment list is the page that offers the connection forms.
-test("the hub pastes its tokens from the environment list", async ({ page }) => {
+// Connectors has its own page, so the list holds environments and AWS accounts only.
+test("the environment list leaves connections to Connectors", async ({ page }) => {
   await stubEnvironments(page);
 
   await page.goto("environments");
 
-  await expect(page.getByRole("heading", { level: 2, name: "Connections" })).toBeVisible();
-  await expect(page.getByRole("heading", { level: 3, name: "Support" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Connections" }).click();
-  await expect(page.getByRole("heading", { level: 3, name: "Support" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Save token" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Environments" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connections" })).toHaveCount(0);
 });
 
-for (const theme of ["light", "dark"] as const) {
-  test(`the connections panel offers three keys in ${theme} mode`, async ({ page }) => {
-    await useTheme(page, theme);
-    await stubEnvironments(page);
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    await page.setViewportSize({ width: 1440, height: 900 });
+test("an environment page keeps its tab in the address", async ({ page }) => {
+  await stubEnvironments(page);
 
-    await page.goto("environments");
-    await page.getByRole("button", { name: "Connections" }).click();
+  await page.goto("environments/spoke-a");
+  await page.getByRole("tab", { name: "Settings" }).click();
+  await expect(page).toHaveURL(/\/environments\/spoke-a\?tab=settings$/);
 
-    await expect(page.getByTestId("connection-servicenow")).toBeVisible();
-    await expect(page.getByTestId("connection-assistant")).toBeVisible();
-    await expect(page.getByTestId("connection-cursor")).toBeVisible();
-    await expect(page.locator("[data-testid^='connection-']")).toHaveCount(3);
-    await expect(page.locator("html")).toHaveClass(theme === "dark" ? /dark/ : /^(?!.*dark).*$/);
-    await page.screenshot({ path: `test-results/connections-${theme}.png`, fullPage: true });
-  });
-}
+  await page.reload();
+  await expect(page.getByRole("tab", { name: "Settings" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+});
 
 test("an unscoped databases url is not a page", async ({ page }) => {
   const crashes: string[] = [];
@@ -95,7 +87,7 @@ test("connect says where it builds and what it costs before printing the command
   // The hub mints its own operator token, so there is nothing here to paste.
   await expect(page.getByLabel("Hub operator token")).toHaveCount(0);
   await expect(page.getByText("eu-west-1")).toBeVisible();
-  await expect(page.getByText(/cost money/)).toBeVisible();
+  await expect(page.getByText(/AWS bills you for it/)).toBeVisible();
 
   await page.getByRole("button", { name: "Create command" }).click();
 
@@ -161,7 +153,6 @@ for (const theme of ["light", "dark"] as const) {
 
     await page.goto("environments");
     await expect(page.getByRole("heading", { level: 1, name: "Environments" })).toBeVisible();
-    await expect(page.getByRole("heading", { level: 2, name: "Connections" })).toBeVisible();
     await expect(page.locator("html")).toHaveClass(theme === "dark" ? /dark/ : /^(?!.*dark).*$/);
     await page.screenshot({ path: `test-results/environments-${theme}.png`, fullPage: true });
 

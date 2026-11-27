@@ -1,8 +1,15 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useLocation } from "react-router";
 import { AppRoutes } from "@/routes";
 import { createMockDatabase, createMockLifecycle, renderWithProviders } from "@/test/utils";
+
+function LocationProbe() {
+  const location = useLocation();
+
+  return <p data-testid="location">{`${location.pathname}${location.search}`}</p>;
+}
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -180,7 +187,12 @@ describe("EnvironmentsPage", () => {
     await userEvent.click(await screen.findByRole("link", { name: /spoke-a/ }));
 
     expect(await screen.findByRole("heading", { level: 1, name: "spoke-a" })).toBeInTheDocument();
-    expect(screen.getByText("MySQL or PostgreSQL on spoke-a.")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === "P" && element.textContent === "MySQL or PostgreSQL on spoke-a.",
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByText("orders-dev")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Create database" })).toHaveAttribute(
       "href",
@@ -234,14 +246,94 @@ describe("EnvironmentsPage", () => {
   });
 });
 
-describe("connections on the hub", () => {
-  it("puts the connections panel under the environment list", async () => {
+describe("the environment page", () => {
+  const monitoring = {
+    settings: { access: "cluster", cpuMillicores: 1000, memoryMi: 1024, storageGi: 5 },
+    access: {
+      username: "admin",
+      passwordCommand: "kubectl get secret pmm-secret -n everest-system",
+      portForwardCommand: "kubectl port-forward -n everest-system svc/monitoring-service 8443:443",
+      url: "https://localhost:8443",
+    },
+  };
+
+  function stubOne(environment: Record<string, unknown>) {
     stubApi((path) => {
       if (path === "/api/environments") {
-        return {
-          hub: true,
-          environments: [{ name: "spoke-a", status: "connected" }],
-        };
+        return { hub: true, environments: [environment] };
+      }
+      if (path.endsWith("/monitoring")) {
+        return monitoring;
+      }
+
+      return {};
+    });
+  }
+
+  it("is titled with the name, its status, Team and last report", async () => {
+    stubOne({
+      name: "spoke-a",
+      team: "alpha",
+      status: "connected",
+      lastSeen: new Date().toISOString(),
+    });
+
+    renderWithProviders(<AppRoutes />, { route: "/environments/spoke-a" });
+
+    expect(await screen.findByRole("heading", { level: 1, name: "spoke-a" })).toBeInTheDocument();
+    const header = screen.getByRole("banner");
+    expect(header).toHaveTextContent("Connected");
+    expect(header).toHaveTextContent("alpha");
+    expect(header).toHaveTextContent(/Last seen/);
+    expect(header).not.toHaveTextContent("Managed by PDS");
+  });
+
+  it("offers no Monitoring or Support access on a joined environment that never reported", async () => {
+    stubOne({ name: "spoke-new", status: "unreachable" });
+
+    renderWithProviders(<AppRoutes />, { route: "/environments/spoke-new?tab=monitoring" });
+
+    expect(await screen.findByRole("tab", { name: "Databases" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByText("Joining")).toBeInTheDocument();
+    expect(screen.getByText("No report yet")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Monitoring" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Support access" })).not.toBeInTheDocument();
+  });
+
+  it("opens the tab the address names, and puts the chosen tab in the address", async () => {
+    stubOne({ name: "spoke-a", status: "connected", lastSeen: new Date().toISOString() });
+    const user = userEvent.setup();
+
+    renderWithProviders(
+      <>
+        <AppRoutes />
+        <LocationProbe />
+      </>,
+      { route: "/environments/spoke-a?tab=monitoring" },
+    );
+
+    expect(await screen.findByRole("tab", { name: "Monitoring" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(await screen.findByLabelText("Storage (GiB)")).toHaveValue(5);
+
+    await user.click(screen.getByRole("tab", { name: "Settings" }));
+    expect(screen.getByTestId("location")).toHaveTextContent("/environments/spoke-a?tab=settings");
+
+    await user.click(screen.getByRole("tab", { name: "Databases" }));
+    expect(screen.getByTestId("location")).toHaveTextContent(/^\/environments\/spoke-a$/);
+  });
+});
+
+describe("connections on the environments page", () => {
+  it("leaves the connections to their own page", async () => {
+    stubApi((path) => {
+      if (path === "/api/environments") {
+        return { hub: true, environments: [{ name: "spoke-a", status: "connected" }] };
       }
 
       return {};
@@ -249,60 +341,7 @@ describe("connections on the hub", () => {
 
     renderWithProviders(<AppRoutes />, { route: "/environments" });
 
-    expect(
-      await screen.findByRole("heading", { level: 2, name: "Connections" }),
-    ).toBeInTheDocument();
-    expect(screen.getByTestId("connections-panel")).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { level: 3, name: "Support" })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Connections" }));
-    expect(screen.getByRole("heading", { level: 3, name: "Support" })).toBeInTheDocument();
-  });
-
-  it("shows the connections panel on a hub with no spokes yet", async () => {
-    stubApi((path) => {
-      if (path === "/api/environments") {
-        return { hub: true, environments: [] };
-      }
-
-      return {};
-    });
-
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
-
-    expect(await screen.findByText("No environments yet")).toBeInTheDocument();
-    expect(screen.getByTestId("connections-panel")).toBeInTheDocument();
-  });
-
-  it("keeps the connections panel on the environment list", async () => {
-    stubApi((path) => {
-      if (path === "/api/environments") {
-        return { environments: [] };
-      }
-
-      return {};
-    });
-
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
-
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "Environments" }),
-    ).toBeInTheDocument();
-    expect(await screen.findByTestId("connections-panel")).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { level: 1, name: "Databases" })).not.toBeInTheDocument();
-  });
-
-  it("leaves the connections panel out when that surface is off", async () => {
-    stubApi((path) => {
-      if (path === "/api/environments") {
-        return { hub: true, environments: [] };
-      }
-
-      return {};
-    });
-
-    renderWithProviders(<AppRoutes />, { route: "/environments", flags: { connections: false } });
-
-    expect(await screen.findByText("No environments yet")).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: /spoke-a/ })).toBeInTheDocument();
     expect(screen.queryByTestId("connections-panel")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Connections" })).not.toBeInTheDocument();
   });
@@ -517,7 +556,9 @@ describe("Disconnecting an environment", () => {
     ).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
     expect(
-      screen.getByText(/The Kubernetes cluster and its databases keep running/),
+      within(screen.getByRole("dialog")).getByText(
+        /The Kubernetes cluster and its databases keep running/,
+      ),
     ).toBeInTheDocument();
     // Nothing in AWS is touched, so the confirmation must not read as a cleanup.
     expect(screen.getByText(/Nothing in AWS is deleted/)).toBeInTheDocument();
@@ -647,7 +688,7 @@ describe("EnvironmentsPage managed environments", () => {
     });
   }
 
-  it("shows a managed environment with its account, state and four phases", async () => {
+  it("summarises a managed environment on its row", async () => {
     stubManaged(managedRow());
 
     renderWithProviders(<AppRoutes />, { route: "/environments" });
@@ -660,15 +701,35 @@ describe("EnvironmentsPage managed environments", () => {
           element.textContent === "Created by PDS in AWS account payments in eu-west-1",
       ),
     ).toBeInTheDocument();
+    // The run belongs to the environment's page, not to the row.
+    expect(screen.queryByText("Creating network and Kubernetes cluster")).not.toBeInTheDocument();
+  });
+
+  it("shows a managed environment being built with its account, state and four phases", async () => {
+    stubManaged(managedRow());
+    const user = userEvent.setup();
+
+    renderWithProviders(<AppRoutes />, { route: "/environments/orders" });
+
+    expect(await screen.findByRole("heading", { level: 1, name: "orders" })).toBeInTheDocument();
+    expect(screen.getByText("Creating")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("banner")).toHaveTextContent(
+        "Managed by PDS in AWS account payments, eu-west-1",
+      ),
+    );
+    expect(screen.getByText("No report yet")).toBeInTheDocument();
     expect(screen.getByText("Creating network and Kubernetes cluster")).toBeInTheDocument();
     expect(screen.getByText("Finishing")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("link", { name: /orders/ }));
-    await userEvent.click(await screen.findByRole("tab", { name: "Settings" }));
+    // There is nothing to monitor or open support on until the environment exists.
+    expect(screen.getByRole("tab", { name: "Databases" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Monitoring" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Support access" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create database" })).toBeDisabled();
+
+    await user.click(screen.getByRole("tab", { name: "Settings" }));
     expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Disconnect" })).not.toBeInTheDocument();
-    // There is nothing to monitor or open support on until the environment exists.
-    expect(screen.queryByRole("button", { name: "Monitoring" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Support access" })).not.toBeInTheDocument();
   });
 
   it("offers Retry after a failure and links an unreachable account to its fix", async () => {
@@ -688,13 +749,32 @@ describe("EnvironmentsPage managed environments", () => {
       "unreachable",
     );
 
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
+    renderWithProviders(<AppRoutes />, { route: "/environments/orders" });
 
     expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Fix the AWS account" })).toHaveAttribute(
+    expect(await screen.findByRole("link", { name: "Fix the AWS account" })).toHaveAttribute(
       "href",
       "/environments?fix=cc_1#aws-accounts",
     );
+  });
+
+  it("gives a ready managed environment Monitoring and Updates, but no Support access", async () => {
+    stubManaged(
+      managedRow({
+        state: "ready",
+        provisioning: undefined,
+        status: "connected",
+        lastSeen: now,
+        lifecycle: createMockLifecycle(),
+      }),
+    );
+
+    renderWithProviders(<AppRoutes />, { route: "/environments/orders" });
+
+    expect(await screen.findByRole("tab", { name: "Monitoring" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Updates" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Support access" })).not.toBeInTheDocument();
+    expect(screen.getByText(/^Last seen/)).toBeInTheDocument();
   });
 
   it("lists the AWS accounts under the environments", async () => {
@@ -745,14 +825,22 @@ describe("EnvironmentsPage managed environments", () => {
         lifecycle: createMockLifecycle({ lost: true, lostReason: "Infrastructure missing" }),
       }),
     );
+    const user = userEvent.setup();
 
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
+    renderWithProviders(<AppRoutes />, { route: "/environments/orders" });
 
     expect(await screen.findByText("Lost")).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("Infrastructure missing");
     expect(screen.getByRole("button", { name: "Rebuild" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Remove from PDS only" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Monitoring" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Monitoring" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Updates" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Settings" }));
+    const settings = screen.getByRole("tabpanel");
+    expect(within(settings).queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+    expect(
+      within(settings).getByRole("button", { name: "Remove from PDS only" }),
+    ).toBeInTheDocument();
   });
 });

@@ -120,18 +120,7 @@ describe("AppShell", () => {
     expect(screen.queryByText("MySQL on this Kubernetes cluster")).not.toBeInTheDocument();
   });
 
-  it("adds support to the navigation once the adapter reports it is connected", async () => {
-    renderShell();
-
-    expect(await screen.findByRole("link", { name: "Support" })).toHaveAttribute(
-      "href",
-      "/support",
-    );
-  });
-
-  // No ServiceNow Secret means no tickets to list, so the entry is left out
-  // rather than leading to a page that only says so.
-  it("leaves support out of the navigation when the adapter answers 501", async () => {
+  it("keeps support in the navigation whether or not ServiceNow is connected", async () => {
     stubSupport(
       jsonResponse(
         { code: "ErrNotImplemented", message: "Support tickets are not configured." },
@@ -140,12 +129,9 @@ describe("AppShell", () => {
     );
     renderShell();
 
-    await waitFor(() =>
-      expect(screen.getByRole("link", { name: "Environments" })).toBeInTheDocument(),
-    );
-    expect(screen.queryByRole("button", { name: /^Chat$/ })).not.toBeInTheDocument();
-    await waitFor(() =>
-      expect(screen.queryByRole("link", { name: "Support" })).not.toBeInTheDocument(),
+    expect(await screen.findByRole("link", { name: "Support" })).toHaveAttribute(
+      "href",
+      "/support",
     );
   });
 

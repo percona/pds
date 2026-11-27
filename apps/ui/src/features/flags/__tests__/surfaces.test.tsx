@@ -199,10 +199,10 @@ describe("hub overlay", () => {
   it("offers chat with the Claude and Cursor keys", async () => {
     stubAdapter({ "/api/environments": { hub: true, environments: [] } });
 
-    renderWithProviders(<AppRoutes />, { route: "/environments", flags });
+    renderWithProviders(<AppRoutes />, { route: "/connectors", flags });
 
     await userEvent.click(await screen.findByRole("button", { name: "Connections" }));
-    expect(screen.getByTestId("connection-assistant")).toBeInTheDocument();
+    expect(await screen.findByTestId("connection-assistant")).toBeInTheDocument();
     expect(screen.getByTestId("connection-cursor")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Ask PDS" })).toBeInTheDocument();
   });
@@ -227,20 +227,6 @@ describe("hub overlay", () => {
     ).toEqual(["Environments", "Alerts", "AI agents", "Connectors", "Activity", "Support"]);
     expect(screen.queryByRole("link", { name: "Databases" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Ask PDS" })).toBeInTheDocument();
-  });
-
-  it("opens chat from the chat route", async () => {
-    renderWithProviders(
-      <AppShell>
-        <AppRoutes />
-      </AppShell>,
-      { route: "/chat", flags },
-    );
-
-    expect(await screen.findAllByRole("region", { name: "Chat" })).not.toHaveLength(0);
-    expect(
-      screen.queryByRole("heading", { level: 1, name: "Page not found" }),
-    ).not.toBeInTheDocument();
   });
 
   it("serves activity on the hub", async () => {
@@ -283,7 +269,6 @@ describe("routes", () => {
     { name: "one change", route: "/activity/000042", flags: { activity: false } },
     { name: "support", route: "/support", flags: { support: false } },
     { name: "one ticket", route: "/support/CS0001", flags: { support: false } },
-    { name: "chat", route: "/chat", flags: { chat: false } },
     { name: "AI agents", route: "/agents", flags: { mcp: false } },
   ];
 
@@ -385,8 +370,6 @@ describe("database detail", () => {
         database={database as never}
         tab="activity"
         onTabChange={onTabChange}
-        connectionCopied={false}
-        onConnect={() => {}}
         onBackUpNow={() => {}}
         backingUp={false}
         onRestore={() => {}}
@@ -405,8 +388,6 @@ describe("database detail", () => {
         database={database as never}
         tab="metrics"
         onTabChange={onTabChange}
-        connectionCopied={false}
-        onConnect={() => {}}
         onBackUpNow={() => {}}
         backingUp={false}
         onRestore={() => {}}

@@ -159,13 +159,20 @@ const synchronousActions = new Set<string>([
  * no work was started to contradict it.
  */
 export function describeOutcome(outcome: string, action?: string): OutcomeDescription {
+  const shown = shownOutcome(outcome, action);
+
+  return outcomes[shown] ?? { label: shown, icon: CircleDashed, variant: "muted" };
+}
+
+/**
+ * The outcome a row shows, which is what the outcome filter matches on, so a
+ * filter for Succeeded never lists a row that reads Accepted.
+ */
+export function shownOutcome(outcome: string, action?: string): string {
   // The adapter now records "accepted" for the work it only started, so this
   // remap is for rows written before it did. The activity ring keeps months of
   // them and they must not start reading as finished work.
   const asynchronous = action !== undefined && !synchronousActions.has(action);
-  if (outcome === "succeeded" && asynchronous) {
-    return outcomes.accepted;
-  }
 
-  return outcomes[outcome] ?? { label: outcome, icon: CircleDashed, variant: "muted" };
+  return outcome === "succeeded" && asynchronous ? "accepted" : outcome;
 }

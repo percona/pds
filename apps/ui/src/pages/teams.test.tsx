@@ -56,6 +56,16 @@ function stubAdapter(options: Adapter = {}) {
           }),
         );
       }
+      if (path === "/api/environments?team=all") {
+        return Promise.resolve(
+          jsonResponse({
+            environments: [
+              { name: "orders-prod", status: "connected", team: "payments" },
+              { name: "orders-stage", status: "connected", team: "payments" },
+            ],
+          }),
+        );
+      }
       if (method !== "GET") {
         calls.push({ method, path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
 
@@ -76,21 +86,32 @@ afterEach(() => {
 });
 
 describe("Teams screen", () => {
-  it("lists the teams with how many users each has", async () => {
+  it("lists the teams with their users and the environments each owns", async () => {
     stubAdapter();
 
     renderWithProviders(<AppRoutes />, { route: "/teams" });
 
     expect(await screen.findByRole("heading", { level: 1, name: "Teams" })).toBeVisible();
-    const payments = (await screen.findByRole("cell", { name: "payments" })).closest("tr");
-    expect(payments).not.toBeNull();
-    expect(within(payments as HTMLElement).getByRole("cell", { name: "2" })).toBeVisible();
-    const fallback = screen.getByRole("cell", { name: "default" }).closest("tr");
-    expect(within(fallback as HTMLElement).getByRole("cell", { name: "1" })).toBeVisible();
+    const payments = (await screen.findByRole("link", { name: "payments" })).closest("tr");
+    const row = within(payments as HTMLElement);
+    expect(row.getByText("2")).toBeVisible();
+    expect(row.getByText("Grace, Linus")).toBeVisible();
+    expect(await row.findByText("orders-prod")).toBeVisible();
+    expect(row.getByText("orders-stage")).toBeVisible();
+    expect(screen.getByRole("link", { name: "payments" })).toHaveAttribute(
+      "href",
+      "/teams/payments",
+    );
+    const fallback = within(
+      screen.getByRole("link", { name: "default" }).closest("tr") as HTMLElement,
+    );
+    expect(fallback.getByText("Ada")).toBeVisible();
+    expect(fallback.getByText("None")).toBeVisible();
   });
 
-  it("creates a team from its name", async () => {
-    const calls = stubAdapter();
+  it("creates a team and opens its page", async () => {
+    // The list a read after the create answers already holds the new Team.
+    const calls = stubAdapter({ teams: [{ name: "default" }, { name: "platform" }] });
     renderWithProviders(<AppRoutes />, { route: "/teams" });
 
     await userEvent.click(await screen.findByRole("button", { name: "Create team" }));
@@ -104,6 +125,7 @@ describe("Teams screen", () => {
       expect(calls).toEqual([{ method: "POST", path: "/api/teams", body: { name: "platform" } }]),
     );
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(await screen.findByRole("heading", { level: 1, name: "platform" })).toBeVisible();
   });
 
   it("says a team name is taken and keeps the dialog open", async () => {

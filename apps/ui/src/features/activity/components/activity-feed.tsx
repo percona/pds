@@ -1,9 +1,11 @@
 import { CircleAlert, PlugZap, ScrollText } from "lucide-react";
-import type { MouseEvent, ReactNode } from "react";
-import { Link, useNavigate } from "react-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { useId, type MouseEvent, type ReactNode } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { NativeSelect } from "@/components/ui/native-select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -15,16 +17,58 @@ import {
 } from "@/components/ui/table";
 import { TeamLabel } from "@/features/teams";
 import { formatRelativeTime, formatTimestamp } from "@/lib/format";
-import { clientIcon, describeAction, describeOutcome, describeSource } from "../actions";
-import { useActivity } from "../hooks/use-activity";
-import type { ActivityEntry } from "../types";
+import {
+  clientIcon,
+  describeAction,
+  describeOutcome,
+  describeSource,
+  shownOutcome,
+} from "../actions";
+import { activityKey, useActivity } from "../hooks/use-activity";
+import type { ActivityEntry, ActivityPage } from "../types";
 
 type ActivityFeedProps = {
   /** Set to scope the feed to one database. Unset shows the whole environment. */
   databaseId?: string;
   live: boolean;
   onLiveChange: (live: boolean) => void;
+  /**
+   * Shows the action, outcome, made by and database filters, kept in the URL.
+   * Only the database filter is a query; the others narrow the loaded rows,
+   * because the control plane filters by nothing else.
+   */
+  filterable?: boolean;
 };
+
+type Filters = { action: string; outcome: string; by: string; database: string };
+
+const filterKeys = ["action", "outcome", "by", "database"] as const;
+
+const outcomeOptions = [
+  { value: "succeeded", label: "Succeeded" },
+  { value: "accepted", label: "Accepted" },
+  { value: "failed", label: "Failed" },
+];
+
+const madeByOptions = [
+  { value: "people", label: "People in the console" },
+  { value: "chat", label: "Chat" },
+  { value: "mcp", label: "AI agents" },
+];
+
+function matches(entry: ActivityEntry, filters: Filters): boolean {
+  if (filters.action && entry.action !== filters.action) {
+    return false;
+  }
+  if (filters.outcome && shownOutcome(entry.outcome, entry.action) !== filters.outcome) {
+    return false;
+  }
+  if (filters.by === "people") {
+    return !entry.client;
+  }
+
+  return !filters.by || entry.client === filters.by;
+}
 
 /**
  * What the control plane did, newest first.
@@ -34,8 +78,24 @@ type ActivityFeedProps = {
  * ended. The detail rides under the action rather than claiming a sixth column,
  * and the action itself opens the full timeline for that change.
  */
-export function ActivityFeed({ databaseId, live, onLiveChange }: ActivityFeedProps) {
-  const { entries, error, isPending, isFetching, retry } = useActivity({ databaseId, live });
+export function ActivityFeed({
+  databaseId,
+  live,
+  onLiveChange,
+  filterable = false,
+}: ActivityFeedProps) {
+  const queryClient = useQueryClient();
+  const [params, setParams] = useSearchParams();
+  const filters: Filters = {
+    action: filterable ? (params.get("action") ?? "") : "",
+    outcome: filterable ? (params.get("outcome") ?? "") : "",
+    by: filterable ? (params.get("by") ?? "") : "",
+    database: filterable ? (params.get("database") ?? "") : "",
+  };
+  const { entries, error, isPending, isFetching, retry } = useActivity({
+    databaseId: databaseId ?? (filters.database || undefined),
+    live,
+  });
 
   if (isPending) {
     return <ActivityFeedSkeleton />;
@@ -66,6 +126,39 @@ export function ActivityFeed({ databaseId, live, onLiveChange }: ActivityFeedPro
     );
   }
 
+  const filtered = filterKeys.some((key) => filters[key] !== "");
+  const shown = entries.filter((entry) => matches(entry, filters));
+  // A database filter narrows the read itself, so the choices also come from
+  // the unfiltered read kept in the cache: picking one database must not make
+  // every other one disappear from the list.
+  const databaseOptions = filterable
+    ? unique([
+        ...(queryClient.getQueryData<ActivityPage>(activityKey())?.entries ?? []).map(
+          (entry) => entry.databaseId,
+        ),
+        ...entries.map((entry) => entry.databaseId),
+        filters.database,
+      ])
+    : [];
+
+  function setFilter(key: keyof Filters, value: string) {
+    const next = new URLSearchParams(params);
+    if (value) {
+      next.set(key, value);
+    } else {
+      next.delete(key);
+    }
+    setParams(next);
+  }
+
+  function clearFilters() {
+    const next = new URLSearchParams(params);
+    for (const key of filterKeys) {
+      next.delete(key);
+    }
+    setParams(next);
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-4">
@@ -83,7 +176,17 @@ export function ActivityFeed({ databaseId, live, onLiveChange }: ActivityFeedPro
         </Button>
       </div>
 
-      {entries.length === 0 ? (
+      {filterable && (entries.length > 0 || filtered) ? (
+        <FilterBar
+          filters={filters}
+          actions={unique([...entries.map((entry) => entry.action), filters.action])}
+          databases={databaseOptions}
+          onChange={setFilter}
+          onClear={filtered ? clearFilters : undefined}
+        />
+      ) : null}
+
+      {entries.length === 0 && !filtered ? (
         <EmptyCard
           title="Nothing has changed yet"
           detail={
@@ -92,6 +195,17 @@ export function ActivityFeed({ databaseId, live, onLiveChange }: ActivityFeedPro
               : "Creating a database, backing one up, or changing a connection will show up here."
           }
           icon={<ScrollText className="size-5 text-muted-foreground" strokeWidth={1.5} />}
+        />
+      ) : shown.length === 0 ? (
+        <EmptyCard
+          title="No changes match these filters"
+          detail="Change a filter to see the rest."
+          icon={<ScrollText className="size-5 text-muted-foreground" strokeWidth={1.5} />}
+          action={
+            <Button variant="outline" size="sm" onClick={clearFilters}>
+              Clear filters
+            </Button>
+          }
         />
       ) : (
         <Card className="overflow-hidden">
@@ -107,7 +221,7 @@ export function ActivityFeed({ databaseId, live, onLiveChange }: ActivityFeedPro
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {entries.map((entry) => (
+                {shown.map((entry) => (
                   <ActivityRow key={entry.id} entry={entry} />
                 ))}
               </TableBody>
@@ -115,8 +229,97 @@ export function ActivityFeed({ databaseId, live, onLiveChange }: ActivityFeedPro
           </div>
         </Card>
       )}
+
+      {filterable && entries.length > 0 ? (
+        <p className="text-xs text-muted-foreground" data-testid="activity-count">
+          Showing <span className="font-mono">{shown.length}</span> of{" "}
+          <span className="font-mono">{entries.length}</span> loaded changes. The database filter
+          asks the control plane. The others narrow what is already loaded.
+        </p>
+      ) : null}
     </div>
   );
+}
+
+type FilterBarProps = {
+  filters: Filters;
+  actions: string[];
+  databases: string[];
+  onChange: (key: keyof Filters, value: string) => void;
+  onClear?: () => void;
+};
+
+function FilterBar({ filters, actions, databases, onChange, onClear }: FilterBarProps) {
+  return (
+    <div className="flex flex-wrap items-end gap-4" data-testid="activity-filters">
+      <Filter label="Action" value={filters.action} onChange={(v) => onChange("action", v)}>
+        <option value="">All actions</option>
+        {actions.map((action) => (
+          <option key={action} value={action}>
+            {describeAction(action).label}
+          </option>
+        ))}
+      </Filter>
+      <Filter label="Outcome" value={filters.outcome} onChange={(v) => onChange("outcome", v)}>
+        <option value="">Any outcome</option>
+        {outcomeOptions.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </Filter>
+      <Filter label="Made by" value={filters.by} onChange={(v) => onChange("by", v)}>
+        <option value="">Anyone</option>
+        {madeByOptions.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </Filter>
+      <Filter label="Database" value={filters.database} onChange={(v) => onChange("database", v)}>
+        <option value="">All databases</option>
+        {databases.map((database) => (
+          <option key={database} value={database}>
+            {database}
+          </option>
+        ))}
+      </Filter>
+      {onClear ? (
+        <Button variant="ghost" size="sm" onClick={onClear}>
+          Clear filters
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+type FilterProps = {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  children: ReactNode;
+};
+
+function Filter({ label, value, onChange, children }: FilterProps) {
+  const id = useId();
+
+  // The label names the control and nothing else. Wrapping the select would
+  // fold every option into the accessible name, so "Database" also matched
+  // an action whose label contains that word.
+  return (
+    <div className="space-y-1.5 text-sm font-medium">
+      <label htmlFor={id} className="block">
+        {label}
+      </label>
+      <NativeSelect id={id} value={value} onChange={(event) => onChange(event.target.value)}>
+        {children}
+      </NativeSelect>
+    </div>
+  );
+}
+
+function unique(values: (string | undefined)[]): string[] {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))];
 }
 
 function ActivityRow({ entry }: { entry: ActivityEntry }) {

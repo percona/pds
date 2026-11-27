@@ -144,6 +144,7 @@ test("the detail page states a private database's address", async ({ page }) => 
   await page.goto("databases/spoke-a/pds.orders-dev");
 
   await expect(page.getByText("Private, reachable from your VPC")).toBeVisible();
+  await page.getByRole("button", { name: "From your app" }).click();
   await expect(
     page.getByText("internal-a1b2c3.elb.us-east-1.amazonaws.com", { exact: true }).first(),
   ).toBeVisible();
@@ -156,6 +157,7 @@ test("the detail page states a public database's address", async ({ page }) => {
   await page.goto("databases/spoke-a/pds.orders-dev");
 
   await expect(page.getByText("Public, reachable from the internet")).toBeVisible();
+  await page.getByRole("button", { name: "From your app" }).click();
   await expect(
     page.getByText("a1b2c3.elb.us-east-1.amazonaws.com", { exact: true }).first(),
   ).toBeVisible();

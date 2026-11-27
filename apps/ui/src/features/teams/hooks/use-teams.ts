@@ -1,6 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ApiError } from "@/lib/api";
-import { createTeam, deleteTeam, fetchTeams, renameTeam } from "../api";
+import type { Environment } from "@/features/environments";
+import {
+  createTeam,
+  deleteTeam,
+  fetchEnvironmentsOfEveryTeam,
+  fetchTeams,
+  renameTeam,
+} from "../api";
 import type { Team } from "../types";
 
 export const teamsKey = ["teams"] as const;
@@ -8,6 +15,14 @@ export const teamsKey = ["teams"] as const;
 /** `enabled` is false for a person who may not read the Teams, so no request is made. */
 export function useTeams(enabled = true) {
   return useQuery<Team[], ApiError>({ queryKey: teamsKey, queryFn: fetchTeams, enabled });
+}
+
+/** Every Team's environments, each with the Team it belongs to. */
+export function useTeamEnvironments() {
+  return useQuery<Environment[], ApiError>({
+    queryKey: [...teamsKey, "environments"],
+    queryFn: fetchEnvironmentsOfEveryTeam,
+  });
 }
 
 /** A write is followed by a read, because the counts and the names both moved. */

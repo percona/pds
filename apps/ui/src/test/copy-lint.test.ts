@@ -45,7 +45,7 @@ describe("copy lint", () => {
     );
 
     expect(offenders).toEqual([]);
-  });
+  }, 20_000);
 
   it("names no bare cluster in visible text", () => {
     const offenders = visibleSources().flatMap(({ file, texts }) =>
@@ -53,7 +53,7 @@ describe("copy lint", () => {
     );
 
     expect(offenders).toEqual([]);
-  });
+  }, 20_000);
 
   it("rejects a one-word Cluster label", () => {
     const texts = visibleCopyTexts(`

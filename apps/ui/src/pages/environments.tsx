@@ -1,20 +1,15 @@
-import { CircleAlert, CircleArrowUp, Server, TriangleAlert } from "lucide-react";
-import { useState } from "react";
+import { ChevronRight, CircleAlert, CircleArrowUp, Server, TriangleAlert } from "lucide-react";
 import { Link } from "react-router";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  environmentPill,
   lifecycleNotes,
-  LostPanel,
-  managedPill,
-  ManagedDeleteDialog,
-  ProvisioningPanel,
   useEnvironments,
   type Environment,
 } from "@/features/environments";
-import { ConnectionsPanel } from "@/features/connections";
 import {
   accountName,
   AwsAccountsSection,
@@ -22,9 +17,7 @@ import {
   type AwsAccount,
 } from "@/features/aws-accounts";
 import { engineChoicePhrase, StatusPill, useDatabases } from "@/features/databases";
-import { SupportAccessStatus } from "@/features/support-access";
 import { TeamLabel } from "@/features/teams";
-import { Feature, useFeature } from "@/features/flags";
 import { formatRelativeTime, formatTimestamp } from "@/lib/format";
 
 export function EnvironmentsPage() {
@@ -62,7 +55,7 @@ export function EnvironmentsPage() {
           <ul className="divide-y divide-border">
             {environments.map((environment) => (
               <EnvironmentRow
-                key={environment.name}
+                key={`${environment.team ?? ""}/${environment.name}`}
                 environment={environment}
                 account={accounts.find((candidate) => candidate.id === environment.connectionId)}
                 databaseCount={
@@ -75,14 +68,11 @@ export function EnvironmentsPage() {
       ) : null}
 
       <AwsAccountsSection />
-
-      <Feature name="connections">
-        <ConnectionsPanel />
-      </Feature>
     </div>
   );
 }
 
+/** A row only summarises. Everything an environment needs done is on its own page. */
 function EnvironmentRow({
   environment,
   account,
@@ -92,134 +82,80 @@ function EnvironmentRow({
   account: AwsAccount | undefined;
   databaseCount?: number;
 }) {
-  const [deleting, setDeleting] = useState(false);
-  const supportAccess = useFeature("support-access");
-
   const managed = environment.origin === "managed";
-  const lost = managed && environment.state === "lost";
-  const notes = managed && !lost ? lifecycleNotes(environment.lifecycle) : [];
-  const pill = managedPill(environment.state);
-  const unreachable = !managed && environment.status === "unreachable";
-  // A row appears the moment a token is minted, so most of the time an
-  // unreachable environment with no heartbeat is one still being built, not one
-  // that failed. The red pill said otherwise for the whole 15 minutes.
-  const joining = unreachable && !environment.lastSeen;
+  const notes =
+    managed && environment.state !== "lost" ? lifecycleNotes(environment.lifecycle) : [];
+  const pill = environmentPill(environment);
   const lastSeen = formatRelativeTime(environment.lastSeen);
 
   return (
     <li>
-      {/*
-       * The actions are centred on the summary line alone. Centred on the
-       * whole row, they slid down over the confirmation text once it opened.
-       */}
-      <div className="relative">
-        <Link
-          to={`/environments/${encodeURIComponent(environment.name)}`}
-          className="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-2 px-5 py-4 hover:bg-accent sm:grid-cols-[minmax(0,2fr)_auto_minmax(0,1fr)]"
-        >
-          <div className="min-w-0 space-y-1">
-            <p className="truncate font-mono text-sm font-medium">{environment.name}</p>
-            {environment.team ? <TeamLabel name={environment.team} /> : null}
-            {managed ? (
-              <p className="text-xs text-muted-foreground">
-                Created by PDS in AWS account{" "}
-                <span className="font-mono">
-                  {account ? accountName(account) : environment.connectionId}
-                </span>
-                {environment.region ? (
-                  <>
-                    {" "}
-                    in <span className="font-mono">{environment.region}</span>
-                  </>
-                ) : null}
-              </p>
-            ) : null}
-            {notes.length > 0 ? (
-              <ul className="flex flex-wrap gap-x-4 gap-y-1">
-                {notes.map((note) => (
-                  <li
-                    key={note.kind}
-                    className="flex items-center gap-1.5 text-xs text-muted-foreground"
-                  >
-                    {note.kind === "update" ? (
-                      <CircleArrowUp className="size-3.5" strokeWidth={1.5} aria-hidden="true" />
-                    ) : (
-                      <TriangleAlert
-                        className="size-3.5 text-warning"
-                        strokeWidth={1.5}
-                        aria-hidden="true"
-                      />
-                    )}
-                    {note.label}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
+      <Link
+        to={`/environments/${encodeURIComponent(environment.name)}`}
+        className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 px-5 py-4 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none sm:grid-cols-[minmax(0,2fr)_9rem_minmax(0,1fr)_minmax(0,1.2fr)_auto]"
+      >
+        <div className="min-w-0 space-y-1">
+          <p className="truncate font-mono text-sm font-medium">{environment.name}</p>
+          {environment.team ? <TeamLabel name={environment.team} /> : null}
           {managed ? (
-            <StatusPill kind={pill.kind} label={pill.label} />
-          ) : joining ? (
-            <StatusPill kind="creating" label="Joining" />
-          ) : unreachable ? (
-            <StatusPill kind="degraded" label="Unreachable" />
-          ) : (
-            <StatusPill kind="ready" label="Connected" />
-          )}
-          <p
-            className="text-xs text-muted-foreground sm:text-right"
-            title={formatTimestamp(environment.lastSeen) ?? undefined}
-          >
-            {managed && !lastSeen ? "" : lastSeen ? `Last seen ${lastSeen}` : "No heartbeat yet"}
-          </p>
-          {databaseCount !== undefined ? (
             <p className="text-xs text-muted-foreground">
-              <span className="font-mono">{databaseCount}</span>
-              {databaseCount === 1 ? " database" : " databases"}
+              Created by PDS in AWS account{" "}
+              <span className="font-mono">
+                {account ? accountName(account) : environment.connectionId}
+              </span>
+              {environment.region ? (
+                <>
+                  {" "}
+                  in <span className="font-mono">{environment.region}</span>
+                </>
+              ) : null}
             </p>
           ) : null}
-        </Link>
-      </div>
-      {managed && account?.state === "unreachable" ? (
-        <p className="border-t border-border px-5 py-3 text-sm text-muted-foreground">
-          PDS cannot reach AWS account <span className="font-mono">{accountName(account)}</span>.{" "}
-          <Link
-            to={`/environments?fix=${encodeURIComponent(account.id)}#aws-accounts`}
-            className="rounded-md font-medium text-primary hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-          >
-            Fix the AWS account
-          </Link>
+          {notes.length > 0 ? (
+            <ul className="flex flex-wrap gap-x-4 gap-y-1">
+              {notes.map((note) => (
+                <li
+                  key={note.kind}
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                >
+                  {note.kind === "update" ? (
+                    <CircleArrowUp className="size-3.5" strokeWidth={1.5} aria-hidden="true" />
+                  ) : (
+                    <TriangleAlert
+                      className="size-3.5 text-warning"
+                      strokeWidth={1.5}
+                      aria-hidden="true"
+                    />
+                  )}
+                  {note.label}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+        <span>
+          <StatusPill kind={pill.kind} label={pill.label} />
+        </span>
+        <p className="hidden text-xs text-muted-foreground sm:block">
+          {databaseCount !== undefined ? (
+            <>
+              <span className="font-mono">{databaseCount}</span>
+              {databaseCount === 1 ? " database" : " databases"}
+            </>
+          ) : null}
         </p>
-      ) : null}
-      {managed && environment.provisioning && environment.provisioning.progress !== "ready" ? (
-        <div className="border-t border-border px-5 py-5">
-          <ProvisioningPanel
-            environment={environment.name}
-            provisioning={environment.provisioning}
-          />
-        </div>
-      ) : null}
-      {lost && environment.lifecycle ? (
-        <div className="border-t border-border px-5 py-5">
-          <LostPanel
-            environment={environment.name}
-            lifecycle={environment.lifecycle}
-            onRemove={() => setDeleting(true)}
-          />
-        </div>
-      ) : null}
-      {managed ? (
-        <ManagedDeleteDialog
-          environment={environment.name}
-          account={account ? accountName(account) : (environment.connectionId ?? "")}
-          accountUnreachable={account?.state === "unreachable"}
-          lost={lost}
-          open={deleting}
-          onOpenChange={setDeleting}
+        <p
+          className="hidden text-xs text-muted-foreground sm:block"
+          title={formatTimestamp(environment.lastSeen) ?? undefined}
+        >
+          {lastSeen ? `Last seen ${lastSeen}` : managed ? "" : "No report yet"}
+        </p>
+        <ChevronRight
+          className="hidden size-4 text-muted-foreground sm:block"
+          strokeWidth={1.5}
+          aria-hidden="true"
         />
-      ) : null}
-      {supportAccess && environment.supportAccess ? (
-        <SupportAccessStatus summary={environment.supportAccess} />
-      ) : null}
+      </Link>
     </li>
   );
 }
@@ -249,8 +185,8 @@ function EmptyState() {
       <div className="space-y-1">
         <p className="text-sm font-medium">No environments yet</p>
         <p className="text-sm text-muted-foreground">
-          Add an environment to run {engineChoicePhrase} on it from here. Amazon EKS in your AWS
-          account is where an environment runs, and AWS bills for it.
+          Add an environment to run {engineChoicePhrase} on it from here. PDS builds an EKS cluster
+          and its worker nodes in your AWS account, and AWS bills for them.
         </p>
       </div>
       <Button asChild>

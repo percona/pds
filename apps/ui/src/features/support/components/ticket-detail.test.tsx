@@ -158,7 +158,7 @@ describe("TicketDetail", () => {
     expect(screen.queryByRole("link", { name: "Open in ServiceNow" })).not.toBeInTheDocument();
   });
 
-  it("points at the public portal when the adapter has no ServiceNow Secret", async () => {
+  it("points at Connectors when the adapter has no ServiceNow Secret", async () => {
     stubTicket(
       jsonResponse(
         { code: "ErrNotImplemented", message: "Support tickets are not configured." },
@@ -168,6 +168,10 @@ describe("TicketDetail", () => {
     renderDetail();
 
     expect(await screen.findByText("Support is not connected")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Connectors" })).toHaveAttribute(
+      "href",
+      "/connectors",
+    );
     expect(screen.getByRole("link", { name: "Open the support portal" })).toHaveAttribute(
       "href",
       "https://www.percona.com/services/support",

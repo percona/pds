@@ -1,4 +1,4 @@
-import { CircleAlert, LifeBuoy, PlugZap } from "lucide-react";
+import { CircleAlert, LifeBuoy } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { Badge } from "@/components/ui/badge";
@@ -15,8 +15,8 @@ import {
 } from "@/components/ui/table";
 import { formatRelativeTime, formatTimestamp } from "@/lib/format";
 import { useSupportTickets } from "../hooks/use-support-tickets";
-import { publicSupportPortalUrl } from "../portal";
 import { describeTicketState } from "../ticket-state";
+import { SupportNotConnected } from "./support-not-connected";
 import type { SupportTicket } from "../types";
 
 /**
@@ -32,20 +32,7 @@ export function TicketList() {
 
   if (error) {
     if (error.code === "ErrNotImplemented") {
-      return (
-        <EmptyCard
-          title="Support is not connected"
-          detail={error.message}
-          icon={<PlugZap className="size-5 text-muted-foreground" strokeWidth={1.5} />}
-          action={
-            <Button variant="outline" asChild>
-              <a href={publicSupportPortalUrl} target="_blank" rel="noreferrer">
-                Open the support portal
-              </a>
-            </Button>
-          }
-        />
-      );
+      return <SupportNotConnected />;
     }
 
     return (

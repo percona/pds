@@ -10,9 +10,9 @@ import {
   useSignInMethods,
 } from "@/features/auth";
 import type { ClaimInput, OrganizationInvite } from "@/features/auth";
+import { ApiError } from "@/lib/api";
 
 type ClaimValues = Pick<ClaimInput, "password" | "login">;
-import { ApiError } from "@/lib/api";
 
 /**
  * The screen behind an invite link. It names what the link is for before

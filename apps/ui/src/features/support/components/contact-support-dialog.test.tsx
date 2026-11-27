@@ -162,6 +162,10 @@ describe("ContactSupportDialog", () => {
       "Support is not connected yet.",
     );
     expect(screen.queryByRole("button", { name: "Send ticket" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Connectors" })).toHaveAttribute(
+      "href",
+      "/connectors",
+    );
     expect(screen.getByRole("link", { name: /Open the support portal/ })).toHaveAttribute(
       "href",
       "https://www.percona.com/services/support",

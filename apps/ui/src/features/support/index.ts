@@ -1,4 +1,8 @@
+export { ContactSupportButton } from "./components/contact-support-button";
 export { ContactSupportDialog } from "./components/contact-support-dialog";
+export { SupportNotConnected } from "./components/support-not-connected";
+export { supportDraft } from "./support-draft";
+export type { SupportDraft, SupportDraftInput } from "./support-draft";
 export { TicketDetail } from "./components/ticket-detail";
 export { TicketList } from "./components/ticket-list";
 export { createTicket, fetchTicket, fetchTickets } from "./api";

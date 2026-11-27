@@ -37,3 +37,17 @@ export type IssuedInvitation = Invitation & {
   link: string;
   emailed: boolean;
 };
+
+/** What an admin changes about a User. A field left out is left alone. */
+export type MemberChange = {
+  team?: string;
+  role?: Role;
+};
+
+/**
+ * What became of one address in an invite: its invitation and link, or the
+ * control plane's reason for refusing it.
+ */
+export type InviteOutcome =
+  | { kind: "issued"; invitation: IssuedInvitation }
+  | { kind: "refused"; email: string; reason: string };

@@ -1,10 +1,12 @@
 import { BellRing, CircleCheck, Server } from "lucide-react";
+import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAlerts } from "../hooks/use-alerts";
 import type { AlertEnvironment, AlertReport, AlertSeverity } from "../types";
+import { AlertPanel } from "./alert-panel";
 import { AlertRow } from "./alert-row";
 import { EmptyCard } from "./empty-card";
 import { EnvironmentBanner } from "./environment-banner";
@@ -26,6 +28,8 @@ export function AlertsView() {
   const [params, setParams] = useSearchParams();
   const severity = params.get("severity") ?? "";
   const requested = params.get("environment") ?? "";
+  const [openId, setOpenId] = useState<string>();
+  const [opener, setOpener] = useState<HTMLElement | null>(null);
 
   if (isPending) {
     return <AlertsSkeleton />;
@@ -65,6 +69,9 @@ export function AlertsView() {
       (!severity || alert.severity === severity) &&
       (!environment || alert.environment === environment),
   );
+  // An alert that cleared between reads closes its panel rather than showing
+  // something monitoring no longer reports.
+  const opened = data.alerts.find((alert) => alert.id === openId);
   const unavailable = data.environments.filter((env) => env.state !== "live");
   const notes = data.environments.filter((env) => env.note);
 
@@ -115,7 +122,15 @@ export function AlertsView() {
       {shown.length > 0 ? (
         <ul className="divide-y divide-border rounded-lg border border-border bg-card">
           {shown.map((alert) => (
-            <AlertRow key={alert.id} alert={alert} readAt={readAt.get(alert.environment)} />
+            <AlertRow
+              key={alert.id}
+              alert={alert}
+              readAt={readAt.get(alert.environment)}
+              onOpen={(element) => {
+                setOpener(element);
+                setOpenId(alert.id);
+              }}
+            />
           ))}
         </ul>
       ) : (
@@ -126,6 +141,13 @@ export function AlertsView() {
           onClear={() => setParams(new URLSearchParams())}
         />
       )}
+
+      <AlertPanel
+        alert={opened}
+        readAt={opened ? readAt.get(opened.environment) : undefined}
+        opener={opener}
+        onClose={() => setOpenId(undefined)}
+      />
     </div>
   );
 }

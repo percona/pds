@@ -150,76 +150,25 @@ test.describe("support tickets", () => {
     await expect(page.getByTestId("ticket-comments")).toContainText(reply);
   });
 
-  // No Secret means no support entry and no send button, but still a route to
-  // Percona.
-  test("an adapter with no ServiceNow Secret hides support and points at the portal", async ({
+  // No Secret means no send button, but the entry stays and the page says
+  // where the connection is made and still offers a route to Percona.
+  test("an adapter with no ServiceNow Secret points at Connectors and the portal", async ({
     page,
   }) => {
     await stubUnconfigured(page);
     await page.goto("./");
 
     await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Support" })).toHaveCount(0);
-
-    await page.goto("support");
+    await page.getByRole("link", { name: "Support" }).click();
 
     await expect(page.getByText("Support is not connected")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Open Connectors" })).toHaveAttribute(
+      "href",
+      /\/connectors$/,
+    );
     await expect(page.getByRole("link", { name: "Open the support portal" })).toHaveAttribute(
       "href",
       publicPortal,
     );
-  });
-
-  test("pasting ServiceNow tokens on the environment list shows the support entry", async ({
-    page,
-  }) => {
-    let configured = false;
-
-    await page.route("**/api/environments", (route) =>
-      route.fulfill({ json: { hub: true, environments: [] } }),
-    );
-    await page.route("**/api/connections/servicenow", (route) => {
-      configured = true;
-
-      return route.fulfill({ status: 204, body: "" });
-    });
-    await page.route("**/api/connections", (route) =>
-      route.fulfill({
-        json: {
-          servicenow: { configured },
-          assistant: { configured: false },
-          cursor: { configured: false },
-        },
-      }),
-    );
-    await page.route("**/api/support/tickets**", (route) => {
-      if (!configured) {
-        return route.fulfill({
-          status: 501,
-          json: {
-            code: "ErrNotImplemented",
-            message:
-              "Support tickets need a ServiceNow connection, which this adapter does not have.",
-          },
-        });
-      }
-
-      return route.fulfill({
-        json: { tickets: [], portalUrl: openTicket.portalUrl },
-      });
-    });
-    await page.route("**/api/databases?*", (route) => route.fulfill({ json: { databases: [] } }));
-
-    await page.goto("environments");
-
-    await expect(page.getByRole("link", { name: "Support" })).toHaveCount(0);
-
-    await page.getByRole("button", { name: "Connections" }).click();
-    const support = page.getByTestId("connection-servicenow");
-    await support.getByLabel("Client token").fill("client-token");
-    await support.getByRole("button", { name: "Save token" }).click();
-
-    await expect(support.getByText("Connected")).toBeVisible();
-    await expect(page.getByRole("link", { name: "Support" })).toBeVisible();
   });
 });

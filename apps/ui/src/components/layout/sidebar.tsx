@@ -18,8 +18,8 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { ReactNode, RefObject } from "react";
-import { Link, NavLink } from "react-router";
+import type { CSSProperties, ReactNode, RefObject } from "react";
+import { Link, NavLink, useLocation } from "react-router";
 import { ExperimentalNotice } from "@/components/layout/experimental-notice";
 import { useSidebarPreference } from "@/components/layout/sidebar-preference";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
@@ -27,7 +27,6 @@ import { OrganizationSwitcher, SignedInAs, useIsAdmin } from "@/features/auth";
 import { useActivityAvailability } from "@/features/activity";
 import { useAlerts } from "@/features/alerts";
 import { useFeature } from "@/features/flags";
-import { useSupportAvailability } from "@/features/support";
 import { TeamSelector } from "@/features/teams";
 import { shortenedProductName } from "@/lib/product";
 import { cn } from "@/lib/utils";
@@ -60,17 +59,62 @@ const navClassName = ({ isActive }: { isActive: boolean }) =>
       : "text-muted-foreground hover:bg-accent hover:text-foreground",
   );
 
+// The rail's nav scrolls, and a scrolling box clips anything absolutely
+// positioned inside it, so a tooltip is placed against the viewport from the
+// rect of the entry it names instead.
 const tooltipClassName =
-  "pointer-events-none absolute top-1/2 left-full z-50 ml-2 hidden -translate-y-1/2 rounded-md border border-border bg-popover px-2 py-1 text-xs whitespace-nowrap text-popover-foreground group-hover:block group-focus-within:block";
+  "pointer-events-none fixed z-50 -translate-y-1/2 rounded-md border border-border bg-popover px-2 py-1 text-xs whitespace-nowrap text-popover-foreground";
+
+type RailTipHandlers = {
+  onMouseEnter: (event: { currentTarget: HTMLElement }) => void;
+  onMouseLeave: () => void;
+  onFocus: (event: { currentTarget: HTMLElement }) => void;
+  onBlur: () => void;
+};
+
+function useRailTip(): { style: CSSProperties | null; handlers: RailTipHandlers } {
+  const [style, setStyle] = useState<CSSProperties | null>(null);
+
+  function show(event: { currentTarget: HTMLElement }) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setStyle({ top: rect.top + rect.height / 2, left: rect.right + 8 });
+  }
+
+  function hide() {
+    setStyle(null);
+  }
+
+  return {
+    style,
+    handlers: { onMouseEnter: show, onMouseLeave: hide, onFocus: show, onBlur: hide },
+  };
+}
+
+function RailTip({ label, style }: { label: string; style: CSSProperties | null }) {
+  return (
+    <span
+      role="tooltip"
+      aria-hidden="true"
+      className={tooltipClassName}
+      hidden={!style}
+      style={style ?? undefined}
+    >
+      {label}
+    </span>
+  );
+}
+
+const organizationPaths = organizationItems.map((item) => item.to);
+
+function inOrganization(pathname: string) {
+  return organizationPaths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+}
 
 export function Sidebar({
   restoreFocusRef,
 }: {
   restoreFocusRef?: RefObject<HTMLButtonElement | null>;
 }) {
-  // An environment with no ServiceNow Secret has no tickets to list, so the entry is
-  // left out rather than leading to a page that only says so.
-  const support = useSupportAvailability();
   // An environment built without the activity ring returns 501, so the entry is left
   // out rather than navigating to a page that cannot load.
   const activity = useActivityAvailability();
@@ -94,7 +138,8 @@ export function Sidebar({
     ...(mcpOn ? [agentsItem] : []),
     ...(connectionsOn ? [connectorsItem] : []),
     ...(activityOn && activity.connected && !activity.checking ? [activityItem] : []),
-    ...(supportOn && support.connected && !support.checking ? [supportItem] : []),
+    // Support without ServiceNow still has a page: it says so and points at Connectors.
+    ...(supportOn ? [supportItem] : []),
   ];
 
   useEffect(() => {
@@ -252,9 +297,15 @@ function SidebarHeader({
 }
 
 function ProductHome({ rail }: { rail: boolean }) {
+  const tip = useRailTip();
+
   return (
     <div className={cn("flex min-w-0 gap-1.5", rail ? "flex-col items-center" : "items-start")}>
-      <Link to="/" className="group relative flex min-w-0 items-center gap-1.5 rounded-md">
+      <Link
+        to="/"
+        className="relative flex min-w-0 items-center gap-1.5 rounded-md"
+        {...(rail ? tip.handlers : {})}
+      >
         <img src={assetUrl("percona-mark.svg")} alt="" className="size-5 shrink-0" />
         <span
           className={cn(
@@ -264,11 +315,7 @@ function ProductHome({ rail }: { rail: boolean }) {
         >
           {shortenedProductName}
         </span>
-        {rail ? (
-          <span role="tooltip" aria-hidden="true" className={tooltipClassName}>
-            {shortenedProductName}
-          </span>
-        ) : null}
+        {rail ? <RailTip label={shortenedProductName} style={tip.style} /> : null}
       </Link>
       <ExperimentalNotice compact={rail} />
     </div>
@@ -287,28 +334,38 @@ function NavEntry({
   onNavigate: () => void;
 }) {
   const Icon = item.icon;
+  const tip = useRailTip();
 
   return (
     <NavLink
       to={item.to}
       onClick={onNavigate}
       className={({ isActive }) => cn(navClassName({ isActive }), rail && "justify-center px-0")}
+      {...(rail ? tip.handlers : {})}
     >
       <Icon className="size-4 shrink-0" strokeWidth={1.5} aria-hidden="true" />
       <span className={rail ? "sr-only" : undefined}>{item.label}</span>
       {badge}
-      {rail ? (
-        <span role="tooltip" aria-hidden="true" className={tooltipClassName}>
-          {item.label}
-        </span>
-      ) : null}
+      {rail ? <RailTip label={item.label} style={tip.style} /> : null}
     </NavLink>
   );
 }
 
 function OrganizationNav({ rail, onNavigate }: { rail: boolean; onNavigate: () => void }) {
-  const [open, setOpen] = useState(false);
+  const current = inOrganization(useLocation().pathname);
+  // Null until the person opens or closes the group themselves. Until then
+  // the expanded sidebar shows it open on one of its pages, so the current
+  // page is never hidden in a closed group.
+  const [choice, setChoice] = useState<boolean | null>(null);
+  const open = choice ?? (!rail && current);
   const rootRef = useRef<HTMLDivElement>(null);
+  const tip = useRailTip();
+
+  // The rail's menu is a popover: closing it hands the group back to the
+  // default, so expanding the sidebar later still opens it on its own page.
+  function close() {
+    setChoice(rail ? null : false);
+  }
 
   useEffect(() => {
     if (!open || !rail) {
@@ -317,7 +374,7 @@ function OrganizationNav({ rail, onNavigate }: { rail: boolean; onNavigate: () =
 
     function onPointerDown(event: MouseEvent) {
       if (!rootRef.current?.contains(event.target as Node)) {
-        setOpen(false);
+        setChoice(null);
       }
     }
 
@@ -330,10 +387,15 @@ function OrganizationNav({ rail, onNavigate }: { rail: boolean; onNavigate: () =
     <div ref={rootRef} className={cn("relative", rail ? "pt-2" : "pt-4")}>
       <button
         type="button"
-        className={cn(navClassName({ isActive: false }), "w-full", rail && "justify-center px-0")}
+        className={cn(
+          navClassName({ isActive: current && !open }),
+          "w-full",
+          rail && "justify-center px-0",
+        )}
         aria-expanded={open}
         aria-controls="sidebar-organization"
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => setChoice(!open)}
+        {...(rail ? tip.handlers : {})}
       >
         <Building2 className="size-4 shrink-0" strokeWidth={1.5} aria-hidden="true" />
         <span className={cn(rail ? "sr-only" : "flex-1 text-left")}>Organization</span>
@@ -342,11 +404,7 @@ function OrganizationNav({ rail, onNavigate }: { rail: boolean; onNavigate: () =
         ) : (
           <ChevronRight className="size-4 shrink-0" strokeWidth={1.5} aria-hidden="true" />
         )}
-        {rail && !open ? (
-          <span role="tooltip" aria-hidden="true" className={tooltipClassName}>
-            Organization
-          </span>
-        ) : null}
+        {rail && !open ? <RailTip label="Organization" style={tip.style} /> : null}
       </button>
       {open ? (
         <div
@@ -364,7 +422,7 @@ function OrganizationNav({ rail, onNavigate }: { rail: boolean; onNavigate: () =
             }
             event.preventDefault();
             event.stopPropagation();
-            setOpen(false);
+            close();
           }}
         >
           {organizationItems.map((item) => (
@@ -374,7 +432,9 @@ function OrganizationNav({ rail, onNavigate }: { rail: boolean; onNavigate: () =
               rail={false}
               badge={null}
               onNavigate={() => {
-                setOpen(false);
+                if (rail) {
+                  close();
+                }
                 onNavigate();
               }}
             />

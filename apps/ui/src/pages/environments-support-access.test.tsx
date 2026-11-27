@@ -128,18 +128,30 @@ const optionStates = () =>
     .getAllByRole("option")
     .map((option) => [option.textContent, (option as HTMLOptionElement).disabled]);
 
-async function openPanel(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(await screen.findByRole("link", { name: /spoke-a/ }));
-  await user.click(await screen.findByRole("tab", { name: "Support access" }));
+/**
+ * Opens the environment page straight on its Support access tab, the way a
+ * link or a reload does, so no test spends its time clicking through the list.
+ */
+function renderSupportTab(flags?: Record<string, boolean>) {
+  renderWithProviders(<AppRoutes />, {
+    route: "/environments/spoke-a?tab=support",
+    ...(flags ? { flags } : {}),
+  });
 }
 
-describe("support access on the environments page", () => {
+async function openPanel() {
+  expect(
+    await screen.findByRole("tab", { name: "Support access", selected: true }),
+  ).toBeInTheDocument();
+}
+
+describe("support access on the environment page", () => {
   it("opens read only for 4 hours by default, with no case number needed", async () => {
     const { calls } = stubApi({});
     const user = userEvent.setup();
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
+    renderSupportTab();
 
-    await openPanel(user);
+    await openPanel();
 
     expect(await screen.findByRole("radio", { name: /Read only/ })).toBeChecked();
     expect(screen.getByRole("radio", { name: /Admin/ })).not.toBeChecked();
@@ -163,10 +175,9 @@ describe("support access on the environments page", () => {
 
   it("states in plain words what each level allows", async () => {
     stubApi({});
-    const user = userEvent.setup();
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
+    renderSupportTab();
 
-    await openPanel(user);
+    await openPanel();
 
     expect(await screen.findByText(/Cannot change anything/)).toBeInTheDocument();
     expect(screen.getByText(/Can create and change your databases/)).toBeInTheDocument();
@@ -174,10 +185,9 @@ describe("support access on the environments page", () => {
 
   it("tells the customer that admin cannot read secrets", async () => {
     stubApi({});
-    const user = userEvent.setup();
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
+    renderSupportTab();
 
-    await openPanel(user);
+    await openPanel();
 
     // No access level reads Secrets, so the Admin option must say so.
     expect(await screen.findByText(/Can create and change your databases/)).toHaveTextContent(
@@ -187,10 +197,9 @@ describe("support access on the environments page", () => {
 
   it("tells the customer that admin cannot delete a database or a backup", async () => {
     stubApi({});
-    const user = userEvent.setup();
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
+    renderSupportTab();
 
-    await openPanel(user);
+    await openPanel();
 
     expect(await screen.findByText(/Can create and change your databases/)).toHaveTextContent(
       /Cannot delete databases or backups/,
@@ -200,9 +209,9 @@ describe("support access on the environments page", () => {
   it("sends the chosen level, duration and trimmed case number", async () => {
     const { calls } = stubApi({});
     const user = userEvent.setup();
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
+    renderSupportTab();
 
-    await openPanel(user);
+    await openPanel();
     await user.click(await screen.findByRole("radio", { name: /Admin/ }));
     await user.selectOptions(screen.getByLabelText("Duration"), "24");
     await user.type(screen.getByLabelText("ServiceNow case number"), "  CS0012345 ");
@@ -221,9 +230,9 @@ describe("support access on the environments page", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const { calls, state } = stubApi({});
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
+    renderSupportTab();
 
-    await openPanel(user);
+    await openPanel();
     await user.click(await screen.findByRole("button", { name: "Open support access" }));
     expect(await screen.findByText(/Support access is starting/)).toBeInTheDocument();
     const listReads = () => calls.filter((call) => call.path === "/api/environments").length;
@@ -244,15 +253,14 @@ describe("support access on the environments page", () => {
       window: { state: "open", level: "admin", expiresAt: hoursFromNow(3.2), caseReference: "CS1" },
       summary: { state: "open", level: "admin", expiresAt: hoursFromNow(3.2) },
     });
-    const user = userEvent.setup();
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
+    renderSupportTab();
 
-    // The one-line status sits under the row without opening the panel.
+    // The one-line status sits above the panel.
     const status = await screen.findByRole("group", { name: "Support access status" });
     expect(status).toHaveTextContent(/Support access on, admin/);
     expect(status).toHaveTextContent(/3h 1\dm left/);
 
-    await openPanel(user);
+    await openPanel();
 
     expect(await screen.findByText("CS1")).toBeInTheDocument();
     expect(screen.getByText("Admin")).toBeInTheDocument();
@@ -261,10 +269,9 @@ describe("support access on the environments page", () => {
 
   it("says PDS records when access opens and ends, and that the audit log is the customer's", async () => {
     stubApi({ window: { state: "open", level: "readOnly", expiresAt: hoursFromNow(2) } });
-    const user = userEvent.setup();
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
+    renderSupportTab();
 
-    await openPanel(user);
+    await openPanel();
 
     expect(
       await screen.findByText(/PDS records when access opens, extends and ends/),
@@ -281,9 +288,9 @@ describe("support access on the environments page", () => {
       summary: { state: "open", level: "readOnly", expiresAt: hoursFromNow(2) },
     });
     const user = userEvent.setup();
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
+    renderSupportTab();
 
-    await openPanel(user);
+    await openPanel();
     await user.click(await screen.findByRole("button", { name: "End access" }));
 
     const dialog = await screen.findByRole("dialog", { name: "End support access?" });
@@ -313,10 +320,9 @@ describe("support access on the environments page", () => {
     stubApi({
       window: { state: "closed", level: "readOnly", expiresAt: hoursFromNow(-1), closedReason },
     });
-    const user = userEvent.setup();
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
+    renderSupportTab();
 
-    await openPanel(user);
+    await openPanel();
 
     expect(await screen.findByText(message)).toBeInTheDocument();
     // A closed window can be opened again.
@@ -332,10 +338,9 @@ describe("support access on the environments page", () => {
         expiresAt: new Date(Date.now() + 2_000).toISOString(),
       },
     });
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
+    renderSupportTab();
 
-    await openPanel(user);
+    await openPanel();
     expect(await screen.findByText(/Support access is open/)).toBeInTheDocument();
     state.window = state.window && { ...state.window, state: "closed", closedReason: "expired" };
     await vi.advanceTimersByTimeAsync(4_000);
@@ -349,11 +354,10 @@ describe("support access on the environments page", () => {
       window: { state: "open", level: "readOnly", expiresAt: hoursFromNow(2) },
       summary: { state: "open", level: "readOnly", expiresAt: hoursFromNow(2) },
     });
-    const user = userEvent.setup();
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
+    renderSupportTab();
 
     expect(await screen.findByRole("group", { name: "Support access status" })).toBeInTheDocument();
-    await openPanel(user);
+    await openPanel();
 
     expect(await screen.findByText(/Support access is open/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "End access" })).not.toBeInTheDocument();
@@ -362,10 +366,9 @@ describe("support access on the environments page", () => {
 
   it("offers a member who is not an admin no way to open it", async () => {
     stubApi({ role: "user" });
-    const user = userEvent.setup();
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
+    renderSupportTab();
 
-    await openPanel(user);
+    await openPanel();
 
     expect(await screen.findByText(/Support access is off/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open support access" })).not.toBeInTheDocument();
@@ -373,10 +376,9 @@ describe("support access on the environments page", () => {
 
   it("shows nothing for an environment of another Team", async () => {
     stubApi({ readStatus: 404 });
-    const user = userEvent.setup();
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
+    renderSupportTab();
 
-    await openPanel(user);
+    await openPanel();
 
     await waitFor(() =>
       expect(screen.queryByRole("heading", { name: "Support access" })).not.toBeInTheDocument(),
@@ -389,12 +391,11 @@ describe("support access on the environments page", () => {
     const { calls } = stubApi({
       summary: { state: "open", level: "admin", expiresAt: hoursFromNow(3) },
     });
-    renderWithProviders(<AppRoutes />, {
-      route: "/environments",
-      flags: { "support-access": false },
-    });
+    renderSupportTab({ "support-access": false });
 
-    await screen.findByText("spoke-a");
+    expect(
+      await screen.findByRole("tab", { name: "Databases", selected: true }),
+    ).toBeInTheDocument();
 
     expect(screen.queryByRole("tab", { name: "Support access" })).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Support access status" })).not.toBeInTheDocument();
@@ -403,9 +404,10 @@ describe("support access on the environments page", () => {
 
   it("shows no status line when the environment has no active window", async () => {
     stubApi({});
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
+    renderSupportTab();
 
-    await screen.findByText("spoke-a");
+    await openPanel();
+    expect(await screen.findByText(/Support access is off/)).toBeInTheDocument();
 
     expect(screen.queryByRole("group", { name: "Support access status" })).not.toBeInTheDocument();
   });
@@ -413,10 +415,9 @@ describe("support access on the environments page", () => {
   describe("extending an open window", () => {
     it("offers each duration as 'Until N hours from now' and disables those that would not end later", async () => {
       stubApi({ window: { state: "open", level: "readOnly", expiresAt: hoursFromNow(3.2) } });
-      const user = userEvent.setup();
-      renderWithProviders(<AppRoutes />, { route: "/environments" });
+      renderSupportTab();
 
-      await openPanel(user);
+      await openPanel();
       await screen.findByLabelText("Extend access");
 
       expect(optionStates()).toEqual([
@@ -438,9 +439,9 @@ describe("support access on the environments page", () => {
         },
       });
       const user = userEvent.setup();
-      renderWithProviders(<AppRoutes />, { route: "/environments" });
+      renderSupportTab();
 
-      await openPanel(user);
+      await openPanel();
       await user.selectOptions(await screen.findByLabelText("Extend access"), "24");
       await user.click(screen.getByRole("button", { name: "Extend" }));
 
@@ -462,9 +463,9 @@ describe("support access on the environments page", () => {
         window: { state: "open", level: "readOnly", expiresAt: hoursFromNow(3.2) },
       });
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-      renderWithProviders(<AppRoutes />, { route: "/environments" });
+      renderSupportTab();
 
-      await openPanel(user);
+      await openPanel();
       await user.selectOptions(await screen.findByLabelText("Extend access"), "24");
       await user.click(screen.getByRole("button", { name: "Extend" }));
       expect(await screen.findByText(/Extending until/)).toBeInTheDocument();
@@ -483,8 +484,8 @@ describe("support access on the environments page", () => {
     it("shows the refusal the control plane gives", async () => {
       stubApi({ window: { state: "open", level: "readOnly", expiresAt: hoursFromNow(3.2) } });
       const user = userEvent.setup();
-      renderWithProviders(<AppRoutes />, { route: "/environments" });
-      await openPanel(user);
+      renderSupportTab();
+      await openPanel();
       const fetchMock = vi.mocked(fetch);
       const answer = fetchMock.getMockImplementation();
       fetchMock.mockImplementation((input, init) =>
@@ -510,10 +511,9 @@ describe("support access on the environments page", () => {
         role: "user",
         window: { state: "open", level: "readOnly", expiresAt: hoursFromNow(2) },
       });
-      const user = userEvent.setup();
-      renderWithProviders(<AppRoutes />, { route: "/environments" });
+      renderSupportTab();
 
-      await openPanel(user);
+      await openPanel();
 
       expect(await screen.findByText(/Support access is open/)).toBeInTheDocument();
       expect(screen.queryByLabelText("Extend access")).not.toBeInTheDocument();
@@ -521,10 +521,9 @@ describe("support access on the environments page", () => {
 
     it("offers no extension while the window is still starting", async () => {
       stubApi({ window: { state: "opening", level: "readOnly", expiresAt: hoursFromNow(4) } });
-      const user = userEvent.setup();
-      renderWithProviders(<AppRoutes />, { route: "/environments" });
+      renderSupportTab();
 
-      await openPanel(user);
+      await openPanel();
 
       expect(await screen.findByText(/Support access is starting/)).toBeInTheDocument();
       expect(screen.queryByLabelText("Extend access")).not.toBeInTheDocument();
@@ -541,9 +540,9 @@ describe("sharing the address with a support engineer", () => {
       window: { state: "open", level: "readOnly", expiresAt: hoursFromNow(2), shareNote },
     });
     const user = userEvent.setup();
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
+    renderSupportTab();
 
-    await openPanel(user);
+    await openPanel();
 
     expect(
       await screen.findByText(/Private address: pds-1\.tail1234\.ts\.net/),
@@ -554,10 +553,9 @@ describe("sharing the address with a support engineer", () => {
 
   it("shows nothing to share when the control plane gives no text", async () => {
     stubApi({ window: { state: "open", level: "readOnly", expiresAt: hoursFromNow(2) } });
-    const user = userEvent.setup();
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
+    renderSupportTab();
 
-    await openPanel(user);
+    await openPanel();
 
     expect(await screen.findByText(/Support access is open/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Copy details" })).not.toBeInTheDocument();

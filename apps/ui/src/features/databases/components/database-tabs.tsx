@@ -13,7 +13,7 @@ import { findProfile } from "@/features/profiles";
 import { formatRelativeTime, formatTimestamp } from "@/lib/format";
 import type { Backup, Database } from "../types";
 import { BackupsTab } from "./backups-tab";
-import { ConnectCard } from "./connect-card";
+import { ConnectSection } from "./connect-section";
 import { SettingsTab } from "./settings-tab";
 
 /**
@@ -37,10 +37,6 @@ type DatabaseTabsProps = {
   database: Database;
   tab: DatabaseTab;
   onTabChange: (tab: DatabaseTab) => void;
-  /** True once this developer has copied the connection string before. */
-  connectionCopied: boolean;
-  /** Opens the connect dialog, which the page owns. */
-  onConnect: () => void;
   onBackUpNow: () => void;
   /** True while a backup is being started, which is a second or two. */
   backingUp: boolean;
@@ -58,8 +54,6 @@ export function DatabaseTabs({
   database,
   tab,
   onTabChange,
-  connectionCopied,
-  onConnect,
   onBackUpNow,
   backingUp,
   backupEnabled = true,
@@ -101,7 +95,7 @@ export function DatabaseTabs({
       </TabsList>
 
       <TabsContent value="overview">
-        <Overview database={database} connectionCopied={connectionCopied} onConnect={onConnect} />
+        <Overview database={database} />
       </TabsContent>
 
       <TabsContent value="backups">
@@ -146,40 +140,24 @@ function DatabaseActivity({ databaseId }: { databaseId: string }) {
   return <ActivityFeed databaseId={databaseId} live={live} onLiveChange={setLive} />;
 }
 
-type OverviewProps = {
-  database: Database;
-  connectionCopied: boolean;
-  onConnect: () => void;
-};
-
 /**
- * The overview: the connection card, then the details, then the metric minis.
- * The connection card leads until the developer has copied the string once;
- * after that the metrics take the top spot, because the question changes from
- * "how do I connect" to "how is it doing".
+ * The overview: Connect leads, because reaching a new database is the first
+ * thing everyone does with it, then the details, then the metric minis.
  */
-function Overview({ database, connectionCopied, onConnect }: OverviewProps) {
+function Overview({ database }: { database: Database }) {
   const metricsOn = useFeature("metrics");
-
-  const connect = (
-    <div key="connect" data-block="connect">
-      <ConnectCard database={database} onConnect={onConnect} />
-    </div>
-  );
-
-  const metrics = metricsOn ? (
-    <section key="metrics" data-block="metrics">
-      <OverviewMetrics databaseId={database.id} />
-    </section>
-  ) : null;
-
-  const details = <Details key="details" database={database} />;
-
-  const blocks = connectionCopied ? [metrics, connect, details] : [connect, details, metrics];
 
   return (
     <div data-testid="overview-blocks" className="space-y-6">
-      {blocks}
+      <section data-block="connect">
+        <ConnectSection database={database} />
+      </section>
+      <Details database={database} />
+      {metricsOn ? (
+        <section data-block="metrics">
+          <OverviewMetrics databaseId={database.id} />
+        </section>
+      ) : null}
     </div>
   );
 }

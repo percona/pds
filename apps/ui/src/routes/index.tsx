@@ -8,7 +8,6 @@ import { ActivityPage } from "@/pages/activity";
 import { ActivityDetailPage } from "@/pages/activity-detail";
 import { AlertsPage } from "@/pages/alerts";
 import { AwsCleanupPage } from "@/pages/aws-cleanup";
-import { ChatPageRoute } from "@/pages/chat";
 import { ConnectorsPage } from "@/pages/connectors";
 import { EnvironmentsPage } from "@/pages/environments";
 import { ConnectAwsAccountPage } from "@/pages/connect-aws-account";
@@ -23,6 +22,7 @@ import { UpdateEnvironmentPage } from "@/pages/update-environment";
 import { SupportPage } from "@/pages/support";
 import { SupportTicketPage } from "@/pages/support-ticket";
 import { SettingsPage } from "@/pages/settings";
+import { TeamPage } from "@/pages/team";
 import { TeamsPage } from "@/pages/teams";
 import { UsersPage } from "@/pages/users";
 
@@ -195,6 +195,14 @@ export function AppRoutes() {
           }
         />
         <Route
+          path="teams/:name"
+          element={
+            <AdminOnly>
+              <TeamPage />
+            </AdminOnly>
+          }
+        />
+        <Route
           path="users"
           element={
             <AdminOnly>
@@ -208,14 +216,6 @@ export function AppRoutes() {
             <AdminOnly>
               <SettingsPage />
             </AdminOnly>
-          }
-        />
-        <Route
-          path="chat"
-          element={
-            <Surface name="chat">
-              <ChatPageRoute />
-            </Surface>
           }
         />
         <Route

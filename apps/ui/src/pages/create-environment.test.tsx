@@ -1,8 +1,15 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useLocation } from "react-router";
 import { AppRoutes } from "@/routes";
 import { renderWithProviders } from "@/test/utils";
+
+function LocationProbe() {
+  const location = useLocation();
+
+  return <p data-testid="location">{`${location.pathname}${location.search}`}</p>;
+}
 
 function account(overrides: Record<string, unknown> = {}) {
   return {
@@ -76,35 +83,61 @@ async function name(user: ReturnType<typeof userEvent.setup>, value: string) {
 }
 
 describe("Create an environment", () => {
-  it("builds the environment in an AWS account by default, in five steps", async () => {
+  it("builds the environment in an AWS account by default, in four steps", async () => {
     stubApi([account()]);
 
     renderWithProviders(<AppRoutes />, { route: "/environments/new" });
 
     for (const title of [
       "1. Name this environment",
-      "2. Choose how to create it",
-      "3. Choose the AWS account",
-      "4. Choose the region",
-      "5. Create the environment",
+      "2. Choose the AWS account",
+      "3. Choose the region",
+      "4. Review and create",
     ]) {
       expect(await screen.findByRole("heading", { name: title })).toBeInTheDocument();
     }
-    expect(screen.getByRole("link", { name: "Run a command yourself instead" })).toHaveAttribute(
+    const modes = screen.getByRole("navigation", { name: "How to create it" });
+    expect(
+      within(modes).getByRole("link", { name: "PDS creates it in your AWS account" }),
+    ).toHaveAttribute("aria-current", "page");
+    expect(within(modes).getByRole("link", { name: "Run a command yourself" })).toHaveAttribute(
       "href",
       "/environments/new?mode=command",
     );
   });
 
-  it("keeps the command path for someone who runs it themselves", async () => {
-    stubApi([]);
+  it("says what PDS builds and that AWS bills for it before creating", async () => {
+    stubApi([account()]);
+    const user = userEvent.setup();
 
-    renderWithProviders(<AppRoutes />, { route: "/environments/new?mode=command" });
+    renderWithProviders(<AppRoutes />, { route: "/environments/new" });
+
+    expect(
+      await screen.findByText("Choose a connected AWS account to see what PDS will create."),
+    ).toBeInTheDocument();
+    await user.click(await screen.findByRole("radio", { name: /payments/ }));
+
+    const built = screen.getByRole("list", { name: "What PDS builds" });
+    expect(built).toHaveTextContent(/EKS cluster/);
+    expect(built).toHaveTextContent(/S3 bucket for backups/);
+    expect(screen.getByText(/AWS bills you for it until you delete the environment/)).toBeVisible();
+    expect(screen.queryByText(/--local/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/already run/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the command path one switch away, carrying the name", async () => {
+    stubApi([]);
+    const user = userEvent.setup();
+
+    renderWithProviders(<AppRoutes />, { route: "/environments/new" });
+    await name(user, "orders");
+    await user.click(screen.getByRole("link", { name: "Run a command yourself" }));
 
     expect(await screen.findByRole("heading", { name: "2. Run this command" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Environment name")).toHaveValue("orders");
     expect(
-      screen.getByRole("link", { name: "Let PDS create it in your AWS account instead" }),
-    ).toHaveAttribute("href", "/environments/new");
+      screen.getByRole("link", { name: "PDS creates it in your AWS account" }),
+    ).toHaveAttribute("href", "/environments/new?name=orders");
   });
 
   it("offers the command itself when the Team has no AWS account yet", async () => {
@@ -113,10 +146,12 @@ describe("Create an environment", () => {
     renderWithProviders(<AppRoutes />, { route: "/environments/new" });
 
     const step = (
-      await screen.findByRole("heading", { name: "3. Choose the AWS account" })
+      await screen.findByRole("heading", { name: "2. Choose the AWS account" })
     ).closest("section") as HTMLElement;
     expect(await within(step).findByRole("button", { name: "Create command" })).toBeInTheDocument();
-    expect(screen.getByText("Choose an AWS account to pick a region.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Choose a connected AWS account to pick a region."),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create environment" })).toBeDisabled();
   });
 
@@ -153,11 +188,17 @@ describe("Create an environment", () => {
     expect(screen.getByRole("button", { name: "Create command" })).toBeInTheDocument();
   });
 
-  it("creates the environment in the chosen account and region, then shows its progress", async () => {
+  it("creates the environment in the chosen account and region, then opens it to show its progress", async () => {
     const calls = stubApi([account()]);
     const user = userEvent.setup();
 
-    renderWithProviders(<AppRoutes />, { route: "/environments/new" });
+    renderWithProviders(
+      <>
+        <AppRoutes />
+        <LocationProbe />
+      </>,
+      { route: "/environments/new" },
+    );
     await name(user, "orders");
     await user.click(await screen.findByRole("radio", { name: /payments/ }));
     await user.selectOptions(screen.getByLabelText("Region"), "us-east-1");
@@ -170,9 +211,7 @@ describe("Create an environment", () => {
     );
     const post = calls.find((call) => call.path === "/api/cloud-connections/cc_1/environments");
     expect(JSON.parse(String(post?.init?.body))).toEqual({ name: "orders", region: "us-east-1" });
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "Environments" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByTestId("location")).toHaveTextContent("/environments/orders");
   });
 
   it("offers every region for an account that may build anywhere", async () => {
@@ -238,6 +277,6 @@ describe("Create an environment", () => {
     await user.click(screen.getByRole("button", { name: "Create environment" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("This AWS account is not ready");
-    expect(screen.getByRole("heading", { name: "5. Create the environment" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "4. Review and create" })).toBeInTheDocument();
   });
 });

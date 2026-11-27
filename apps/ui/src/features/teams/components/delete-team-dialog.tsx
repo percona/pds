@@ -18,6 +18,7 @@ type DeleteTeamDialogProps = {
   team: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onDeleted?: () => void;
 };
 
 /**
@@ -25,7 +26,7 @@ type DeleteTeamDialogProps = {
  * Team that still has users or environments and says which, and that sentence
  * is shown as it stands.
  */
-export function DeleteTeamDialog({ team, open, onOpenChange }: DeleteTeamDialogProps) {
+export function DeleteTeamDialog({ team, open, onOpenChange, onDeleted }: DeleteTeamDialogProps) {
   const fieldId = useId();
   const [typed, setTyped] = useState("");
   const remove = useDeleteTeam(team);
@@ -63,6 +64,7 @@ export function DeleteTeamDialog({ team, open, onOpenChange }: DeleteTeamDialogP
               onSuccess: () => {
                 toast.success("Team deleted");
                 onOpenChange(false);
+                onDeleted?.();
               },
             });
           }}

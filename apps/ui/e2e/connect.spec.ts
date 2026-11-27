@@ -129,41 +129,32 @@ test("a row opens the detail page and the connection string copies", async ({ pa
     "History",
     "Settings",
   ]);
-  // The connection card leads the overview until the string has been copied.
+  // Connect leads the overview, from a laptop first.
   await expect(page.getByTestId("overview-blocks").locator("> *").first()).toHaveAttribute(
     "data-block",
     "connect",
   );
+  await expect(page.getByRole("button", { name: "From your laptop" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByText(/This database runs on spoke-a/)).toBeVisible();
+  await expect(page.getByText("1. Point kubectl at the Kubernetes cluster")).toBeVisible();
 
   // The password never reaches the screen, only the clipboard.
   await expect(page.getByText(maskedUri).first()).toBeVisible();
   await expect(page.getByText(uri)).toHaveCount(0);
 
-  await page.getByTestId("database-actions").getByRole("button", { name: "Connect" }).click();
-
-  const dialog = page.getByRole("dialog");
-  await expect(dialog.getByText(/This database runs on spoke-a/)).toBeVisible();
-  await expect(dialog.getByText("1. Point kubectl at the Kubernetes cluster")).toBeVisible();
-  await expect(dialog.getByText(/get secret 'orders-dev-app-credentials'/)).toBeVisible();
-  await expect(page.getByText(uri)).toHaveCount(0);
-
-  await dialog.getByRole("button", { name: "Copy connection string" }).click();
+  await page.getByRole("button", { name: "Copy connection string" }).click();
 
   await expect(page.getByText("Connection string copied")).toBeVisible();
   await expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(uri);
+  await expect(page.getByText(uri)).toHaveCount(0);
 
-  await page.keyboard.press("Escape");
-
-  // After the copy the question changes, so metrics take the top spot.
+  // Copying changes nothing about the order: Connect still leads.
   await expect(page.getByTestId("overview-blocks").locator("> *").first()).toHaveAttribute(
     "data-block",
-    "metrics",
-  );
-
-  await page.reload();
-  await expect(page.getByTestId("overview-blocks").locator("> *").first()).toHaveAttribute(
-    "data-block",
-    "metrics",
+    "connect",
   );
 });
 
@@ -257,10 +248,12 @@ for (const theme of ["light", "dark"] as const) {
     await expect(page.getByTestId("metric-mini-cpu")).toHaveAttribute("data-state", "data");
     await page.screenshot({ path: `test-results/database-detail-${theme}.png`, fullPage: true });
 
-    await page.getByTestId("database-actions").getByRole("button", { name: "Connect" }).click();
-    await expect(page.getByRole("dialog").getByText(/This database runs on spoke-a/)).toBeVisible();
-    await page.screenshot({ path: `test-results/connect-dialog-${theme}.png` });
-    await page.getByRole("button", { name: "Close" }).click();
+    await page.getByRole("button", { name: "From your app" }).click();
+    await expect(page.getByText("orders-dev-app-credentials")).toBeVisible();
+    await page.screenshot({ path: `test-results/connect-app-${theme}.png` });
+    await page.getByRole("button", { name: "From an AI agent" }).click();
+    await expect(page.getByText("Connect to orders-dev on spoke-a.")).toBeVisible();
+    await page.screenshot({ path: `test-results/connect-agent-${theme}.png` });
 
     await page.getByRole("tab", { name: "Metrics" }).click();
     await expect(page.getByTestId("metric-panel-cpu")).toBeVisible();

@@ -1,9 +1,8 @@
-import { DatabaseBackup, LifeBuoy, Plug, Scaling, Trash2 } from "lucide-react";
+import { DatabaseBackup, LifeBuoy, Scaling, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Feature } from "@/features/flags";
 import { findProfile } from "@/features/profiles";
-import { connectBlockedReason } from "../connect";
 import { databaseStatus } from "../status";
 import type { Database } from "../types";
 import { EngineIcon, engineLabel } from "./engine-icon";
@@ -11,7 +10,6 @@ import { StatusPill } from "./status-pill";
 
 type DatabaseHeaderProps = {
   database: Database;
-  onConnect: () => void;
   onScale: () => void;
   onBackUpNow: () => void;
   /** True while a backup is being started, which is a second or two. */
@@ -28,13 +26,12 @@ type DatabaseHeaderProps = {
 };
 
 /**
- * The detail header. Connect leads as the primary; Delete is last and quiet, red
- * in its label only, because the red fill belongs to the confirm button inside
- * the dialog it opens.
+ * The detail header. Connect is not here: it leads the Overview. Delete is
+ * last and quiet, red in its label only, because the red fill belongs to the
+ * confirm button inside the dialog it opens.
  */
 export function DatabaseHeader({
   database,
-  onConnect,
   onScale,
   onBackUpNow,
   backingUp,
@@ -44,10 +41,6 @@ export function DatabaseHeader({
 }: DatabaseHeaderProps) {
   const status = databaseStatus(database);
   const profile = findProfile(database.profile);
-  // A disabled control takes no hover and no focus, so a native tooltip on it
-  // would never be read. The button only goes off; the connect card carries
-  // the sentence that says why.
-  const blocked = connectBlockedReason(database);
 
   return (
     <header
@@ -69,10 +62,6 @@ export function DatabaseHeader({
       </div>
 
       <div data-testid="database-actions" className="flex flex-wrap items-center gap-2">
-        <Button disabled={Boolean(blocked)} onClick={onConnect}>
-          <Plug strokeWidth={1.5} aria-hidden="true" />
-          Connect
-        </Button>
         <Button variant="outline" onClick={onScale}>
           <Scaling strokeWidth={1.5} aria-hidden="true" />
           Scale

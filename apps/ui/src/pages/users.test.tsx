@@ -27,7 +27,7 @@ type Adapter = {
   invitations?: Invitation[];
   session?: Record<string, unknown>;
   /** Answers a write, or returns undefined to accept it. */
-  write?: (method: string, path: string) => Response | undefined;
+  write?: (method: string, path: string, body: unknown) => Response | undefined;
 };
 
 const admin = {
@@ -92,8 +92,9 @@ function stubAdapter(options: Adapter = {}) {
         return Promise.resolve(jsonResponse({ invitations: options.invitations ?? [pending] }));
       }
       if (method !== "GET") {
-        calls.push({ method, path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-        const answer = options.write?.(method, path);
+        const body: unknown = init?.body ? JSON.parse(String(init.body)) : undefined;
+        calls.push({ method, path, body });
+        const answer = options.write?.(method, path, body);
         if (answer) {
           return Promise.resolve(answer);
         }
@@ -141,7 +142,7 @@ describe("Users screen", () => {
     renderWithProviders(<AppRoutes />, { route: "/users" });
 
     await userEvent.click(await screen.findByRole("button", { name: "Invite people" }));
-    await userEvent.type(await screen.findByLabelText("Email"), "linus@example.com");
+    await userEvent.type(await screen.findByLabelText("Email addresses"), "linus@example.com");
     await userEvent.selectOptions(screen.getByLabelText("Team"), "payments");
     await userEvent.selectOptions(screen.getByLabelText("Role"), "admin");
     await userEvent.click(screen.getByRole("button", { name: "Send invite" }));
@@ -168,7 +169,7 @@ describe("Users screen", () => {
     renderWithProviders(<AppRoutes />, { route: "/users" });
 
     await userEvent.click(await screen.findByRole("button", { name: "Invite people" }));
-    await userEvent.type(await screen.findByLabelText("Email"), "linus@example.com");
+    await userEvent.type(await screen.findByLabelText("Email addresses"), "linus@example.com");
     await userEvent.click(screen.getByRole("button", { name: "Send invite" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent(
@@ -183,9 +184,10 @@ describe("Users screen", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Invite people" }));
     const send = await screen.findByRole("button", { name: "Send invite" });
     expect(send).toBeDisabled();
-    await userEvent.type(screen.getByLabelText("Email"), "linus");
+    await userEvent.type(screen.getByLabelText("Email addresses"), "linus");
     expect(send).toBeDisabled();
-    await userEvent.type(screen.getByLabelText("Email"), "@example.com");
+    expect(await screen.findByText("linus is not an email address.")).toBeVisible();
+    await userEvent.type(screen.getByLabelText("Email addresses"), "@example.com");
     expect(send).toBeEnabled();
   });
 
@@ -203,10 +205,10 @@ describe("Users screen", () => {
     await userEvent.selectOptions(await screen.findByLabelText("Role"), "admin");
     await userEvent.click(screen.getByLabelText("Anyone with the link can join"));
 
-    expect(screen.getByLabelText("Email")).toBeDisabled();
+    expect(screen.getByLabelText("Email addresses")).toBeDisabled();
     expect(screen.getByLabelText("Role")).toHaveValue("user");
     expect(screen.getByLabelText("Role")).toBeDisabled();
-    await userEvent.click(screen.getByRole("button", { name: "Send invite" }));
+    await userEvent.click(screen.getByRole("button", { name: "Create link" }));
 
     await waitFor(() =>
       expect(calls).toEqual([
@@ -234,12 +236,105 @@ describe("Users screen", () => {
     renderWithProviders(<AppRoutes />, { route: "/users" });
 
     await userEvent.click(await screen.findByRole("button", { name: "Invite people" }));
-    await userEvent.type(await screen.findByLabelText("Email"), "grace@example.com");
+    await userEvent.type(await screen.findByLabelText("Email addresses"), "grace@example.com");
     await userEvent.click(screen.getByRole("button", { name: "Send invite" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
+    const dialog = screen.getByRole("dialog", { name: "Invite people" });
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
       "That address already has a pending invitation. Resend or revoke it.",
     );
+  });
+
+  it("sends one invite per address and lists the one that was refused", async () => {
+    const calls = stubAdapter({
+      write: (_method, _path, body) => {
+        const email = (body as { email: string }).email;
+        if (email === "grace@example.com") {
+          return jsonResponse(
+            {
+              code: "ErrConflict",
+              message: "That address already has a pending invitation. Resend or revoke it.",
+            },
+            409,
+          );
+        }
+
+        return jsonResponse(
+          { ...created, email, link: `https://pds.example/claim?token=${email}` },
+          201,
+        );
+      },
+    });
+    renderWithProviders(<AppRoutes />, { route: "/users" });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Invite people" }));
+    await userEvent.type(
+      await screen.findByLabelText("Email addresses"),
+      "linus@example.com, grace@example.com{enter}ken@example.com linus@example.com",
+    );
+    const addresses = screen.getByRole("list", { name: "Addresses to invite" });
+    expect(within(addresses).getAllByRole("listitem")).toHaveLength(3);
+    await userEvent.click(screen.getByRole("button", { name: "Send 3 invites" }));
+
+    await waitFor(() => expect(calls).toHaveLength(3));
+    expect(calls.map((call) => (call.body as { email: string }).email)).toEqual([
+      "linus@example.com",
+      "grace@example.com",
+      "ken@example.com",
+    ]);
+    const links = await screen.findByRole("status");
+    expect(within(links).getByText("Invite sent to linus@example.com.")).toBeVisible();
+    expect(within(links).getByText("Invite sent to ken@example.com.")).toBeVisible();
+    expect(links).toHaveTextContent(
+      "grace@example.com. Not sent: That address already has a pending invitation. Resend or revoke it.",
+    );
+    expect(within(links).getAllByRole("button", { name: "Copy link" })).toHaveLength(2);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("keeps each link until it is dismissed", async () => {
+    stubAdapter({
+      write: (_method, _path, body) => {
+        const email = (body as { email: string }).email;
+
+        return jsonResponse(
+          { ...created, email, link: `https://pds.example/claim?token=${email}` },
+          201,
+        );
+      },
+    });
+    renderWithProviders(<AppRoutes />, { route: "/users" });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Invite people" }));
+    await userEvent.type(
+      await screen.findByLabelText("Email addresses"),
+      "linus@example.com ken@example.com",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Send 2 invites" }));
+
+    const links = await screen.findByRole("status");
+    await userEvent.click(
+      within(links).getByRole("button", { name: "Dismiss the invite for linus@example.com" }),
+    );
+    expect(within(links).queryByText("Invite sent to linus@example.com.")).not.toBeInTheDocument();
+    expect(within(links).getByText("Invite sent to ken@example.com.")).toBeVisible();
+    await userEvent.click(
+      within(links).getByRole("button", { name: "Dismiss the invite for ken@example.com" }),
+    );
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("opens the claim screen of a new link in a new tab", async () => {
+    stubAdapter();
+    renderWithProviders(<AppRoutes />, { route: "/users" });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Invite people" }));
+    await userEvent.type(await screen.findByLabelText("Email addresses"), "linus@example.com");
+    await userEvent.click(screen.getByRole("button", { name: "Send invite" }));
+
+    const open = await screen.findByRole("link", { name: "Open as the invited person" });
+    expect(open).toHaveAttribute("href", "/claim?token=fresh-token");
+    expect(open).toHaveAttribute("target", "_blank");
   });
 
   it("resends an invitation and shows its new link", async () => {
@@ -269,6 +364,78 @@ describe("Users screen", () => {
       expect(calls).toEqual([{ method: "DELETE", path: "/api/invitations/7", body: undefined }]),
     );
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("moves a user to another team", async () => {
+    const calls = stubAdapter();
+    renderWithProviders(<AppRoutes />, { route: "/users" });
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Move Grace Hopper to another team" }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Move Grace Hopper" });
+    expect(within(dialog).getByLabelText("New team")).toHaveValue("default");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Move" }));
+
+    await waitFor(() =>
+      expect(calls).toEqual([{ method: "PATCH", path: "/api/users/2", body: { team: "default" } }]),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("changes a role and keeps save off until it differs", async () => {
+    const calls = stubAdapter();
+    renderWithProviders(<AppRoutes />, { route: "/users" });
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Change the role of Grace Hopper" }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Change the role of Grace Hopper" });
+    const save = within(dialog).getByRole("button", { name: "Save role" });
+    expect(save).toBeDisabled();
+    await userEvent.click(within(dialog).getByRole("radio", { name: /Admin/ }));
+    await userEvent.click(save);
+
+    await waitFor(() =>
+      expect(calls).toEqual([{ method: "PATCH", path: "/api/users/2", body: { role: "admin" } }]),
+    );
+  });
+
+  it("shows the control plane's refusal for the last admin as it stands", async () => {
+    stubAdapter({
+      write: () =>
+        jsonResponse(
+          { code: "ErrConflict", message: "An organization needs at least one admin." },
+          409,
+        ),
+    });
+    renderWithProviders(<AppRoutes />, { route: "/users" });
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Change the role of Ada Lovelace" }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Change the role of Ada Lovelace" });
+    await userEvent.click(within(dialog).getByRole("radio", { name: /User/ }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "An organization needs at least one admin.",
+    );
+  });
+
+  it("removes a user only after it is confirmed", async () => {
+    const calls = stubAdapter();
+    renderWithProviders(<AppRoutes />, { route: "/users" });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Remove Grace Hopper" }));
+    const dialog = await screen.findByRole("dialog", { name: "Remove Grace Hopper" });
+    expect(dialog).toHaveTextContent("Grace Hopper loses access to Acme on their next request.");
+    expect(calls).toEqual([]);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+
+    await waitFor(() =>
+      expect(calls).toEqual([{ method: "DELETE", path: "/api/users/2", body: undefined }]),
+    );
   });
 
   it("shows an empty state when nothing is pending", async () => {
