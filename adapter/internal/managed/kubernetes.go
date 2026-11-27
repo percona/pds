@@ -18,7 +18,7 @@ import (
 // KindKubernetes is the run kind that updates an environment's stack: the
 // template revision this release embeds and, when asked, the next Kubernetes
 // minor version of the cluster and its node group.
-const KindKubernetes = "upgrade_kubernetes"
+const KindKubernetes = store.KindUpgradeKubernetes
 
 const stepUpdateStack = "update-stack"
 

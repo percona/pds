@@ -11,7 +11,8 @@ import (
 )
 
 // Run statuses. A run is unfinished while it is queued, running, paused or
-// failed: a failed run still holds its environment until Retry or Delete.
+// failed: a failed run still holds its environment until Retry or Delete, except
+// a failed upgrade, which the next run supersedes.
 const (
 	RunQueued    = "queued"
 	RunRunning   = "running"
@@ -32,6 +33,13 @@ const (
 // KindDelete is the run kind that may start beside an unfinished run of its
 // environment, and that preempts it.
 const KindDelete = "delete"
+
+// The upgrade kinds. A failed run of one of them leaves the environment as it
+// was and ends where a person decides, so the next run supersedes it.
+const (
+	KindUpgradePDS        = "upgrade_pds"
+	KindUpgradeKubernetes = "upgrade_kubernetes"
+)
 
 const unfinished = "status IN ('queued','running','paused','failed')"
 
@@ -154,6 +162,8 @@ func lockEnvironment(tx *gorm.DB, team uint, environment string) error {
 
 // Start queues a run with its steps. Delete is the one kind that may start while
 // another run is unfinished: it cancels what is idle and flags what is running.
+// Any other kind starts over a failed upgrade run, which it cancels, and is
+// refused while anything else is unfinished.
 func (p *Provisioning) Start(ctx context.Context, team uint, environment, kind string, steps []string, now time.Time) (ProvisioningRun, error) {
 	return p.StartWith(ctx, team, environment, kind, steps, "", now)
 }
@@ -181,6 +191,10 @@ func (p *Provisioning) StartWith(ctx context.Context, team uint, environment, ki
 				return err
 			}
 		} else {
+			if err := scope.Session(&gorm.Session{}).Where("status = 'failed' AND kind IN ?", []string{KindUpgradePDS, KindUpgradeKubernetes}).
+				Updates(map[string]any{"status": RunCancelled, "finished_at": now, "updated_at": now, "lease_owner": ""}).Error; err != nil {
+				return err
+			}
 			var open int64
 			if err := scope.Session(&gorm.Session{}).Where(unfinished).Count(&open).Error; err != nil {
 				return err
@@ -214,12 +228,12 @@ func (p *Provisioning) StartWith(ctx context.Context, team uint, environment, ki
 	return run, nil
 }
 
-// Unfinished reports whether the environment has a run in hand: queued, running,
-// paused or failed.
-func (p *Provisioning) Unfinished(ctx context.Context, team uint, environment string) (bool, error) {
+// InProgress reports whether a run of the environment is queued, running or
+// paused, so something is changing it. A failed run changes nothing.
+func (p *Provisioning) InProgress(ctx context.Context, team uint, environment string) (bool, error) {
 	var open int64
 	err := p.db.WithContext(ctx).Model(&ProvisioningRun{}).
-		Where("team_id = ? AND environment = ? AND "+unfinished, team, environment).Count(&open).Error
+		Where("team_id = ? AND environment = ? AND status IN ('queued','running','paused')", team, environment).Count(&open).Error
 	if err != nil {
 		return false, scrub(err)
 	}
