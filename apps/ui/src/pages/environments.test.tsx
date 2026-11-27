@@ -67,9 +67,9 @@ describe("EnvironmentsPage", () => {
     });
     const user = userEvent.setup();
 
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
+    renderWithProviders(<AppRoutes />, { route: "/environments/spoke-a" });
 
-    await user.click(await screen.findByRole("button", { name: "Monitoring" }));
+    await user.click(await screen.findByRole("tab", { name: "Monitoring" }));
 
     expect(await screen.findByLabelText("Storage (GiB)")).toHaveValue(5);
     expect(screen.getByText(/get secret pmm-secret/)).toBeInTheDocument();
@@ -179,7 +179,7 @@ describe("EnvironmentsPage", () => {
 
     await userEvent.click(await screen.findByRole("link", { name: /spoke-a/ }));
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Databases" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "spoke-a" })).toBeInTheDocument();
     expect(screen.getByText("MySQL or PostgreSQL on spoke-a.")).toBeInTheDocument();
     expect(screen.getByText("orders-dev")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Create database" })).toHaveAttribute(
@@ -222,7 +222,7 @@ describe("EnvironmentsPage", () => {
 
     renderWithProviders(<AppRoutes />, { route: "/environments/spoke-a" });
 
-    await screen.findByRole("heading", { level: 1, name: "Databases" });
+    await screen.findByRole("heading", { level: 1, name: "spoke-a" });
 
     await waitFor(() =>
       expect(
@@ -309,7 +309,7 @@ describe("connections on the hub", () => {
 });
 
 describe("home in hub mode", () => {
-  it("sends the hub home to the environment list", async () => {
+  it("shows the setup checklist on home when there are no environments", async () => {
     stubApi((path) => {
       if (path === "/api/environments") {
         return { hub: true, environments: [] };
@@ -320,9 +320,8 @@ describe("home in hub mode", () => {
 
     renderWithProviders(<AppRoutes />, { route: "/" });
 
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "Environments" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Home" })).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Setup progress" })).toBeInTheDocument();
   });
 
   it("reports a failed environment read on the home page", async () => {
@@ -361,7 +360,7 @@ describe("home in hub mode", () => {
     renderWithProviders(<AppRoutes />, { route: "/" });
 
     expect(await screen.findByText("The environment list could not be read")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 1, name: "Environments" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Home" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { level: 1, name: "Databases" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Create database" })).not.toBeInTheDocument();
   });
@@ -510,9 +509,9 @@ describe("Disconnecting an environment", () => {
       }),
     );
 
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
+    renderWithProviders(<AppRoutes />, { route: "/environments/spoke-typo" });
 
-    await screen.findByRole("button", { name: "Disconnect" });
+    await userEvent.click(await screen.findByRole("tab", { name: "Settings" }));
     expect(
       screen.queryByRole("link", { name: "Continue with OpenEverest" }),
     ).not.toBeInTheDocument();
@@ -535,7 +534,9 @@ describe("Disconnecting an environment", () => {
     );
     expect(deletes).toHaveLength(0);
     expect(screen.queryByLabelText("Hub operator token")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove" })).toBeDisabled();
 
+    await userEvent.type(screen.getByLabelText("Environment name"), "spoke-typo");
     await userEvent.click(screen.getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(deletes).toEqual(["/api/environments/spoke-typo"]));
 
@@ -563,22 +564,23 @@ describe("Updating an environment", () => {
       },
     ]);
 
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
+    renderWithProviders(<AppRoutes />, { route: "/environments/spoke-a" });
 
-    const links = await screen.findAllByRole("link", { name: "Update" });
-    expect(links.map((link) => link.getAttribute("href"))).toEqual([
+    await userEvent.click(await screen.findByRole("tab", { name: "Settings" }));
+    expect(screen.getByRole("link", { name: "Update" })).toHaveAttribute(
+      "href",
       "/environments/spoke-a/update",
-      "/environments/spoke-quiet/update",
-    ]);
-    expect(screen.getAllByRole("button", { name: "Disconnect" })).toHaveLength(2);
+    );
+    expect(screen.getByRole("button", { name: "Disconnect" })).toBeInTheDocument();
   });
 
   it("does not offer Update on an environment that never connected", async () => {
     stubList([{ name: "spoke-joining", status: "unreachable" }]);
 
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
+    renderWithProviders(<AppRoutes />, { route: "/environments/spoke-joining" });
 
-    await screen.findByRole("button", { name: "Disconnect" });
+    await userEvent.click(await screen.findByRole("tab", { name: "Settings" }));
+    expect(screen.getByRole("button", { name: "Disconnect" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Update" })).not.toBeInTheDocument();
   });
 
@@ -588,13 +590,13 @@ describe("Updating an environment", () => {
       { name: "prod", team: "beta", status: "connected", lastSeen: new Date().toISOString() },
     ]);
 
-    renderWithProviders(<AppRoutes />, { route: "/environments" });
+    renderWithProviders(<AppRoutes />, { route: "/environments/prod" });
 
-    const links = await screen.findAllByRole("link", { name: "Update" });
-    expect(links.map((link) => link.getAttribute("href"))).toEqual([
+    await userEvent.click(await screen.findByRole("tab", { name: "Settings" }));
+    expect(screen.getByRole("link", { name: "Update" })).toHaveAttribute(
+      "href",
       "/environments/prod/update?team=alpha",
-      "/environments/prod/update?team=beta",
-    ]);
+    );
   });
 });
 
@@ -660,6 +662,8 @@ describe("EnvironmentsPage managed environments", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Creating network and Kubernetes cluster")).toBeInTheDocument();
     expect(screen.getByText("Finishing")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("link", { name: /orders/ }));
+    await userEvent.click(await screen.findByRole("tab", { name: "Settings" }));
     expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Disconnect" })).not.toBeInTheDocument();
     // There is nothing to monitor or open support on until the environment exists.
@@ -723,7 +727,8 @@ describe("EnvironmentsPage managed environments", () => {
     expect(await screen.findByText("Update available")).toBeInTheDocument();
     expect(screen.getByText("Changed outside PDS")).toBeInTheDocument();
     expect(screen.queryByText("PDS 1.5.0 is available.")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Updates" }));
+    await user.click(screen.getByRole("link", { name: /orders/ }));
+    await user.click(await screen.findByRole("tab", { name: "Updates" }));
 
     expect(await screen.findByText("PDS 1.5.0 is available.")).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Changed outside PDS" })).toHaveTextContent(

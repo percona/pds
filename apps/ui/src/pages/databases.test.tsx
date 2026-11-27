@@ -71,7 +71,7 @@ describe("DatabasesPage", () => {
     renderWithProviders(<AppRoutes />, { route: "/environments/spoke-a" });
 
     expect(await screen.findByText("orders-dev")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 1, name: "Databases" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "spoke-a" })).toBeInTheDocument();
     expect(screen.getByText("MySQL or PostgreSQL on spoke-a.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Create database" })).toHaveAttribute(
       "href",

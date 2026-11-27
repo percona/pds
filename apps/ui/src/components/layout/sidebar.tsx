@@ -7,6 +7,7 @@ import {
   CircleAlert,
   LifeBuoy,
   PanelLeftClose,
+  Plug,
   PanelLeftOpen,
   ScrollText,
   Server,
@@ -44,6 +45,7 @@ const alertsItem: NavItem = { to: "/alerts", label: "Alerts", icon: Bell };
 const activityItem: NavItem = { to: "/activity", label: "Activity", icon: ScrollText };
 const supportItem: NavItem = { to: "/support", label: "Support", icon: LifeBuoy };
 const agentsItem: NavItem = { to: "/agents", label: "AI agents", icon: Bot };
+const connectorsItem: NavItem = { to: "/connectors", label: "Connectors", icon: Plug };
 const teamsItem: NavItem = { to: "/teams", label: "Teams", icon: Users };
 const usersItem: NavItem = { to: "/users", label: "Users", icon: UserPlus };
 const settingsItem: NavItem = { to: "/settings", label: "Settings", icon: Settings };
@@ -80,6 +82,7 @@ export function Sidebar({
   const activityOn = useFeature("activity");
   const supportOn = useFeature("support");
   const mcpOn = useFeature("mcp");
+  const connectionsOn = useFeature("connections");
   const admin = useIsAdmin();
   const { rail, phone, closeDrawer } = useSidebarPreference();
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -89,6 +92,7 @@ export function Sidebar({
     ...(environmentsOn ? [environmentsItem] : []),
     alertsItem,
     ...(mcpOn ? [agentsItem] : []),
+    ...(connectionsOn ? [connectorsItem] : []),
     ...(activityOn && activity.connected && !activity.checking ? [activityItem] : []),
     ...(supportOn && support.connected && !support.checking ? [supportItem] : []),
   ];

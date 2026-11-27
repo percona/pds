@@ -28,6 +28,7 @@ export const topLevelPaths = [
   "/support",
   "/chat",
   "/agents",
+  "/connectors",
   "/teams",
   "/users",
   "/settings",

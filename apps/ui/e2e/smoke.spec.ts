@@ -1,9 +1,9 @@
 import { expect, test } from "./fixtures";
 
-test("the app loads the environments page", async ({ page }) => {
+test("the app loads home", async ({ page }) => {
   await page.goto("./");
 
-  await expect(page.getByRole("heading", { level: 1, name: "Environments" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
   await expect(page.getByTestId("sidebar").getByText("PDS", { exact: true })).toBeVisible();
 });
 

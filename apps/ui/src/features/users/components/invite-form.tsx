@@ -137,19 +137,23 @@ export function InviteForm({ onIssued }: InviteFormProps) {
         </Field>
       </div>
 
-      <div className="flex items-start gap-2">
+      <div
+        className="flex items-start gap-2"
+        onPointerDown={(event) => event.stopPropagation()}
+      >
         <input
           id={`${fieldId}-any`}
           type="checkbox"
           className="mt-0.5 size-4 accent-primary"
           disabled={invite.isPending}
-          {...register("anyEmail", {
-            onChange: (event: { target: { checked: boolean } }) => {
-              if (event.target.checked) {
-                setValue("role", "user");
-              }
-            },
-          })}
+          checked={anyEmail}
+          onChange={(event) => {
+            const next = event.target.checked;
+            setValue("anyEmail", next, { shouldValidate: true });
+            if (next) {
+              setValue("role", "user", { shouldValidate: true });
+            }
+          }}
         />
         <div className="space-y-0.5">
           <Label htmlFor={`${fieldId}-any`}>Anyone with the link can join</Label>

@@ -9,6 +9,7 @@ import { ActivityDetailPage } from "@/pages/activity-detail";
 import { AlertsPage } from "@/pages/alerts";
 import { AwsCleanupPage } from "@/pages/aws-cleanup";
 import { ChatPageRoute } from "@/pages/chat";
+import { ConnectorsPage } from "@/pages/connectors";
 import { EnvironmentsPage } from "@/pages/environments";
 import { ConnectAwsAccountPage } from "@/pages/connect-aws-account";
 import { CreateEnvironmentPage } from "@/pages/create-environment";
@@ -161,6 +162,14 @@ export function AppRoutes() {
           }
         />
         <Route path="alerts" element={<AlertsPage />} />
+        <Route
+          path="connectors"
+          element={
+            <Surface name="connections">
+              <ConnectorsPage />
+            </Surface>
+          }
+        />
         <Route
           path="support"
           element={

@@ -159,6 +159,7 @@ describe("AppShell", () => {
       "Environments",
       "Alerts",
       "AI agents",
+      "Connectors",
       "Activity",
       "Support",
     ]);

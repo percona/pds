@@ -176,7 +176,7 @@ for (const theme of ["light", "dark"] as const) {
     await page.screenshot({ path: `test-results/environments-new-${theme}.png`, fullPage: true });
 
     await page.goto("environments/spoke-a");
-    await expect(page.getByRole("heading", { level: 1, name: "Databases" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "spoke-a" })).toBeVisible();
     await page.screenshot({
       path: `test-results/environment-databases-${theme}.png`,
       fullPage: true,
@@ -204,11 +204,10 @@ for (const theme of ["light", "dark"] as const) {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.setViewportSize({ width: 1440, height: 900 });
 
-    await page.goto("environments");
-    // A joining environment has nothing to update, so only the other two offer it.
-    await expect(page.getByRole("link", { name: "Update" })).toHaveCount(2);
+    await page.goto("environments/spoke-a");
+    await page.getByRole("tab", { name: "Settings" }).click();
     await page.screenshot({ path: `test-results/environments-update-row-${theme}.png` });
-    await page.getByRole("link", { name: "Update" }).first().click();
+    await page.getByRole("link", { name: "Update" }).click();
 
     await expect(page.getByRole("heading", { level: 1, name: "Update spoke-a" })).toBeVisible();
     await expect(page.getByText(/not a tested upgrade path/)).toBeVisible();
@@ -227,8 +226,9 @@ for (const theme of ["light", "dark"] as const) {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.setViewportSize({ width: 1440, height: 900 });
 
-    await page.goto("environments");
-    await page.getByRole("button", { name: "Disconnect" }).first().click();
+    await page.goto("environments/spoke-a");
+    await page.getByRole("tab", { name: "Settings" }).click();
+    await page.getByRole("button", { name: "Disconnect" }).click();
 
     await expect(page.getByRole("link", { name: "View delete command" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Continue with OpenEverest" })).toBeVisible();
@@ -240,9 +240,10 @@ for (const theme of ["light", "dark"] as const) {
 test("the disconnect panel offers the hand-over beside the delete command", async ({ page }) => {
   await stubEnvironments(page);
 
-  await page.goto("environments");
+  await page.goto("environments/spoke-a");
+  await page.getByRole("tab", { name: "Settings" }).click();
   await expect(page.getByRole("link", { name: "Continue with OpenEverest" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Disconnect" }).first().click();
+  await page.getByRole("button", { name: "Disconnect" }).click();
 
   await expect(page.getByRole("link", { name: "View delete command" })).toBeVisible();
   await page.getByRole("link", { name: "Continue with OpenEverest" }).click();

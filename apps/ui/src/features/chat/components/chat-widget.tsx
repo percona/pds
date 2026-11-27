@@ -526,7 +526,7 @@ export function ChatWidget() {
             className="flex h-[32rem] w-[24rem] max-h-[calc(100vh-5rem)] max-w-[calc(100vw-3rem)] flex-col rounded-lg border border-border bg-card shadow-lg"
           >
             <header className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
-              <h2 className="text-base font-semibold">Chat</h2>
+              <h2 className="text-base font-semibold">Ask PDS</h2>
               <div className="flex items-center gap-1">
                 {configuredProviders.length > 0 ? (
                   <>

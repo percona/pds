@@ -22,6 +22,7 @@ export { ProvisioningPanel } from "./provisioning-panel";
 export { LifecyclePanel } from "./lifecycle-panel";
 export { LostPanel } from "./lost-panel";
 export { ManagedDeleteDialog } from "./managed-delete-dialog";
+export { DisconnectDialog } from "./disconnect-dialog";
 export { lifecycleNotes, managedPill } from "./managed-state";
 export { MonitoringPanel } from "./monitoring-panel";
 export { awsCleanupPath, joinDatabaseNamespace, joinOwnershipTag } from "./aws-cleanup";

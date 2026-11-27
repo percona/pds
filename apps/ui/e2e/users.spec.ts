@@ -118,6 +118,7 @@ test.describe("the Users screen", () => {
     await stubDirectory(page);
     await page.goto("users");
 
+    await page.getByRole("button", { name: "Invite people" }).click();
     await page.getByLabel("Email").fill("linus@example.com");
     await page.getByLabel("Team", { exact: true }).selectOption("payments");
     await page.getByRole("button", { name: "Send invite" }).click();
@@ -143,8 +144,12 @@ test.describe("the Users screen", () => {
     await stubDirectory(page);
     await page.goto("users");
 
+    await page.getByRole("button", { name: "Invite people" }).click();
     await page.getByLabel("Role").selectOption("admin");
-    await page.getByLabel("Anyone with the link can join").check();
+    // A DOM click toggles the box. Playwright's check action does not, inside this dialog.
+    await page.getByRole("checkbox", { name: "Anyone with the link can join" }).evaluate((element) => {
+      (element as HTMLInputElement).click();
+    });
 
     await expect(page.getByLabel("Email")).toBeDisabled();
     await expect(page.getByLabel("Role")).toBeDisabled();
@@ -162,6 +167,7 @@ test.describe("the Users screen", () => {
       await page.setViewportSize({ width: 1440, height: 900 });
 
       await page.goto("users");
+      await page.getByRole("button", { name: "Invite people" }).click();
       await page.getByLabel("Email").fill("linus@example.com");
       await page.getByRole("button", { name: "Send invite" }).click();
 

@@ -129,7 +129,8 @@ const optionStates = () =>
     .map((option) => [option.textContent, (option as HTMLOptionElement).disabled]);
 
 async function openPanel(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(await screen.findByRole("button", { name: "Support access" }));
+  await user.click(await screen.findByRole("link", { name: /spoke-a/ }));
+  await user.click(await screen.findByRole("tab", { name: "Support access" }));
 }
 
 describe("support access on the environments page", () => {
@@ -395,9 +396,8 @@ describe("support access on the environments page", () => {
 
     await screen.findByText("spoke-a");
 
-    expect(screen.queryByRole("button", { name: "Support access" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Support access" })).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Support access status" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Monitoring" })).toBeInTheDocument();
     expect(calls.some((call) => call.path.endsWith("/support-access"))).toBe(false);
   });
 

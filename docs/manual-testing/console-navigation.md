@@ -32,6 +32,8 @@ npm -w @pds/ui run build
 | Click Ask PDS | The chat panel opens over the current page. |
 | Switch theme, then repeat the collapsed rail and the phone drawer | Light and dark use the same layout. Purple stays the only accent. |
 
+Home is the checklist until a database exists, then the counts, what needs attention, and recent activity. An environment row is a summary. Monitoring, support access, updates, and disconnect or delete are tabs on the environment. Connectors is its own page. Users leads with pending invites, and Invite people is a dialog. Activity names invitations and support access.
+
 ## Left for a later change
 
-Brand marks for MySQL, PostgreSQL, Anthropic, Claude, Cursor, ServiceNow, and MCP stay on the generic icons. The design lock allows only Lucide icons, and each brand's usage rules have to be checked before a mark can ship.
+Brand marks for MySQL, PostgreSQL, Anthropic, Claude, Cursor, ServiceNow, and MCP stay on the generic icons. The design lock allows only Lucide icons, and each brand's usage rules have to be checked before a mark can ship. A price before creating an environment, and moving an environment to another team, are not available from the control plane.

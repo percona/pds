@@ -127,7 +127,7 @@ test("a confirmed delete takes the database off the list the page lands on", asy
   await dialog.getByRole("button", { name: "Delete" }).click();
 
   await expect(page.getByText("Database deleted")).toBeVisible();
-  await expect(page.getByRole("heading", { level: 1, name: "Databases" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "spoke-a" })).toBeVisible();
   await expect(page.getByText("No databases yet")).toBeVisible();
   await expect(page.getByText("orders-prod")).toBeHidden();
 });

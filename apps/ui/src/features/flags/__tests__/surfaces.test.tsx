@@ -164,7 +164,7 @@ describe("navigation", () => {
       within(nav)
         .getAllByRole("link")
         .map((link) => link.textContent?.trim()),
-    ).toEqual(["Environments", "Alerts", "AI agents", "Activity", "Support"]);
+    ).toEqual(["Environments", "Alerts", "AI agents", "Connectors", "Activity", "Support"]);
   });
 });
 
@@ -224,7 +224,7 @@ describe("hub overlay", () => {
       within(nav)
         .getAllByRole("link")
         .map((link) => link.textContent?.trim()),
-    ).toEqual(["Environments", "Alerts", "AI agents", "Activity", "Support"]);
+    ).toEqual(["Environments", "Alerts", "AI agents", "Connectors", "Activity", "Support"]);
     expect(screen.queryByRole("link", { name: "Databases" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Ask PDS" })).toBeInTheDocument();
   });

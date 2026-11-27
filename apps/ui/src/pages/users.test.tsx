@@ -140,6 +140,7 @@ describe("Users screen", () => {
     const calls = stubAdapter();
     renderWithProviders(<AppRoutes />, { route: "/users" });
 
+    await userEvent.click(await screen.findByRole("button", { name: "Invite people" }));
     await userEvent.type(await screen.findByLabelText("Email"), "linus@example.com");
     await userEvent.selectOptions(screen.getByLabelText("Team"), "payments");
     await userEvent.selectOptions(screen.getByLabelText("Role"), "admin");
@@ -166,6 +167,7 @@ describe("Users screen", () => {
     });
     renderWithProviders(<AppRoutes />, { route: "/users" });
 
+    await userEvent.click(await screen.findByRole("button", { name: "Invite people" }));
     await userEvent.type(await screen.findByLabelText("Email"), "linus@example.com");
     await userEvent.click(screen.getByRole("button", { name: "Send invite" }));
 
@@ -178,6 +180,7 @@ describe("Users screen", () => {
     stubAdapter();
     renderWithProviders(<AppRoutes />, { route: "/users" });
 
+    await userEvent.click(await screen.findByRole("button", { name: "Invite people" }));
     const send = await screen.findByRole("button", { name: "Send invite" });
     expect(send).toBeDisabled();
     await userEvent.type(screen.getByLabelText("Email"), "linus");
@@ -196,6 +199,7 @@ describe("Users screen", () => {
     });
     renderWithProviders(<AppRoutes />, { route: "/users" });
 
+    await userEvent.click(await screen.findByRole("button", { name: "Invite people" }));
     await userEvent.selectOptions(await screen.findByLabelText("Role"), "admin");
     await userEvent.click(screen.getByLabelText("Anyone with the link can join"));
 
@@ -229,6 +233,7 @@ describe("Users screen", () => {
     });
     renderWithProviders(<AppRoutes />, { route: "/users" });
 
+    await userEvent.click(await screen.findByRole("button", { name: "Invite people" }));
     await userEvent.type(await screen.findByLabelText("Email"), "grace@example.com");
     await userEvent.click(screen.getByRole("button", { name: "Send invite" }));
 
