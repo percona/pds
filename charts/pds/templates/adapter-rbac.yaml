@@ -55,6 +55,21 @@ rules:
     resourceNames:
       - "monitoring-service"
     verbs: ["get"]
+  {{- if .Values.adapter.backupKey.user }}
+  # The agent writes the backup key it makes to this Secret, and the control
+  # plane asks it to remove the IAM user through this ConfigMap when the
+  # environment is deleted.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - {{ .Values.stack.s3.existingSecret | quote }}
+    verbs: ["get", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames:
+      - "pds-backup-user"
+    verbs: ["get", "update", "patch"]
+  {{- end }}
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create"]
@@ -167,51 +182,6 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "pds.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
----
-# Restoring a PostgreSQL backup into a new database. The provider refuses to
-# restore into a new Instance, so the agent creates the database with its data
-# source first, reading the source's cluster and the backup it restores. Delete
-# lets it remove the database a failed seed left behind.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: {{ $name }}-database-seeds
-  namespace: {{ $dbns }}
-  labels:
-    {{- include "pds.labels" . | nindent 4 }}
-    app.kubernetes.io/component: adapter
-  {{- with .Values.commonAnnotations }}
-  annotations:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-rules:
-  - apiGroups: ["pgv2.percona.com"]
-    resources: ["perconapgclusters"]
-    verbs: ["get", "create", "delete"]
-  - apiGroups: ["pgv2.percona.com"]
-    resources: ["perconapgbackups"]
-    verbs: ["get"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: {{ $name }}-database-seeds
-  namespace: {{ $dbns }}
-  labels:
-    {{- include "pds.labels" . | nindent 4 }}
-    app.kubernetes.io/component: adapter
-  {{- with .Values.commonAnnotations }}
-  annotations:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: {{ $name }}-database-seeds
-subjects:
-  - kind: ServiceAccount
-    name: {{ include "pds.serviceAccountName" . }}
-    namespace: {{ .Release.Namespace }}
 {{- end }}
 ---
 # CPU and memory for each database. metrics-server answers a namespaced
@@ -252,6 +222,49 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "pds.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
+{{- with .Values.adapter.hub.releaseRef }}
+---
+# The agent reports the state of the one HelmRelease that holds this release,
+# and reads nothing else of Flux. resourceNames limits get to that name in
+# whichever namespace it lives in.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}-release
+  labels:
+    {{- include "pds.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: adapter
+  {{- with $.Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources: ["helmreleases"]
+    resourceNames:
+      - {{ index (splitList "/" .) 1 | quote }}
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-release
+  labels:
+    {{- include "pds.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: adapter
+  {{- with $.Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}-release
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "pds.serviceAccountName" $ }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

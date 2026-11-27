@@ -159,7 +159,7 @@ function RestoreIntoNewDatabase({
       <Field
         id={`${fieldId}-name`}
         label="New database name"
-        help={`Lowercase letters, digits, and dashes, ${rule.limit} at most. It runs next to ${database.name} on ${environment}.`}
+        help={`Lowercase letters, digits, and dashes, starting with a letter, ${rule.limit} at most. It runs next to ${database.name} on ${environment}.`}
         error={touched && trimmed !== "" ? wrong : undefined}
       >
         {(props) => (

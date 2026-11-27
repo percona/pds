@@ -14,6 +14,8 @@
 _LAB_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=helm-install.sh
 source "${_LAB_LIB_DIR}/helm-install.sh"
+# shellcheck source=flux-environment.sh
+source "${_LAB_LIB_DIR}/flux-environment.sh"
 
 # Docker Desktop's 8 GB setting is the smallest that holds the hub and one
 # connected environment. The daemon reports a little less than that slider, so the
@@ -1253,14 +1255,25 @@ lab_up() {
     lab_issue_join "${UI_PORT}" "${jar}" "${SPOKE_CLUSTER}" "${token_file}"
     api_command="$(lab_json_field "$(cat "${token_file}")" command)"
     join_command="$(lab_connect_command "${api_command}" "${public_url}" "$(lab_json_field "$(cat "${token_file}")" token)")"
-    lab_wait_namespace "${spoke_context}" "${HUB_NS}"
-    lab_wait_namespace "${spoke_context}" flux-system
-    lab_run_join "${join_command}" "${SPOKE_CLUSTER}" "${CHART_DIR}" "${state}"
+    if [[ "${LAB_CONNECT:-join}" == flux ]]; then
+      # Flux is installed by the bootstrap, so the namespace is not waited for.
+      flux_environment_connect "${SPOKE_CLUSTER}" "${state}" "${git_dir}" "${CHART_DIR}" \
+        "$(lab_json_field "$(cat "${token_file}")" token)" "${public_url}" "${UI_PORT}"
+    else
+      lab_wait_namespace "${spoke_context}" "${HUB_NS}"
+      lab_wait_namespace "${spoke_context}" flux-system
+      lab_run_join "${join_command}" "${SPOKE_CLUSTER}" "${CHART_DIR}" "${state}"
+    fi
+  fi
+  if [[ "${LAB_CONNECT:-join}" == flux ]]; then
+    flux_environment_wait "${spoke_context}"
   fi
   lab_wait_connected "${UI_PORT}" "${jar}" "${SPOKE_CLUSTER}"
-  lab_wait_kustomization "${spoke_context}" instances 600
-  if lab_wants_platform_kustomization "${arch}"; then
-    lab_wait_kustomization "${spoke_context}" platform 900
+  if [[ "${LAB_CONNECT:-join}" != flux ]]; then
+    lab_wait_kustomization "${spoke_context}" instances 600
+    if lab_wants_platform_kustomization "${arch}"; then
+      lab_wait_kustomization "${spoke_context}" platform 900
+    fi
   fi
 
   cat <<EOF

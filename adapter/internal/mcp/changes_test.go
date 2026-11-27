@@ -19,7 +19,11 @@ import (
 var changeTools = []string{
 	"backup_database", "create_database", "create_environment", "create_support_ticket", "reply_to_support_ticket",
 	"restore_database", "scale_database", "set_backup_schedule",
+	"start_cloud_connection", "create_managed_environment", "retry_environment_run", "upgrade_environment",
 }
+
+// deleteTools are the tools that need the change and delete tier.
+var deleteTools = []string{"delete_database", "delete_managed_environment", "rebuild_environment", "remove_cloud_connection"}
 
 const deleteTool = "delete_database"
 
@@ -62,6 +66,13 @@ func changeAPI() *fakeAPI {
 	api.then(databasePath, ok(databaseFixture()), reply{http.StatusNoContent, nil})
 	api.routes["/api/support/tickets"] = reply{http.StatusCreated, ticketFixture()}
 	api.routes["/api/support/tickets/"+ticket+"/replies"] = reply{http.StatusNoContent, nil}
+	api.routes["DELETE /api/cloud-connections/"+cloudID] = reply{http.StatusNoContent, nil}
+	api.routes["POST /api/cloud-connections/"+cloudID+"/environments"] = reply{http.StatusAccepted, map[string]any{
+		"environment": managedEnvironmentFixture(), "run": startedFixture()["run"],
+	}}
+	api.routes["POST /api/environments/orders/runs"] = reply{http.StatusAccepted, startedFixture()}
+	api.routes["POST /api/environments/orders/runs/5/retry"] = reply{http.StatusAccepted, startedFixture()}
+	api.routes["DELETE /api/environments/orders"] = reply{http.StatusAccepted, startedFixture()}
 	api.routes["/api/connect/tokens"] = reply{http.StatusCreated, map[string]any{"environment": "spoke-b", "expiresAt": "2026-09-08T13:00:00Z"}}
 
 	return api
@@ -79,6 +90,14 @@ func validCalls() map[string]map[string]any {
 		"reply_to_support_ticket": {"number": ticket, "body": "It is still slow."},
 		"create_environment":      {"name": "spoke-b"},
 		deleteTool:                {"id": orders, "confirm": "orders-dev"},
+
+		"start_cloud_connection":     {},
+		"create_managed_environment": {"connectionId": cloudID, "name": "orders", "region": "eu-west-1"},
+		"retry_environment_run":      {"environment": "orders"},
+		"upgrade_environment":        {"environment": "orders", "kind": "pds"},
+		"delete_managed_environment": {"environment": "orders", "confirm": "orders"},
+		"rebuild_environment":        {"environment": "orders"},
+		"remove_cloud_connection":    {"id": cloudID, "confirm": "acme"},
 	}
 }
 
@@ -88,14 +107,16 @@ func TestAReadTierListsNoChangeTool(t *testing.T) {
 	assert.Equal(t, readTools, names(listedTools(t, session)))
 }
 
-func TestAChangeTierListsTheEightChangeToolsAndNotDelete(t *testing.T) {
+func TestAChangeTierListsTheChangeToolsAndNoDeleteTool(t *testing.T) {
 	session := connectAt(t, changeAPI(), auth.AccessChange)
 
 	listed := names(listedTools(t, session))
 
 	assert.Equal(t, sorted(readTools, changeTools), listed)
-	assert.Len(t, listed, 25)
-	assert.NotContains(t, listed, deleteTool)
+	assert.Len(t, listed, 32)
+	for _, tool := range deleteTools {
+		assert.NotContains(t, listed, tool)
+	}
 }
 
 func TestAChangeAndDeleteTierListsEveryTool(t *testing.T) {
@@ -103,8 +124,8 @@ func TestAChangeAndDeleteTierListsEveryTool(t *testing.T) {
 
 	listed := names(listedTools(t, session))
 
-	assert.Equal(t, sorted(readTools, changeTools, []string{deleteTool}), listed)
-	assert.Len(t, listed, 26)
+	assert.Equal(t, sorted(readTools, changeTools, deleteTools), listed)
+	assert.Len(t, listed, 36)
 }
 
 func TestACallerWhoseClientIsNotKnownListsNoChangeTool(t *testing.T) {
@@ -134,8 +155,8 @@ func TestAToolAboveTheTierIsRefusedAsNotAllowedWithNoRequest(t *testing.T) {
 		tools  []string
 		want   string
 	}{
-		{auth.AccessRead, append([]string{deleteTool}, changeTools...), "Changes are not allowed in this session. Tell the user, and do not try again."},
-		{auth.AccessChange, []string{deleteTool}, "Deleting is not allowed in this session. Tell the user, and do not try again."},
+		{auth.AccessRead, append(slices.Clone(deleteTools), changeTools...), "Changes are not allowed in this session. Tell the user, and do not try again."},
+		{auth.AccessChange, deleteTools, "Deleting is not allowed in this session. Tell the user, and do not try again."},
 	}
 	calls := validCalls()
 	for _, tc := range cases {
@@ -738,6 +759,13 @@ func TestCreateEnvironmentNeverCarriesTheJoinTokenOrCommand(t *testing.T) {
 	for name, answer := range cases {
 		t.Run(name, func(t *testing.T) {
 			api := changeAPI()
+			api.routes["DELETE /api/cloud-connections/"+cloudID] = reply{http.StatusNoContent, nil}
+			api.routes["POST /api/cloud-connections/"+cloudID+"/environments"] = reply{http.StatusAccepted, map[string]any{
+				"environment": managedEnvironmentFixture(), "run": startedFixture()["run"],
+			}}
+			api.routes["POST /api/environments/orders/runs"] = reply{http.StatusAccepted, startedFixture()}
+			api.routes["POST /api/environments/orders/runs/5/retry"] = reply{http.StatusAccepted, startedFixture()}
+			api.routes["DELETE /api/environments/orders"] = reply{http.StatusAccepted, startedFixture()}
 			api.routes["/api/connect/tokens"] = answer
 			logs := &logBuffer{}
 			session := connectAs(t, api, callerAt(auth.AccessChange), logs.logger(), mcp.WithConsoleURL("https://pds.example"))
@@ -860,6 +888,9 @@ func TestEveryChangeToolIsAnnotatedAsTheCatalogSays(t *testing.T) {
 		"create_database": {false, false}, "scale_database": {true, false}, "backup_database": {false, false},
 		"set_backup_schedule": {true, false}, "restore_database": {false, false}, "create_support_ticket": {false, false},
 		"reply_to_support_ticket": {false, false}, "create_environment": {false, false}, deleteTool: {false, true},
+		"start_cloud_connection": {true, false}, "create_managed_environment": {false, false}, "retry_environment_run": {false, false},
+		"upgrade_environment": {false, false}, "delete_managed_environment": {false, true}, "rebuild_environment": {false, true},
+		"remove_cloud_connection": {false, true},
 	}
 
 	listed := listedTools(t, connectAt(t, changeAPI(), auth.AccessChangeDelete))
@@ -885,7 +916,7 @@ func TestEveryChangeToolIsAnnotatedAsTheCatalogSays(t *testing.T) {
 }
 
 func TestNoChangeToolTakesACredentialOrAPassword(t *testing.T) {
-	changes := append([]string{deleteTool}, changeTools...)
+	changes := append(slices.Clone(deleteTools), changeTools...)
 	for _, tool := range listedTools(t, connectAt(t, changeAPI(), auth.AccessChangeDelete)) {
 		if !slices.Contains(changes, tool.Name) {
 			continue

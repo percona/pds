@@ -517,7 +517,7 @@ except Exception:
 }
 
 # The label selector for the pods of the named databases. A database's pods
-# carry its name in this label, and so does the pgBackRest job that seeds a
+# carry its name in this label, and so does the pgBackRest job that bootstraps a
 # PostgreSQL restore copy.
 lifecycle_instance_selector() {
   local IFS=,

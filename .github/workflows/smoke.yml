@@ -12,14 +12,17 @@ name: smoke
 #   postgresql   the PostgreSQL lifecycle
 #   mcp          a lab with a connected environment and no database lifecycle,
 #                then the MCP binary's contract tests against its hub
+#   flux         a lab whose environment is bootstrapped the way the control
+#                plane does it, with Flux and a rendered HelmRelease, then one
+#                database created and deleted
 on:
   schedule:
     - cron: "0 2 * * *"
   workflow_dispatch:
     inputs:
       suites:
-        description: "Suites to run, comma separated: mysql, postgresql, mcp"
-        default: "mysql,postgresql,mcp"
+        description: "Suites to run, comma separated: mysql, postgresql, mcp, flux"
+        default: "mysql,postgresql,mcp,flux"
         required: true
 
 jobs:
@@ -34,7 +37,7 @@ jobs:
       - name: choose the suites
         id: plan
         env:
-          REQUESTED: ${{ inputs.suites || 'mysql,postgresql,mcp' }}
+          REQUESTED: ${{ inputs.suites || 'mysql,postgresql,mcp,flux' }}
         run: |
           suites="$(scripts/smoke-suites.sh "${REQUESTED}")"
           echo "suites=${suites}" >> "${GITHUB_OUTPUT}"
@@ -67,6 +70,10 @@ jobs:
       - name: free runner disk
         run: scripts/free-runner-disk.sh
 
+      # Six kind nodes exhaust the default inotify instances on Ubuntu 26.04.
+      - name: raise the runner's inotify limits
+        run: scripts/raise-runner-inotify.sh
+
       # The runner image loads an AppArmor profile for /usr/sbin/mysqld. The
       # kernel attaches it by path to mysqld inside the kind nodes as well,
       # where it denies /etc/my.cnf and the server's share files. The
@@ -95,6 +102,12 @@ jobs:
         with:
           go-version: "1.26.11"
           cache-dependency-path: apps/mcp/go.mod
+      # The flux suite builds the adapter's smoke-environment command.
+      - uses: actions/setup-go@v5
+        if: matrix.suite == 'flux'
+        with:
+          go-version: "1.26.11"
+          cache-dependency-path: adapter/go.mod
 
       - uses: azure/setup-helm@v4
         with:
@@ -125,9 +138,12 @@ jobs:
       # The suite name is the engine. PostgreSQL runs the lifecycle without the
       # MySQL-only alert and unmodeled-field steps, and includes restore.
       - name: hub smoke, ${{ matrix.suite }}
-        if: matrix.suite != 'mcp'
+        if: matrix.suite != 'mcp' && matrix.suite != 'flux'
         run: scripts/hub-smoke.sh --engine "${SUITE}"
 
+      - name: hub smoke, flux
+        if: matrix.suite == 'flux'
+        run: scripts/hub-smoke.sh --flux
       - name: hub smoke, lab only
         if: matrix.suite == 'mcp'
         run: scripts/hub-smoke.sh --lab-only

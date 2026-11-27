@@ -78,6 +78,7 @@ must match.
 |-----------|---------|-------|
 | Percona Database Service chart | 0.1.0 | Source Chart.yaml. A GitHub Release publishes the OCI tag with the release version |
 | Kubernetes | >= 1.27.0-0 | Chart `kubeVersion` |
+| Flux | 2.5.1 | Installed by the join script, and by a managed environment's bootstrap. `scripts/check-compatibility.sh` checks the join script against the pin |
 | OpenEverest | 2.0.0-dev.4 | Chart `openeverest` from https://openeverest.github.io/helm-charts/ |
 | PXC provider | 0.3.1 | `provider-percona-xtradb-cluster` (`provider-pxc`) |
 | PXC operator | 1.20.0 | Installed by the PXC provider chart |
@@ -88,6 +89,35 @@ must match.
 | Backup and Restore CRDs | backup.openeverest.io/v1alpha1 | Adapter client constant |
 | MySQL (Percona XtraDB Cluster) | operator-default | The adapter does not set an engine image |
 | PostgreSQL (Percona PostgreSQL) | operator-default | The adapter does not set an engine image |
+
+## Managed environments
+
+The pin carries three more things for environments the control plane builds in a
+customer's AWS account.
+
+- **Flux version.** `flux.version` is the Flux release both the join script and a
+  managed environment's bootstrap install. The control plane applies a manifest
+  only when its SHA-256 matches a digest compiled into the adapter, and
+  `scripts/check-compatibility.sh` checks the join script's version against the
+  pin, and a test holds the join script's digest equal to the adapter's, so a Flux
+  bump needs the digest added too.
+- **Template revision.** `managedTemplate.revision` numbers the revisions of the
+  CloudFormation templates. Every stack records its revision. `cutFor` holds the
+  chart and Flux versions the revision was last reviewed against. Changing the
+  chart or Flux version fails `scripts/check-compatibility.sh` until the revision
+  is bumped, or `cutFor` is moved to the new versions to leave the revision as it
+  is. A revision never removes or renames a parameter or output the adapter reads.
+  It is separate from the version of the cloud connection template, which a
+  customer updates by rerunning the connect command.
+- **Managed upgrade.** `support.managedUpgrade.from` maps a chart version an
+  environment runs to the chart versions the control plane may move it to:
+  `from: {"0.1.0": ["0.2.0"]}`. Each key and target is a version, and each key
+  lists at least one target. In the window the control plane moves an
+  environment to the newest target listed for its version. A version with no
+  entry has no managed upgrade, and the map starts empty. It is separate from
+  `support.update`, which is the join script's in-place update of a connected
+  environment. The adapter embeds a copy of the pin in `internal/managed`, which a
+  test keeps equal.
 
 PMM is optional. It is not part of the create path. The OpenEverest,
 provider, and operator rows are one unit even when PMM is off.
@@ -141,7 +171,7 @@ lifecycle contract before merge:
    renders the pinned platform.
 3. Dispatch [`.github/workflows/smoke.yml`](../.github/workflows/smoke.yml)
    (`hub-smoke`) against the branch and keep the run URL on the PR. A pin
-   change needs all three suites green: `mysql`, `postgresql` and `mcp`, which
+   change needs all four suites green: `mysql`, `postgresql`, `mcp` and `flux`, which
    run in parallel, each on its own lab. The `mysql` and `postgresql` suites
    are the lifecycle contract. Each brings up a hub and one connected
    kind cluster. The `mysql` suite creates a MySQL Dev database and waits until Ready,
@@ -151,12 +181,18 @@ lifecycle contract before merge:
    and waits for cleanup. The `postgresql` suite runs
    `scripts/hub-smoke.sh --engine postgresql` on a lab of its own: a PostgreSQL
    Dev database through create, Ready, scale, schedule, backup, restore
-   (which seeds a new cluster first) and delete. The alert and unmodeled
+   and delete. The alert and unmodeled
    field steps are MySQL only. Both suites then update the connected environment
    in place with `--update` on the same pin and check the databases they made
    are still Ready. The `mcp` suite brings up a lab with
    `scripts/hub-smoke.sh --lab-only`, creates no lifecycle, and runs the MCP
-   binary's contract tests against its hub. Per-PR `kind-platform` brings the same lab up
+   binary's contract tests against its hub. The `flux` suite runs
+   `scripts/hub-smoke.sh --flux`: it connects the second kind cluster the way
+   the control plane connects a managed environment, with the pinned Flux, the
+   rendered pds HelmRelease and the agent's Secret, and no join script and no
+   AWS. The chart comes from a registry the lab starts, so it is the chart on
+   the branch. It checks the environment is Connected and that a database is
+   created, Ready and deleted. Per-PR `kind-platform` brings the same lab up
    and checks the connected environment, the agent Deployment, and Flux
    Kustomizations `instances` and `platform`. It does not create a
    database. It is not pin-bump evidence.
@@ -169,7 +205,7 @@ lifecycle contract before merge:
    field: each key is OpenEverest or a provider the pin has, and each value is
    a `>=` constraint.
 
-The nightly `hub-smoke` workflow runs the same three suites. Do not treat a
+The nightly `hub-smoke` workflow runs the same four suites. Do not treat a
 green lint job as enough. `hub-smoke` never gates a pull request.
 
 This repository has no required status checks. The reviewer is the gate:

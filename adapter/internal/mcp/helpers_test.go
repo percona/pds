@@ -179,7 +179,10 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.hook(r)
 	}
 
-	answer, ok := f.routes[r.URL.Path]
+	answer, ok := f.routes[r.Method+" "+r.URL.Path]
+	if !ok {
+		answer, ok = f.routes[r.URL.Path]
+	}
 	f.mu.Lock()
 	if steps := f.steps[r.URL.Path]; len(steps) > 0 {
 		answer, ok = steps[0], true

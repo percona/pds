@@ -212,7 +212,11 @@ func (s *Service) makeAlertRulesCurrent(ctx context.Context, environment string)
 	if err != nil {
 		return rulesCurrent, err
 	}
-	want, err := pmmFiles(environment, settings, version, true)
+	ownershipID, err := s.ownershipID(ctx, environment)
+	if err != nil {
+		return rulesCurrent, fmt.Errorf("read the environment's ownership tag: %w", err)
+	}
+	want, err := pmmFiles(environment, settings, version, ownershipID, true)
 	if err != nil {
 		return rulesCurrent, fmt.Errorf("render the monitoring definition: %w", err)
 	}

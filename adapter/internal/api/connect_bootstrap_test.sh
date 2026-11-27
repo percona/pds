@@ -1943,6 +1943,51 @@ unset FAKE_DEPLOYED_RELEASES
   || fail "resolve_platform_release preferred the old release: ${PLATFORM_RELEASE}"
 pass "resolve_platform_release prefers the current release when both exist"
 
+# A managed environment keeps its pds release under a HelmRelease the control
+# plane commits to Git. A join or an update from here would fight it, so both
+# refuse before anything changes.
+[[ -e "${FAKE}/kubectl" ]] && cp "${FAKE}/kubectl" "${WORK}/kubectl.saved"
+cat >"${FAKE}/kubectl" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == *"get helmreleases.helm.toolkit.fluxcd.io"* ]]; then
+  [[ -n "${FAKE_HELMRELEASES:-}" ]] || exit 1
+  printf '%s' "${FAKE_HELMRELEASES}"
+  exit 0
+fi
+exit 0
+EOF
+chmod +x "${FAKE}/kubectl"
+
+PLATFORM_RELEASE="pds"
+refusal="${WORK}/helmrelease-refusal.txt"
+if (
+  export FAKE_HELMRELEASES='{"items":[{"metadata":{"name":"pds","namespace":"flux-system"},"spec":{"releaseName":"pds"}}]}'
+  refuse_managed_environment
+) >"$refusal" 2>&1; then
+  fail "refuse_managed_environment let a join run beside a HelmRelease"
+fi
+grep -q "managed environment" "$refusal" \
+  || fail "refuse_managed_environment did not say why: $(cat "$refusal")"
+grep -q "Nothing was changed" "$refusal" \
+  || fail "refuse_managed_environment did not say nothing changed: $(cat "$refusal")"
+pass "refuse_managed_environment refuses a release a HelmRelease owns"
+
+(
+  export FAKE_HELMRELEASES='{"items":[{"metadata":{"name":"other","namespace":"apps"},"spec":{"releaseName":"other"}}]}'
+  refuse_managed_environment
+) || fail "refuse_managed_environment refused a Kubernetes cluster whose HelmRelease is another release"
+(
+  unset FAKE_HELMRELEASES
+  refuse_managed_environment
+) || fail "refuse_managed_environment refused a Kubernetes cluster that has no HelmRelease resource"
+pass "refuse_managed_environment leaves a connected environment alone"
+
+if [[ -e "${WORK}/kubectl.saved" ]]; then
+  cp "${WORK}/kubectl.saved" "${FAKE}/kubectl"
+else
+  rm -f "${FAKE}/kubectl"
+fi
+
 PLATFORM_RELEASE="pds"
 PLATFORM_RELEASE_NAMED=0
 export FAKE_DEPLOYED_RELEASES=""

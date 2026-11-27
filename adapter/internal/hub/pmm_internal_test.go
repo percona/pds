@@ -54,7 +54,7 @@ func TestPMMSettingsValidate(t *testing.T) {
 }
 
 func TestPMMFilesListEveryFileInTheKustomization(t *testing.T) {
-	files, err := pmmFiles("spoke-a", DefaultPMMSettings(), "1.9.1", true)
+	files, err := pmmFiles("spoke-a", DefaultPMMSettings(), "1.9.1", "", true)
 	require.NoError(t, err)
 
 	var index struct {
@@ -70,7 +70,7 @@ func TestPMMFilesListEveryFileInTheKustomization(t *testing.T) {
 // The spoke's Kustomization sets the namespace, so the files must not pin one.
 // A pinned namespace here would install PMM somewhere the agent does not look.
 func TestPMMFilesLeaveTheNamespaceToTheSpoke(t *testing.T) {
-	files, err := pmmFiles("spoke-a", DefaultPMMSettings(), "1.9.1", true)
+	files, err := pmmFiles("spoke-a", DefaultPMMSettings(), "1.9.1", "", true)
 	require.NoError(t, err)
 
 	for path, body := range files {
@@ -101,7 +101,8 @@ type helmReleaseDoc struct {
 				Annotations map[string]string `json:"annotations"`
 			} `json:"service"`
 			Storage struct {
-				Size string `json:"size"`
+				Size             string `json:"size"`
+				StorageClassName string `json:"storageClassName"`
 			} `json:"storage"`
 			Resources struct {
 				Requests map[string]string `json:"requests"`
@@ -117,12 +118,27 @@ type helmReleaseDoc struct {
 
 func readHelmRelease(t *testing.T, s PMMSettings, version string) helmReleaseDoc {
 	t.Helper()
-	files, err := pmmFiles("spoke-a", s, version, true)
+	files, err := pmmFiles("spoke-a", s, version, "", true)
 	require.NoError(t, err)
 	var doc helmReleaseDoc
 	require.NoError(t, yaml.Unmarshal(files[pmmDir("spoke-a")+"/helmrelease.yaml"], &doc))
 
 	return doc
+}
+
+func TestAManagedEnvironmentsPMMClaimsTheTaggedStorageClass(t *testing.T) {
+	files, err := pmmFiles("spoke-a", DefaultPMMSettings(), "1.9.1", "0123456789ab", true)
+	require.NoError(t, err)
+	var doc helmReleaseDoc
+	require.NoError(t, yaml.Unmarshal(files[pmmDir("spoke-a")+"/helmrelease.yaml"], &doc))
+
+	assert.Equal(t, TaggedStorageClass, doc.Spec.Values.Storage.StorageClassName)
+}
+
+func TestAJoinedEnvironmentsPMMUsesTheDefaultStorageClass(t *testing.T) {
+	doc := readHelmRelease(t, DefaultPMMSettings(), "1.9.1")
+
+	assert.Empty(t, doc.Spec.Values.Storage.StorageClassName)
 }
 
 func TestPMMHelmReleasePinsTheChartAndKeepsTheServiceName(t *testing.T) {
@@ -159,14 +175,14 @@ func TestPMMHelmReleaseCarriesTheSettings(t *testing.T) {
 func TestPMMFilesRejectInvalidSettings(t *testing.T) {
 	s := DefaultPMMSettings()
 	s.Access = "everywhere"
-	_, err := pmmFiles("spoke-a", s, "1.9.1", true)
+	_, err := pmmFiles("spoke-a", s, "1.9.1", "", true)
 	require.Error(t, err)
 }
 
 func TestPMMFilesAreStableForTheSameSettings(t *testing.T) {
-	a, err := pmmFiles("spoke-a", DefaultPMMSettings(), "1.9.1", true)
+	a, err := pmmFiles("spoke-a", DefaultPMMSettings(), "1.9.1", "", true)
 	require.NoError(t, err)
-	b, err := pmmFiles("spoke-a", DefaultPMMSettings(), "1.9.1", true)
+	b, err := pmmFiles("spoke-a", DefaultPMMSettings(), "1.9.1", "", true)
 	require.NoError(t, err)
 	assert.Equal(t, a, b)
 }
@@ -176,7 +192,7 @@ func TestPMMFilesAreStableForTheSameSettings(t *testing.T) {
 // the duplicate, but the post-render step Flux runs rejects it as invalid YAML
 // and the install never starts.
 func TestPMMHelmReleaseDoesNotRepeatLabelsTheChartSets(t *testing.T) {
-	files, err := pmmFiles("spoke-a", DefaultPMMSettings(), "1.9.1", true)
+	files, err := pmmFiles("spoke-a", DefaultPMMSettings(), "1.9.1", "", true)
 	require.NoError(t, err)
 
 	var doc struct {
@@ -203,7 +219,7 @@ type pmmPatch struct {
 
 func readPostRenderers(t *testing.T, s PMMSettings) []pmmPatch {
 	t.Helper()
-	files, err := pmmFiles("spoke-a", s, "1.9.1", true)
+	files, err := pmmFiles("spoke-a", s, "1.9.1", "", true)
 	require.NoError(t, err)
 	var doc struct {
 		Spec struct {

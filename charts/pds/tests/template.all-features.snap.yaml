@@ -303,6 +303,31 @@ data:
       }
     }
 ---
+# Source: pds/templates/tagged-storage-class.yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: pds-gp3
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+    percona.com/owner: platform-team
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  tagSpecification_1: "percona.com/pds=0123456789ab"
+  tagSpecification_2: "percona.com/team=platform"
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+---
 # Source: pds/templates/hub-git-pvc.yaml
 # The hub's desired state for every environment it serves. It has to outlive the
 # pod: losing it means Flux prunes the instances on every spoke at the next
@@ -356,6 +381,32 @@ rules:
     verbs: ["get", "list"]
 ---
 # Source: pds/templates/adapter-rbac.yaml
+# The agent reports the state of the one HelmRelease that holds this release,
+# and reads nothing else of Flux. resourceNames limits get to that name in
+# whichever namespace it lives in.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: platform-adapter-release
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: adapter
+  annotations:
+    percona.com/owner: platform-team
+rules:
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources: ["helmreleases"]
+    resourceNames:
+      - "pds"
+    verbs: ["get"]
+---
+# Source: pds/templates/adapter-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -375,6 +426,31 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: platform-adapter-metrics
+subjects:
+  - kind: ServiceAccount
+    name: platform-adapter
+    namespace: default
+---
+# Source: pds/templates/adapter-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: platform-adapter-release
+  labels:
+    helm.sh/chart: pds-0.1.0
+    app.kubernetes.io/name: pds
+    app.kubernetes.io/instance: pds
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: pds
+    percona.com/team: platform
+    app.kubernetes.io/component: adapter
+  annotations:
+    percona.com/owner: platform-team
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: platform-adapter-release
 subjects:
   - kind: ServiceAccount
     name: platform-adapter
@@ -738,6 +814,19 @@ rules:
     resourceNames:
       - "monitoring-service"
     verbs: ["get"]
+  # The agent writes the backup key it makes to this Secret, and the control
+  # plane asks it to remove the IAM user through this ConfigMap when the
+  # environment is deleted.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - "pds-s3"
+    verbs: ["get", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames:
+      - "pds-backup-user"
+    verbs: ["get", "update", "patch"]
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create"]
@@ -1154,6 +1243,28 @@ spec:
               value: "https://hub.example"
             - name: HUB_AGENT_IMAGE
               value: "ghcr.io/percona/percona-services-adapter:0.1.0-rc.1"
+            - name: AGENT_BACKUP_USER
+              value: "pds-k3j9x2m4p1q7-backup"
+            - name: AGENT_BACKUP_USER_PATH
+              value: "/pds/aaaaaaaaaaaa/"
+            - name: AGENT_BACKUP_BOUNDARY_ARN
+              value: "arn:aws:iam::123456789012:policy/pds/aaaaaaaaaaaa/pds-aaaaaaaaaaaa-backup-boundary"
+            - name: AGENT_BACKUP_BUCKET
+              value: "pds-123456789012-k3j9x2m4p1q7"
+            - name: AGENT_BACKUP_SECRET
+              value: "pds-s3"
+            - name: AGENT_BACKUP_TAG
+              value: "k3j9x2m4p1q7"
+            - name: AWS_REGION
+              value: "eu-west-1"
+            - name: AGENT_RELEASE_REF
+              value: "flux-system/pds"
+            - name: HUB_MANAGED_CHART_VERSION
+              value: "0.1.0-rc.1"
+            - name: HUB_MANAGED_CHART_URL
+              value: "oci://ghcr.io/example/charts"
+            - name: HUB_MANAGED_OUTGOING_CIDRS
+              value: "203.0.113.7/32,198.51.100.0/24"
             - name: ADAPTER_FEATURE_ACTIVITY
               value: "true"
             - name: ADAPTER_FEATURE_ASSISTANT

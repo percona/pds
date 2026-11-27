@@ -12,6 +12,8 @@ on:
       - "scripts/chart-snapshot.sh"
       - "scripts/up.sh"
       - "scripts/lib/hub-install.sh"
+      - "scripts/lib/openeverest-patch.sh"
+      - "scripts/lib/openeverest-patch_test.sh"
       - "scripts/lib/hub-install_test.sh"
       - "scripts/lib/helm-install.sh"
       - "scripts/lib/helm-install_test.sh"
@@ -21,6 +23,8 @@ on:
       - "scripts/lib/lifecycle_test.sh"
       - "scripts/lib/lab.sh"
       - "scripts/lib/lab_test.sh"
+      - "scripts/lib/flux-environment.sh"
+      - "scripts/lib/flux-environment_test.sh"
       - "scripts/hub-smoke.sh"
       - "scripts/hub-smoke_test.sh"
       - "scripts/smoke-suites.sh"
@@ -38,6 +42,8 @@ on:
       - "scripts/chart-snapshot.sh"
       - "scripts/up.sh"
       - "scripts/lib/hub-install.sh"
+      - "scripts/lib/openeverest-patch.sh"
+      - "scripts/lib/openeverest-patch_test.sh"
       - "scripts/lib/hub-install_test.sh"
       - "scripts/lib/helm-install.sh"
       - "scripts/lib/helm-install_test.sh"
@@ -47,6 +53,8 @@ on:
       - "scripts/lib/lifecycle_test.sh"
       - "scripts/lib/lab.sh"
       - "scripts/lib/lab_test.sh"
+      - "scripts/lib/flux-environment.sh"
+      - "scripts/lib/flux-environment_test.sh"
       - "scripts/hub-smoke.sh"
       - "scripts/hub-smoke_test.sh"
       - "scripts/smoke-suites.sh"
@@ -84,8 +92,10 @@ jobs:
       - name: installer unit tests
         run: |
           bash scripts/lib/helm-install_test.sh
+          bash scripts/lib/openeverest-patch_test.sh
           bash scripts/lib/hub-install_test.sh
           bash scripts/lib/lab_test.sh
+          bash scripts/lib/flux-environment_test.sh
           bash scripts/lib/lifecycle_test.sh
           bash scripts/lib/bounded_test.sh
           bash scripts/hub-smoke_test.sh
@@ -142,6 +152,11 @@ jobs:
       # some hosted runner images. These SDKs are unrelated to this job.
       - name: free runner disk
         run: scripts/free-runner-disk.sh
+
+      # The same limits as smoke, so this lab does not hit the Ubuntu 26.04
+      # inotify default when it gains nodes.
+      - name: raise the runner's inotify limits
+        run: scripts/raise-runner-inotify.sh
 
       - uses: actions/setup-node@v4
         with:

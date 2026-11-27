@@ -579,11 +579,10 @@ func postgresSource(t *testing.T, inv *hub.Inventory) {
 	})
 }
 
-// The provider refuses a dataSource on a PostgreSQL Instance, so the hub asks
-// the agent to seed the new database. Nothing is committed yet: a database the
-// provider creates before the seed reaches it is bootstrapped empty, and Flux
-// applies a commit on its own schedule, so the Instance waits for the agent.
-func TestRestoreOfAPostgreSQLBackupQueuesASeedAndCommitsNothingYet(t *testing.T) {
+// A PostgreSQL copy is committed like a MySQL one: the Instance carries the
+// dataSource and the provider bootstraps the new cluster from the source's
+// backup, so the hub queues nothing for the agent.
+func TestRestoreOfAPostgreSQLBackupCommitsTheInstanceWithItsDataSource(t *testing.T) {
 	svc, store, inv := newHub(t)
 	ctx := context.Background()
 	postgresSource(t, inv)
@@ -592,411 +591,18 @@ func TestRestoreOfAPostgreSQLBackupQueuesASeedAndCommitsNothingYet(t *testing.T)
 	require.NoError(t, err)
 	assert.Equal(t, "spoke-a/pds.reporting-restore-1", issued.ID)
 
-	work := svc.TakeWork("spoke-a")
-	require.Len(t, work, 1)
-	assert.Equal(t, hub.WorkSeed, work[0].Kind)
-	assert.Equal(t, "pds.reporting", work[0].Database)
-	assert.Equal(t, "reporting-ok", work[0].BackupID)
-	assert.Equal(t, "reporting-restore-1", work[0].Name)
-
-	_, err = store.Get(ctx, "clusters/spoke-a/instances/reporting-restore-1.yaml")
-	require.ErrorIs(t, err, hub.ErrNotFound)
-
-	// The developer still sees the database they asked for, pending.
-	got, err := svc.Get(ctx, issued.ID)
-	require.NoError(t, err)
-	assert.Equal(t, engine.PhasePending, got.Status.Phase)
-	assert.Equal(t, "postgresql", got.Engine)
-	listed, err := svc.List(ctx, "spoke-a")
-	require.NoError(t, err)
-	names := []string{}
-	for _, inst := range listed {
-		names = append(names, inst.Name)
-	}
-	assert.Contains(t, names, "reporting-restore-1")
-
-	// And the name is taken while the seed runs.
-	_, err = svc.RestoreToNewDatabase(ctx, "spoke-a/pds.reporting", "reporting-ok", "reporting-restore-1")
-	require.ErrorIs(t, err, engine.ErrExists)
-}
-
-// The agent's acknowledgement of a seed is what releases the Instance.
-func TestASeedTheAgentRanCommitsTheInstance(t *testing.T) {
-	svc, store, inv := newHub(t)
-	ctx := context.Background()
-	postgresSource(t, inv)
-	_, err := svc.RestoreToNewDatabase(ctx, "spoke-a/pds.reporting", "reporting-ok", "reporting-restore-1")
-	require.NoError(t, err)
-	work := svc.TakeWork("spoke-a")
-	require.Len(t, work, 1)
-
-	svc.ApplyHeartbeat(hub.Heartbeat{
-		Environment: "spoke-a", Namespace: "pds",
-		Results: []hub.WorkResult{{ID: work[0].ID}},
-	})
-
 	body, err := store.Get(ctx, "clusters/spoke-a/instances/reporting-restore-1.yaml")
 	require.NoError(t, err)
-	assert.Contains(t, string(body), "provider-percona-postgresql")
-	assert.Empty(t, dataSourceBackup(t, body))
-	assert.Contains(t, string(body), "schedules:",
-		"the provider prunes a backup storage that has no schedule, so the copy needs one")
+	assert.Equal(t, "reporting-ok", dataSourceBackup(t, body))
 	index, err := store.Get(ctx, "clusters/spoke-a/instances/kustomization.yaml")
 	require.NoError(t, err)
 	assert.Contains(t, string(index), "reporting-restore-1.yaml")
-	assert.Empty(t, svc.TakeWork("spoke-a"), "an acknowledged seed is not offered again")
-}
 
-// A seed that failed must not become an empty database wearing the restored
-// copy's name. Nothing is committed, and the developer is told.
-func TestAFailedSeedCommitsNoInstanceAndSaysSo(t *testing.T) {
-	svc, store, inv := newHub(t)
-	ctx := context.Background()
-	postgresSource(t, inv)
-	issued, err := svc.RestoreToNewDatabase(ctx, "spoke-a/pds.reporting", "reporting-ok", "reporting-restore-1")
-	require.NoError(t, err)
-	work := svc.TakeWork("spoke-a")
-	require.Len(t, work, 1)
+	assert.Empty(t, svc.TakeWork("spoke-a"), "nothing is left for the agent to seed")
 
-	svc.ApplyHeartbeat(hub.Heartbeat{
-		Environment: "spoke-a", Namespace: "pds", OmitInstances: true, OmitBackups: true,
-		Results: []hub.WorkResult{{ID: work[0].ID, Error: "read backup reporting-ok: perconapgbackups is forbidden"}},
-	})
-
-	_, err = store.Get(ctx, "clusters/spoke-a/instances/reporting-restore-1.yaml")
-	require.ErrorIs(t, err, hub.ErrNotFound)
-	got, err := svc.Get(ctx, issued.ID)
-	require.NoError(t, err)
-	assert.Equal(t, engine.PhaseFailed, got.Status.Phase)
-	assert.Contains(t, got.Status.Message, "restore")
-	assert.NotContains(t, got.Status.Message, "perconapgbackups", "the agent's error is for the log")
-
-	// The name is free again, so the developer can try once more.
+	// The name is taken as soon as the manifest is committed.
 	_, err = svc.RestoreToNewDatabase(ctx, "spoke-a/pds.reporting", "reporting-ok", "reporting-restore-1")
-	require.NoError(t, err)
-	got, err = svc.Get(ctx, issued.ID)
-	require.NoError(t, err)
-	assert.Equal(t, engine.PhasePending, got.Status.Phase)
-}
-
-// failedCopy is a hub whose PostgreSQL restore into reporting-restore-1 failed
-// its seed, and the id of that copy.
-func failedCopy(t *testing.T) (*hub.Service, *hub.Inventory, string) {
-	t.Helper()
-
-	return failedCopyWith(t, hub.WorkResult{Error: "backup not found"})
-}
-
-// failedCopyWith is failedCopy with the result the agent reports for the seed.
-func failedCopyWith(t *testing.T, result hub.WorkResult) (*hub.Service, *hub.Inventory, string) {
-	t.Helper()
-	svc, _, inv := newHub(t)
-	postgresSource(t, inv)
-	issued, err := svc.RestoreToNewDatabase(context.Background(), "spoke-a/pds.reporting", "reporting-ok", "reporting-restore-1")
-	require.NoError(t, err)
-	work := svc.TakeWork("spoke-a")
-	require.Len(t, work, 1)
-	svc.ApplyHeartbeat(hub.Heartbeat{
-		Environment: "spoke-a", Namespace: "pds", OmitInstances: true, OmitBackups: true,
-		Results: []hub.WorkResult{{ID: work[0].ID, Error: result.Error, Reason: result.Reason}},
-	})
-
-	return svc, inv, issued.ID
-}
-
-// A copy whose seed failed has nothing on the environment to delete, and
-// deleting it is how the developer clears the failure from the list.
-func TestDeletingACopyWhoseSeedFailedClearsTheFailure(t *testing.T) {
-	svc, _, id := failedCopy(t)
-	ctx := context.Background()
-
-	require.NoError(t, svc.Delete(ctx, id))
-
-	_, err := svc.Get(ctx, id)
-	require.ErrorIs(t, err, engine.ErrNotFound)
-}
-
-// A copy the agent is still seeding is listed as pending, so deleting it says
-// it is still being restored rather than that it does not exist. Nothing is
-// cancelled: the agent may already be creating its database.
-func TestDeletingACopyStillSeedingIsRefusedAsRestoring(t *testing.T) {
-	svc, _, inv := newHub(t)
-	postgresSource(t, inv)
-	ctx := context.Background()
-	issued, err := svc.RestoreToNewDatabase(ctx, "spoke-a/pds.reporting", "reporting-ok", "reporting-restore-1")
-	require.NoError(t, err)
-	require.Len(t, svc.TakeWork("spoke-a"), 1)
-
-	err = svc.Delete(ctx, issued.ID)
-
-	require.ErrorIs(t, err, hub.ErrRestoring)
-	_, getErr := svc.Get(ctx, issued.ID)
-	require.NoError(t, getErr)
-}
-
-// seededCopy restores a PostgreSQL backup into a new copy and acknowledges the
-// seed, so the copy's Instance is committed but no heartbeat lists it yet.
-func seededCopy(t *testing.T) (*hub.Service, *hub.MemoryStore, *hub.Inventory, string) {
-	t.Helper()
-	svc, store, inv := newHub(t)
-	postgresSource(t, inv)
-	issued, err := svc.RestoreToNewDatabase(context.Background(), "spoke-a/pds.reporting", "reporting-ok", "reporting-restore-1")
-	require.NoError(t, err)
-	work := svc.TakeWork("spoke-a")
-	require.Len(t, work, 1)
-	svc.ApplyHeartbeat(hub.Heartbeat{
-		Environment: "spoke-a", Namespace: "pds",
-		Results: []hub.WorkResult{{ID: work[0].ID}},
-	})
-
-	return svc, store, inv, issued.ID
-}
-
-// The seed has already created the copy's database, and the Instance that
-// adopts it is only committed. Deleting before Flux applies it would remove the
-// manifest and leave that database running unlisted, so the delete waits.
-func TestDeletingASeededCopyBeforeItsInstanceExistsIsRefused(t *testing.T) {
-	svc, store, _, id := seededCopy(t)
-	ctx := context.Background()
-
-	err := svc.Delete(ctx, id)
-
-	require.ErrorIs(t, err, hub.ErrRestoring)
-	_, getErr := store.Get(ctx, "clusters/spoke-a/instances/reporting-restore-1.yaml")
-	require.NoError(t, getErr, "the manifest stays so Flux still creates the Instance")
-}
-
-// The refusal travels with the committed manifest, so a hub restart in the
-// window before the Instance is listed does not reopen it.
-func TestDeletingASeededCopyAfterAHubRestartIsRefused(t *testing.T) {
-	_, store, inv, id := seededCopy(t)
-	ctx := context.Background()
-	restarted := hub.NewService(store, inv, hub.Options{
-		Namespace: "pds", BackupStorage: "s3",
-		Now: func() time.Time { return time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC) },
-	})
-
-	err := restarted.Delete(ctx, id)
-
-	require.ErrorIs(t, err, hub.ErrRestoring)
-	_, getErr := store.Get(ctx, "clusters/spoke-a/instances/reporting-restore-1.yaml")
-	require.NoError(t, getErr)
-}
-
-func TestASeededCopyCanBeDeletedOnceItsInstanceIsListed(t *testing.T) {
-	svc, store, _, id := seededCopy(t)
-	ctx := context.Background()
-	got, err := svc.Get(ctx, id)
-	require.NoError(t, err)
-	svc.ApplyHeartbeat(hub.Heartbeat{
-		Environment: "spoke-a", Namespace: "pds",
-		At:        time.Date(2026, 9, 8, 12, 0, 30, 0, time.UTC),
-		Instances: []engine.Instance{*got},
-	})
-
-	require.NoError(t, svc.Delete(ctx, id))
-
-	_, getErr := store.Get(ctx, "clusters/spoke-a/instances/reporting-restore-1.yaml")
-	require.ErrorIs(t, getErr, hub.ErrNotFound)
-}
-
-// A copy the agent is still seeding is listed, so scaling it must not answer
-// that it does not exist. It is refused the way Delete refuses it.
-func TestScalingACopyStillSeedingIsRefusedAsRestoring(t *testing.T) {
-	svc, _, inv := newHub(t)
-	postgresSource(t, inv)
-	ctx := context.Background()
-	issued, err := svc.RestoreToNewDatabase(ctx, "spoke-a/pds.reporting", "reporting-ok", "reporting-restore-1")
-	require.NoError(t, err)
-	require.Len(t, svc.TakeWork("spoke-a"), 1)
-	cpu := 2
-
-	err = svc.Scale(ctx, issued.ID, engine.ScaleInput{CPUCores: &cpu})
-
-	require.ErrorIs(t, err, hub.ErrRestoring)
-	require.NotErrorIs(t, err, engine.ErrNotFound)
-	require.Empty(t, svc.TakeWork("spoke-a"))
-}
-
-// An id in another namespace is not the copy being restored, even when its
-// name matches, so a scale on it is not found.
-func TestScalingASeedingCopysNameInAnotherNamespaceIsNotFound(t *testing.T) {
-	svc, _, inv := newHub(t)
-	postgresSource(t, inv)
-	ctx := context.Background()
-	_, err := svc.RestoreToNewDatabase(ctx, "spoke-a/pds.reporting", "reporting-ok", "reporting-restore-1")
-	require.NoError(t, err)
-	require.Len(t, svc.TakeWork("spoke-a"), 1)
-	cpu := 2
-
-	err = svc.Scale(ctx, "spoke-a/other.reporting-restore-1", engine.ScaleInput{CPUCores: &cpu})
-
-	require.ErrorIs(t, err, engine.ErrNotFound)
-	require.NotErrorIs(t, err, hub.ErrRestoring)
-}
-
-// A database created under a failed copy's name replaces the failure, so
-// deleting that database later does not bring the failure back.
-func TestACreateUnderAFailedCopysNameReplacesTheFailure(t *testing.T) {
-	svc, _, id := failedCopy(t)
-	ctx := context.Background()
-	_, err := svc.Create(ctx, engine.CreateInput{
-		Name: "reporting-restore-1", Engine: "postgresql", Profile: "dev", Environment: "spoke-a",
-	})
-	require.NoError(t, err)
-
-	require.NoError(t, svc.Delete(ctx, id))
-
-	_, err = svc.Get(ctx, id)
-	require.ErrorIs(t, err, engine.ErrNotFound)
-}
-
-// Disconnecting forgets an environment's failed copies with the rest of its
-// state, so the next environment to join under that name does not inherit them.
-func TestDisconnectForgetsFailedCopies(t *testing.T) {
-	svc, inv, id := failedCopy(t)
-	ctx := context.Background()
-
-	require.NoError(t, disconnect(ctx, svc, "spoke-a"))
-	inv.Register("spoke-a", "pds")
-	inv.ApplyHeartbeat(hub.Heartbeat{Environment: "spoke-a", Namespace: "pds", At: time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)})
-
-	_, err := svc.Get(ctx, id)
-	require.ErrorIs(t, err, engine.ErrNotFound)
-}
-
-// restoreIntoSeed builds a hub over store, asks it for a PostgreSQL restore and
-// returns the seed the agent was handed.
-func restoreIntoSeed(t *testing.T, store hub.Store) (*hub.Service, hub.Work) {
-	t.Helper()
-	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
-	inv := hub.NewInventory(time.Minute)
-	inv.Register("spoke-a", "pds")
-	svc := hub.NewService(store, inv, hub.Options{
-		Namespace:     "pds",
-		BackupStorage: "s3",
-		Now:           func() time.Time { return now },
-	})
-	postgresSource(t, inv)
-	_, err := svc.RestoreToNewDatabase(context.Background(), "spoke-a/pds.reporting", "reporting-ok", "reporting-restore-1")
-	require.NoError(t, err)
-	work := svc.TakeWork("spoke-a")
-	require.Len(t, work, 1)
-	require.Equal(t, hub.WorkSeed, work[0].Kind)
-
-	return svc, work[0]
-}
-
-// A commit that cannot be written leaves the seed owed, so the agent is handed
-// it again and its answer releases the Instance then. The Instance is not lost
-// and the seed is not forgotten.
-func TestASeedWhoseInstanceCannotBeCommittedIsRetried(t *testing.T) {
-	ctx := context.Background()
-	backing := hub.NewMemoryStore()
-	store := &indexFailingStore{Store: backing}
-	svc, seed := restoreIntoSeed(t, store)
-	beat := hub.Heartbeat{
-		Environment: "spoke-a", Namespace: "pds",
-		Results: []hub.WorkResult{{ID: seed.ID}},
-	}
-
-	store.fail = true
-	svc.ApplyHeartbeat(beat)
-	_, err := backing.Get(ctx, "clusters/spoke-a/instances/reporting-restore-1.yaml")
-	require.ErrorIs(t, err, hub.ErrNotFound, "a half written commit is rolled back")
-	got, err := svc.Get(ctx, "spoke-a/pds.reporting-restore-1")
-	require.NoError(t, err)
-	assert.Equal(t, engine.PhasePending, got.Status.Phase, "the copy still waits on its seed")
-
-	store.fail = false
-	svc.SetWorkClock(func() time.Time { return time.Now().Add(5 * time.Minute) })
-	again := svc.TakeWork("spoke-a")
-	require.Len(t, again, 1)
-	assert.Equal(t, seed.ID, again[0].ID)
-	svc.ApplyHeartbeat(beat)
-	_, err = backing.Get(ctx, "clusters/spoke-a/instances/reporting-restore-1.yaml")
-	require.NoError(t, err)
-}
-
-// A Git outage must not make a connected environment look unreachable. The
-// heartbeat that carries a seed whose Instance cannot be committed is still
-// recorded, and still answered with work.
-func TestASeedWhoseInstanceCannotBeCommittedStillRecordsTheHeartbeat(t *testing.T) {
-	store := &indexFailingStore{Store: hub.NewMemoryStore()}
-	svc, seed := restoreIntoSeed(t, store)
-	store.fail = true
-
-	_, known, err := svc.AcceptHeartbeat(hub.Heartbeat{
-		Environment: "spoke-a", Namespace: "pds",
-		Results: []hub.WorkResult{{ID: seed.ID}},
-		Instances: []engine.Instance{{
-			ID: "spoke-a/pds.orders", Name: "orders", Engine: "mysql", Namespace: "pds", Environment: "spoke-a",
-		}},
-	}, nil)
-
-	require.NoError(t, err)
-	assert.True(t, known)
-	last := svc.LastInstances("spoke-a")
-	require.Len(t, last, 1)
-	assert.Equal(t, "orders", last[0].Name)
-}
-
-// budgetStore records how long each write was given to finish. A write with
-// no deadline is recorded as a negative budget.
-type budgetStore struct {
-	hub.Store
-	budgets []time.Duration
-}
-
-func (s *budgetStore) Write(ctx context.Context, files map[string][]byte, message string) error {
-	budget := time.Duration(-1)
-	if deadline, ok := ctx.Deadline(); ok {
-		budget = time.Until(deadline)
-	}
-	s.budgets = append(s.budgets, budget)
-
-	return s.Store.Write(ctx, files, message)
-}
-
-// The agent gives up on a beat after ten seconds, and the work handed out in a
-// reply it never reads waits for the retry. The commit a seed releases has to
-// fit inside that beat.
-func TestASeedCommitFitsInsideTheAgentsBeat(t *testing.T) {
-	store := &budgetStore{Store: hub.NewMemoryStore()}
-	svc, seed := restoreIntoSeed(t, store)
-
-	_, _, err := svc.AcceptHeartbeat(hub.Heartbeat{
-		Environment: "spoke-a", Namespace: "pds",
-		Results: []hub.WorkResult{{ID: seed.ID}},
-	}, nil)
-
-	require.NoError(t, err)
-	require.NotEmpty(t, store.budgets)
-	for _, budget := range store.budgets {
-		assert.Positive(t, budget)
-		assert.Less(t, budget, 10*time.Second)
-	}
-}
-
-// The seed carries the Instance with it, so a hub restart between the request
-// and the acknowledgement still commits it.
-func TestAQueuedSeedKeepsItsInstanceAcrossARestart(t *testing.T) {
-	ctx := context.Background()
-	kv := &memKV{}
-	persist := hub.NewConfigMapWorkPersist(kv, "everest-system", "pds-hub-work")
-	q := hub.NewWorkQueue()
-	q.SetPersist(persist)
-	require.NoError(t, q.Push("spoke-a", hub.Work{
-		Kind: hub.WorkSeed, Database: "pds.orders", BackupID: "b1", Name: "copy", Instance: "kind: Instance\n",
-	}))
-
-	restarted := hub.NewWorkQueue()
-	restarted.SetPersist(persist)
-	require.NoError(t, restarted.Load(ctx))
-
-	got := restarted.Take("spoke-a")
-	require.Len(t, got, 1)
-	assert.Equal(t, "kind: Instance\n", got[0].Instance)
+	require.ErrorIs(t, err, engine.ErrExists)
 }
 
 // The longest label a copy's name lands in is the controller revision hash of
@@ -1136,11 +742,12 @@ func TestRestoreRefusesANameThatIsNotALabel(t *testing.T) {
 	})
 
 	names := map[string]string{
-		"traversal": "../../spoke-b/instances/evil",
-		"slash":     "orders/restore",
-		"space":     "orders restore",
-		"capital":   "OrdersRestore",
-		"empty":     "",
+		"traversal":     "../../spoke-b/instances/evil",
+		"slash":         "orders/restore",
+		"space":         "orders restore",
+		"capital":       "OrdersRestore",
+		"leading digit": "1st-restore",
+		"empty":         "",
 	}
 
 	for label, name := range names {
@@ -1201,12 +808,13 @@ func TestCreateRefusesANameThatIsNotALabel(t *testing.T) {
 	ctx := context.Background()
 
 	names := map[string]string{
-		"traversal":   "../../spoke-b/instances/evil",
-		"slash":       "orders/dev",
-		"space":       "orders dev",
-		"capital":     "OrdersDev",
-		"leading dot": ".orders",
-		"empty":       "",
+		"traversal":     "../../spoke-b/instances/evil",
+		"slash":         "orders/dev",
+		"space":         "orders dev",
+		"capital":       "OrdersDev",
+		"leading dot":   ".orders",
+		"leading digit": "1stbyoc2db",
+		"empty":         "",
 	}
 
 	for label, name := range names {
@@ -2064,54 +1672,11 @@ func TestAPendingBackupBelongsToTheNamespaceItWasAskedIn(t *testing.T) {
 	assert.Empty(t, inB)
 }
 
-// The failed copy names the cause the agent reported, in a sentence of its own
-// with one action, and never repeats the agent's text.
-func TestAFailedSeedNamesItsCause(t *testing.T) {
-	for _, tc := range []struct {
-		reason string
-		want   string
-	}{
-		{hub.SeedBackupUnusable, "The backup is missing or did not finish. Pick a finished backup and restore again."},
-		{hub.SeedSourceGone, "The database this backup was taken from no longer exists. Restore a backup of a database that still exists."},
-		{hub.SeedUnavailable, "This environment cannot restore a PostgreSQL backup yet. Contact Percona support."},
-		{hub.SeedOther, "The restore could not start. Contact Percona support."},
-	} {
-		t.Run(tc.reason, func(t *testing.T) {
-			svc, _, id := failedCopyWith(t, hub.WorkResult{Error: "perconapgbackups is forbidden", Reason: tc.reason})
-
-			got, err := svc.Get(context.Background(), id)
-
-			require.NoError(t, err)
-			assert.Equal(t, engine.PhaseFailed, got.Status.Phase)
-			assert.Equal(t, tc.want, got.Status.Message)
-		})
-	}
-}
-
-// An agent that sends no reason, or one this hub does not know, keeps the
-// sentence the hub always showed.
-func TestAFailedSeedWithoutAKnownReasonKeepsTheOriginalSentence(t *testing.T) {
-	const original = "The restore could not start from that backup. Check that the backup finished and its source database still exists, then restore again."
-	for name, reason := range map[string]string{"none": "", "unknown": "from-the-future"} {
-		t.Run(name, func(t *testing.T) {
-			svc, _, id := failedCopyWith(t, hub.WorkResult{Error: "unknown kind seed", Reason: reason})
-
-			got, err := svc.Get(context.Background(), id)
-
-			require.NoError(t, err)
-			assert.Equal(t, original, got.Status.Message)
-		})
-	}
-}
-
-// The reason crosses from the agent to the hub as JSON, so its tag is part of
-// the contract an older or newer agent keeps.
-func TestAWorkResultKeepsItsReasonOnTheWire(t *testing.T) {
-	body, err := json.Marshal(hub.WorkResult{ID: "w1", Error: "text", Reason: hub.SeedSourceGone})
-	require.NoError(t, err)
-	assert.JSONEq(t, `{"id":"w1","error":"text","reason":"source"}`, string(body))
-
+// An agent that predates the removal of seeding still sends a reason with a
+// failed result. The heartbeat decoder is not strict, so the result still reads.
+func TestAWorkResultWithARetiredReasonStillDecodes(t *testing.T) {
 	var got hub.WorkResult
-	require.NoError(t, json.Unmarshal([]byte(`{"id":"w1","error":"unknown kind seed"}`), &got))
-	assert.Empty(t, got.Reason, "an agent that predates the reason sends none")
+	require.NoError(t, json.Unmarshal([]byte(`{"id":"w1","error":"text","reason":"source"}`), &got))
+
+	assert.Equal(t, hub.WorkResult{ID: "w1", Error: "text"}, got)
 }

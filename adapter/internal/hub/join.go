@@ -22,6 +22,14 @@ func ValidName(name string) bool {
 	return environmentNamePattern.MatchString(name)
 }
 
+// ValidDatabaseName reports whether name can be a new database. The operators
+// name Services after the database, and a Service name must start with a
+// letter, so a name that starts with a digit is accepted by Flux and then
+// never becomes a database.
+func ValidDatabaseName(name string) bool {
+	return ValidName(name) && name[0] >= 'a' && name[0] <= 'z'
+}
+
 // reservedEnvironmentNames are names the hub UI routes to pages of its own, so a
 // environment called one of them has a row that links away from its databases.
 var reservedEnvironmentNames = map[string]struct{}{

@@ -34,11 +34,6 @@ var ErrEngineNotSupported = errors.New("that engine is not available in hub mode
 // available for the source's engine.
 var ErrRestoreNotSupported = errors.New("restore to a new database is not available for that engine")
 
-// ErrRestoring means the database is a PostgreSQL copy the agent is still
-// seeding, or one whose seed ran and whose committed Instance no heartbeat
-// lists yet. Deleting it in either state would orphan the seeded database.
-var ErrRestoring = errors.New("database is still being restored")
-
 // ErrInvalidEnvironment means the join name is not a DNS label, or is a name
 // the hub UI already routes to a page of its own.
 var ErrInvalidEnvironment = errors.New("environment name is not a DNS label")
@@ -91,6 +86,11 @@ type Options struct {
 	// background work a heartbeat starts. Nil means work that is never
 	// cancelled.
 	Context context.Context
+	// OwnershipID returns the ID a managed environment's AWS resources are
+	// tagged with, and empty for an environment the control plane did not build.
+	// The load balancers the hub asks for carry it. Nil means no environment has
+	// one.
+	OwnershipID func(ctx context.Context, environment string) (string, error)
 }
 
 // Service is the hub-mode database backend.
@@ -123,13 +123,8 @@ type Service struct {
 	cloneKeys        map[string]CloneKey
 	cloneUnpersisted map[string]bool
 	pmmVersion       string
+	ownership        func(ctx context.Context, environment string) (string, error)
 	rulesGate        *alertRulesGate
-	// restoreFailed holds the PostgreSQL copies whose seed failed, by
-	// environment and name, with the reason the agent gave, so the developer
-	// is told instead of waiting on a database that will not appear. A hub
-	// restart forgets them.
-	failMu        sync.Mutex
-	restoreFailed map[string]string
 	// supportEvents are what beats did to support access windows, until the
 	// heartbeat route takes them to write up.
 	supportEventsMu sync.Mutex
@@ -185,8 +180,8 @@ func NewService(store Store, inv *Inventory, opts Options) *Service {
 		cloneKeys:        map[string]CloneKey{},
 		cloneUnpersisted: map[string]bool{},
 		pmmVersion:       strings.TrimSpace(opts.PMMChartVersion),
+		ownership:        opts.OwnershipID,
 		rulesGate:        newAlertRulesGate(),
-		restoreFailed:    map[string]string{},
 		supportEvents:    map[string][]SupportEvent{},
 	}
 }
@@ -237,6 +232,16 @@ func (s *Service) targetsFor(environment string) environmentTargets {
 	}
 }
 
+// ownershipID is the ID that tags what a managed environment owns in AWS, and
+// empty for an environment the control plane did not build.
+func (s *Service) ownershipID(ctx context.Context, environment string) (string, error) {
+	if s.ownership == nil {
+		return "", nil
+	}
+
+	return s.ownership(ctx, environment)
+}
+
 // Create writes an Instance manifest for a connected environment.
 func (s *Service) Create(ctx context.Context, in engine.CreateInput) (*engine.Instance, error) {
 	environment := strings.TrimSpace(in.Environment)
@@ -252,8 +257,8 @@ func (s *Service) Create(ctx context.Context, in engine.CreateInput) (*engine.In
 	}
 	// The HTTP role never reaches a plugin. An unchecked name becomes a path
 	// segment in the desired-state tree and a metadata.name Flux has to apply.
-	if !ValidName(name) {
-		return nil, fmt.Errorf("%w: %q must be lowercase letters, numbers, and dashes", engine.ErrInvalidName, name)
+	if !ValidDatabaseName(name) {
+		return nil, fmt.Errorf("%w: %q must start with a letter and be lowercase letters, numbers, and dashes", engine.ErrInvalidName, name)
 	}
 	if flavor.ID == oe.PostgreSQL.ID && len(name) > maxPostgreSQLName {
 		return nil, &engine.BoundsError{
@@ -273,9 +278,6 @@ func (s *Service) Create(ctx context.Context, in engine.CreateInput) (*engine.In
 	// Git is the hub's desired state, not the whole truth. A database the
 	// spoke already runs without a file here would be silently resized to
 	// this profile when Flux applied the new manifest over it.
-	if s.seeding(environment, name) {
-		return nil, fmt.Errorf("%w: %q on %s", engine.ErrExists, name, environment)
-	}
 	if s.observed(environment, s.namespaceFor(environment), name, JoinID(environment, s.namespaceFor(environment), name)) {
 		return nil, fmt.Errorf("%w: %q on %s", engine.ErrExists, name, environment)
 	}
@@ -285,9 +287,17 @@ func (s *Service) Create(ctx context.Context, in engine.CreateInput) (*engine.In
 		return nil, err
 	}
 
+	targets := s.targetsFor(environment)
+	if exposure.External {
+		// A database that cannot be tagged would leave a load balancer the delete
+		// never finds, so a failed lookup refuses the create.
+		if targets.OwnershipID, err = s.ownershipID(ctx, environment); err != nil {
+			return nil, fmt.Errorf("read the environment's ownership tag: %w", err)
+		}
+	}
 	ns := s.namespaceFor(environment)
 	body, p, err := instanceYAML(name, ns, environment, flavor, strings.ToLower(strings.TrimSpace(in.Profile)),
-		s.targetsFor(environment), in.Overrides, exposure)
+		targets, in.Overrides, exposure)
 	if err != nil {
 		return nil, err
 	}
@@ -325,10 +335,6 @@ func (s *Service) Create(ctx context.Context, in engine.CreateInput) (*engine.In
 
 		return nil, err
 	}
-	// The database that now holds the name replaces a restore of it that
-	// failed, which would otherwise come back once this one is deleted.
-	s.forgetRestoreFailure(environment, name)
-
 	out := engine.Instance{
 		ID:          JoinID(environment, ns, name),
 		Name:        name,
@@ -365,25 +371,8 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 
 	path := instancePath(environment, name)
 	body, gitErr := s.manifest(ctx, environment, ns, name)
-	if gitErr == nil && restoredFromYAML(body) && !s.observed(environment, ns, name, id) {
-		// The seed already created the copy's database. Removing the manifest
-		// before an Instance is listed would leave it running with no Instance
-		// to delete it.
-		return fmt.Errorf("%w: %q", ErrRestoring, id)
-	}
 	if errors.Is(gitErr, ErrNotFound) {
 		if !s.observed(environment, ns, name, id) {
-			// A copy still seeding is refused rather than cancelled: the agent
-			// may already be creating its database, which nothing would adopt.
-			if ns == s.namespaceFor(environment) && s.seeding(environment, name) {
-				return fmt.Errorf("%w: %q", ErrRestoring, id)
-			}
-			// A copy whose seed failed has nothing on the environment, and
-			// deleting it is how the developer clears the failure.
-			if ns == s.namespaceFor(environment) && s.forgetRestoreFailure(environment, name) {
-				return nil
-			}
-
 			return fmt.Errorf("%w: %q", engine.ErrNotFound, id)
 		}
 		return wrapPersist(s.work.Push(environment, Work{Kind: WorkDelete, Database: ns + "." + name}))
@@ -489,8 +478,8 @@ func (s *Service) RestoreToNewDatabase(ctx context.Context, id, backupID, name s
 	name = strings.TrimSpace(name)
 	// The name becomes a path segment in the desired-state tree and a
 	// metadata.name Flux applies, so it is checked before anything is read.
-	if !ValidName(name) {
-		return nil, fmt.Errorf("%w: %q must be lowercase letters, numbers, and dashes", engine.ErrInvalidName, name)
+	if !ValidDatabaseName(name) {
+		return nil, fmt.Errorf("%w: %q must start with a letter and be lowercase letters, numbers, and dashes", engine.ErrInvalidName, name)
 	}
 	if err := s.requireConnected(environment); err != nil {
 		return nil, err
@@ -551,34 +540,13 @@ func (s *Service) RestoreToNewDatabase(ctx context.Context, id, backupID, name s
 	ns := s.namespaceFor(environment)
 	restoreFrom := backupID
 	if postgres {
-		// The provider refuses a dataSource on a PostgreSQL Instance, so the
-		// agent creates the database with its dataSource first and the Instance
-		// adopts it. The provider drops a backup storage that has no schedule,
-		// and the copy must archive to a repository of its own afterwards.
-		restoreFrom = ""
+		// Every PostgreSQL copy gets an enabled daily schedule, as a restored
+		// copy always has, so its backups land in a repository of its own.
 		dest.daily = true
 	}
 	body, _, err := buildInstanceYAML(name, ns, environment, dest, s.targetsFor(environment), restoreFrom, engine.Exposure{})
 	if err != nil {
 		return nil, err
-	}
-	if postgres {
-		if body, err = markRestored(body, source); err != nil {
-			return nil, err
-		}
-		// The Instance is committed when the agent reports the seed run, not
-		// now. Flux applies a commit on its own schedule, and a database the
-		// provider creates before the seed reaches it is bootstrapped empty.
-		seed := Work{
-			Kind: WorkSeed, Database: ns + "." + source, BackupID: backupID,
-			Name: name, Instance: string(body),
-		}
-		if err := s.work.Push(environment, seed); err != nil {
-			return nil, wrapPersist(err)
-		}
-		s.forgetRestoreFailure(environment, name)
-
-		return &RestoreIssued{Environment: environment, Name: name, ID: JoinID(environment, ns, name)}, nil
 	}
 	if err := s.commitInstance(ctx, environment, name, body, "restore "+source+" into "+name); err != nil {
 		return nil, err
@@ -608,131 +576,6 @@ func (s *Service) commitInstance(ctx context.Context, environment, name string, 
 	return nil
 }
 
-// settleSeeds acts on the results of PostgreSQL seeds, and returns the results
-// that may be acknowledged. A seed that ran releases the Instance it was
-// holding. One that failed commits nothing, since the provider would create a
-// healthy empty database under the copy's name, and is remembered so the
-// developer sees the failure. A seed whose Instance cannot be committed is left
-// unacknowledged, so it is handed out again and the commit retried. The beat
-// itself is still recorded, as it is when a credentials release cannot write,
-// so a Git outage does not make the environment look unreachable.
-func (s *Service) settleSeeds(environment string, results []WorkResult) []WorkResult {
-	owed := s.work.owed(environment, WorkSeed)
-	if len(owed) == 0 {
-		return results
-	}
-	ctx, cancel := context.WithTimeout(s.lifetime, releaseTimeout)
-	defer cancel()
-	kept := make([]WorkResult, 0, len(results))
-	for _, result := range results {
-		item, ok := owed[result.ID]
-		if !ok {
-			kept = append(kept, result)
-
-			continue
-		}
-		if result.Error != "" {
-			slog.Warn("hub seed failed",
-				slog.String("environment", environment),
-				slog.String("database", item.Name),
-				slog.String("reason", result.Reason),
-				slog.String("err", result.Error))
-			s.failMu.Lock()
-			s.restoreFailed[environment+"/"+item.Name] = result.Reason
-			s.failMu.Unlock()
-			kept = append(kept, result)
-
-			continue
-		}
-		_, source, _ := strings.Cut(item.Database, ".")
-		if err := s.commitInstance(ctx, environment, item.Name, []byte(item.Instance), "restore "+source+" into "+item.Name); err != nil {
-			slog.Warn("hub could not commit a seeded database, so its seed is handed out again",
-				slog.String("environment", environment),
-				slog.String("database", item.Name),
-				slog.String("err", err.Error()))
-
-			continue
-		}
-		kept = append(kept, result)
-	}
-
-	return kept
-}
-
-// forgetRestoreFailure drops the failed seed of this name, and reports whether
-// there was one.
-func (s *Service) forgetRestoreFailure(environment, name string) bool {
-	s.failMu.Lock()
-	defer s.failMu.Unlock()
-
-	key := environment + "/" + name
-	_, failed := s.restoreFailed[key]
-	delete(s.restoreFailed, key)
-
-	return failed
-}
-
-// forgetRestoreFailures drops every failed seed of one environment.
-func (s *Service) forgetRestoreFailures(environment string) {
-	s.failMu.Lock()
-	defer s.failMu.Unlock()
-
-	for key := range s.restoreFailed {
-		if env, _, _ := strings.Cut(key, "/"); env == environment {
-			delete(s.restoreFailed, key)
-		}
-	}
-}
-
-// restoreCopies is the PostgreSQL copies an environment has no Instance for
-// yet: the ones waiting on their seed and the ones whose seed failed.
-func (s *Service) restoreCopies(environment string) []engine.Instance {
-	var out []engine.Instance
-	for _, seed := range s.work.owed(environment, WorkSeed) {
-		inst := s.pendingInstance(environment, seed.Name)
-		inst.Engine = oe.PostgreSQL.ID
-		if profile := profileFromInstanceYAML([]byte(seed.Instance)); profile != "" {
-			inst.Profile = profile
-		}
-		out = append(out, inst)
-	}
-	s.failMu.Lock()
-	defer s.failMu.Unlock()
-	for key, reason := range s.restoreFailed {
-		env, name, _ := strings.Cut(key, "/")
-		if env != environment {
-			continue
-		}
-		inst := s.pendingInstance(environment, name)
-		inst.Engine = oe.PostgreSQL.ID
-		inst.Status = failedRestoreStatus(reason)
-		out = append(out, inst)
-	}
-
-	return out
-}
-
-// failedRestoreStatus is what a copy whose seed failed shows. A reason the hub
-// does not know, or none because the agent predates it, keeps the sentence that
-// covers every cause.
-func failedRestoreStatus(reason string) engine.Status {
-	status := engine.Status{Phase: engine.PhaseFailed}
-	switch reason {
-	case SeedBackupUnusable:
-		status.Message = "The backup is missing or did not finish. Pick a finished backup and restore again."
-	case SeedSourceGone:
-		status.Message = "The database this backup was taken from no longer exists. Restore a backup of a database that still exists."
-	case SeedUnavailable:
-		status.Message = "This environment cannot restore a PostgreSQL backup yet. Contact Percona support."
-	case SeedOther:
-		status.Message = "The restore could not start. Contact Percona support."
-	default:
-		status.Message = "The restore could not start from that backup. Check that the backup finished and its source database still exists, then restore again."
-	}
-
-	return status
-}
-
 // List returns Git desired instances overlaid with the last heartbeat snapshot.
 func (s *Service) List(ctx context.Context, environment string) ([]engine.Instance, error) {
 	byID := map[string]engine.Instance{}
@@ -743,9 +586,6 @@ func (s *Service) List(ctx context.Context, environment string) ([]engine.Instan
 		desired, err := s.desiredInstances(ctx, c.Name)
 		if err != nil {
 			return nil, err
-		}
-		for _, inst := range s.restoreCopies(c.Name) {
-			byID[inst.ID] = inst
 		}
 		for _, inst := range desired {
 			byID[inst.ID] = inst
@@ -813,12 +653,6 @@ func (s *Service) Get(ctx context.Context, id string) (*engine.Instance, error) 
 	body, err := s.manifest(ctx, environment, namespace, name)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
-			for _, inst := range s.restoreCopies(environment) {
-				if inst.ID == id {
-					return &inst, nil
-				}
-			}
-
 			return nil, fmt.Errorf("%w: %q", engine.ErrNotFound, id)
 		}
 
@@ -955,24 +789,11 @@ func (s *Service) requireAbsent(ctx context.Context, environment, name string) e
 	if !errors.Is(err, ErrNotFound) {
 		return err
 	}
-	if s.seeding(environment, name) ||
-		s.observed(environment, s.namespaceFor(environment), name, JoinID(environment, s.namespaceFor(environment), name)) {
+	if s.observed(environment, s.namespaceFor(environment), name, JoinID(environment, s.namespaceFor(environment), name)) {
 		return fmt.Errorf("%w: %q on %s", engine.ErrExists, name, environment)
 	}
 
 	return nil
-}
-
-// seeding reports whether a PostgreSQL copy of this name is waiting on its
-// seed. It has no manifest yet, so the Git check cannot see it.
-func (s *Service) seeding(environment, name string) bool {
-	for _, seed := range s.work.owed(environment, WorkSeed) {
-		if seed.Name == name {
-			return true
-		}
-	}
-
-	return false
 }
 
 // backupState is the state of one backup of one database. It takes the
@@ -1151,9 +972,7 @@ func (s *Service) applyHeartbeatLocked(beat Heartbeat) error {
 	// used to report a timestamp in the future, which made now.Sub(at)
 	// negative and pinned a dead environment to connected for good.
 	beat.At = s.now()
-	// Settle what the last reply asked for before deciding what to ask next.
-	settled := s.settleSeeds(beat.Environment, beat.Results)
-	if err := s.work.Ack(beat.Environment, s.releaseHeld(beat.Environment, settled)); err != nil {
+	if err := s.work.Ack(beat.Environment, s.releaseHeld(beat.Environment, beat.Results)); err != nil {
 		return err
 	}
 	if err := s.reconcileSupport(&beat); err != nil {
@@ -1372,12 +1191,6 @@ func (s *Service) Scale(ctx context.Context, id string, in engine.ScaleInput) er
 	}
 	if errors.Is(gitErr, ErrNotFound) {
 		if !s.observed(environment, ns, name, id) {
-			// A copy still seeding is listed, so it is refused as Delete
-			// refuses it rather than reported as missing.
-			if ns == s.namespaceFor(environment) && s.seeding(environment, name) {
-				return fmt.Errorf("%w: %q", ErrRestoring, id)
-			}
-
 			return fmt.Errorf("%w: %q", engine.ErrNotFound, id)
 		}
 		if err := s.checkHubScale(environment, name, id, nil, in); err != nil {
@@ -1546,6 +1359,23 @@ func (s *Service) SetBackupSchedule(ctx context.Context, id string, in *engine.S
 	return result, nil
 }
 
+// assignNewRepoLocked claims the repository of an environment the inventory does
+// not list yet, so whichever writes to Git first, the join or a managed
+// environment's release, settles the name the other uses. It reports whether the
+// inventory listed the environment. The caller holds the environment's lock.
+func (s *Service) assignNewRepoLocked(ctx context.Context, name string) (known bool, err error) {
+	if _, known = s.inv.Get(name, s.now()); known {
+		return true, nil
+	}
+	if assigner, ok := s.git.(repoAssigner); ok {
+		if err := assigner.Assign(ctx, name); err != nil {
+			return false, fmt.Errorf("%w: %w", ErrGitHost, err)
+		}
+	}
+
+	return false, nil
+}
+
 // IssueJoin mints a token bound to one environment name and writes empty Flux
 // kustomize dirs so the spoke can pull before the first create. The environment
 // is registered so a hub restart still lists it as unreachable until a beat.
@@ -1558,13 +1388,9 @@ func (s *Service) IssueJoin(ctx context.Context, name string) (string, error) {
 	defer s.life.Unlock()
 	unlock := s.spokes.lock(name)
 	defer unlock()
-	_, alreadyKnown := s.inv.Get(name, s.now())
-	if !alreadyKnown {
-		if assigner, ok := s.git.(repoAssigner); ok {
-			if err := assigner.Assign(ctx, name); err != nil {
-				return "", fmt.Errorf("%w: %w", ErrGitHost, err)
-			}
-		}
+	alreadyKnown, err := s.assignNewRepoLocked(ctx, name)
+	if err != nil {
+		return "", err
 	}
 	if s.git != nil {
 		if err := s.git.EnsureRepo(ctx, name); err != nil {
@@ -1826,7 +1652,11 @@ func (s *Service) seedPMM(ctx context.Context, environment string) error {
 	if _, err := s.store.Get(ctx, pmmDir(environment)+"/kustomization.yaml"); err == nil {
 		return nil
 	}
-	files, err := pmmFiles(environment, DefaultPMMSettings(), s.pmmVersion, true)
+	ownershipID, err := s.ownershipID(ctx, environment)
+	if err != nil {
+		return fmt.Errorf("read the environment's ownership tag: %w", err)
+	}
+	files, err := pmmFiles(environment, DefaultPMMSettings(), s.pmmVersion, ownershipID, true)
 	if err != nil {
 		return err
 	}
@@ -1928,7 +1758,6 @@ func (s *Service) Disconnect(ctx context.Context, environment string) (supportRe
 
 		return supportRemoved, wrapPersist(err)
 	}
-	s.forgetRestoreFailures(environment)
 
 	return supportRemoved, nil
 }

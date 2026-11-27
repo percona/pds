@@ -63,6 +63,13 @@ export function ConnectEnvironmentPage() {
         description="One command creates an EKS cluster, installs the platform, and connects it here as an environment."
       />
 
+      <Link
+        to="/environments/new"
+        className="inline-block rounded-md text-sm font-medium text-primary hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+      >
+        Let PDS create it in your AWS account instead
+      </Link>
+
       <div className="space-y-6">
         <Step n={1} title="Name this environment">
           <Field
@@ -207,7 +214,7 @@ function Prerequisites({ region }: { region?: string }) {
   );
 }
 
-function Step({ n, title, children }: { n: number; title: string; children: ReactNode }) {
+export function Step({ n, title, children }: { n: number; title: string; children: ReactNode }) {
   return (
     <section className="space-y-4">
       <Card className="space-y-4 px-5 py-5">

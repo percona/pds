@@ -13,12 +13,14 @@ another module needs to import something. Tests sit next to the code.
 | Package | Owns |
 |---------|------|
 | `cmd/adapter` | The binary: configuration, wiring, roles, and the `adapter organization` command |
-| `internal/api` | HTTP: the chi router in `server.go`, handlers, `AppError` and `Respond`, the session guard, and the embedded join scripts |
+| `internal/api` | HTTP: the chi router in `server.go`, handlers, `AppError` and `Respond`, the session guard, and the embedded join scripts and cloud connection template |
 | `internal/service` | Business logic. Services decide, call clients and return domain errors |
-| `internal/client/*` | One package per downstream: `everest`, `pmm`, `servicenow`, `github`, `claude`, `cursor`, `ses`, and `kube`, the only package that talks to the Kubernetes API, and `clientmeta`, which fetches an OAuth client's metadata document |
+| `internal/client/*` | One package per downstream: `everest`, `pmm`, `servicenow`, `github`, `claude`, `cursor`, `ses`, and `kube`, the only package that talks to the Kubernetes API, `clientmeta`, which fetches an OAuth client's metadata document, `aws`, which assumes a cloud connection's role and makes, reads, changes and sweeps what a managed environment owns, and `backupkey`, which the agent runs inside the environment to make its backup IAM user |
 | `internal/engine` | The engine plugin contract, the registry, and engine errors. `oe` is the shared OpenEverest implementation; `mysql` and `postgresql` are its two flavors |
 | `internal/hub` | Hub state: environment inventory, join tokens, the work queue, and the two Git stores (GitHub, or a local directory) |
 | `internal/agent` | The `agent` role: the heartbeat loop and the work it runs locally |
+| `internal/provision` | Provisioning runs: the lease-based worker, step retry and backoff, pause and resume, the Access window sweeper and run retention. It knows no cloud: a run kind brings its steps |
+| `internal/managed` | Managed environments: the create, delete, upgrade and rebuild runs' steps, the requests that start them, drift and loss, the embedded network and cluster template, and the pds HelmRelease render under its golden. AWS, Kubernetes and the hub come in through interfaces |
 | `internal/store` | The adapter's own PostgreSQL: GORM models, migration, sealing |
 | `internal/auth` | Password hashing, invite and session tokens, the signed cookie, request identity |
 | `internal/config` | Environment configuration: every setting is read and validated here |
@@ -214,20 +216,8 @@ and `postgresql` select a flavor. The agent registers both. The create form
 offers PostgreSQL only when `apps/ui/src/features/databases/engines.ts`
 enables it. The HTTP role does not call the registry: create, scale, schedule
 and delete are Git commits, and backup is work the agent runs. Restore is a
-Git commit that creates a second database. For PostgreSQL the provider refuses
-that, so the hub queues a `seed` work item carrying the Instance manifest and
-commits nothing yet. The agent creates the `PerconaPGCluster` with
-`spec.dataSource.pgbackrest` set from the source's backup (`postgresql.Seed`),
-and the hub commits the Instance when it receives that result, so Flux cannot
-apply it first. That manifest carries `pds.percona.com/restored-from`, and
-`Delete` refuses it with `ErrRestoring` until a heartbeat lists the Instance,
-so a delete cannot orphan the seeded database. A failed seed commits nothing and is reported on the pending
-database. The agent's result carries a typed `reason` (`hub.Seed*`) that the
-hub turns into the failed copy's sentence; the error text goes to the log only,
-and a result with no reason keeps the original sentence.
-A create that errors after the API server made the cluster is
-followed by deleting that cluster when it restores the same backup, so a failed
-copy leaves nothing running.
+Git commit that creates a second database, for both engines: the Instance
+carries a `dataSource` naming the backup, and the provider does the rest.
 
 ```go
 // adapter/internal/engine/engine.go

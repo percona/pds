@@ -185,15 +185,18 @@ Scripts: `shellcheck --severity=warning` on what you touched, and its
 | `compose` | `deploy/`, adapter and MCP server changes | The Compose hub with a throwaway database; the MCP binary's contract tests against a hub with no environments, signed in through the authorize and consent routes |
 | `landing` | Landing page changes | oxlint, Prettier, typecheck, Vitest, build, `npm audit` |
 | `naming`, `pr` | Every PR | Dead product names, and a connected environment called a cluster; the PR title and body |
-| `smoke` | Nightly, dispatch | `hub-smoke`, one parallel job per suite, each with its own lab: `mysql` and `postgresql` run the lifecycle, `mcp` runs the MCP binary's contract tests against a lab with a connected environment. It never gates a PR |
+| `smoke` | Nightly, dispatch | `hub-smoke`, one parallel job per suite, each with its own lab: `mysql` and `postgresql` run the lifecycle, `mcp` runs the MCP binary's contract tests against a lab with a connected environment, `flux` connects the environment the way the control plane does (Flux and a rendered HelmRelease, no join script) and creates a database. It never gates a PR |
 | `publish` | A published GitHub Release | Images (the UI image carries the landing page) and chart, then a `repository_dispatch` of `release-published` to the deploy repository (secret `OPS_DISPATCH_TOKEN`). A release tagged `mcp-v` builds nothing here: it sends `mcp-release-published` instead, and Percona's release pipeline publishes the MCP server and the `pds` plugin |
 
-`hub-smoke` runs in `smoke` on the nightly schedule and on dispatch, as three
+`hub-smoke` runs in `smoke` on the nightly schedule and on dispatch, as four
 suites in parallel. Each brings up its own lab, a hub and one connected
 environment. `mysql` and `postgresql` run the lifecycle through the hub for
 their engine. `mcp` creates no lifecycle: once the environment is connected it
 runs the MCP binary's contract tests against the hub, signed in as the user
-the lab seeds. A failure in one suite does not cancel the others. It is the pin
+the lab seeds. `flux` bootstraps its environment with the adapter's
+`smoke-environment` command instead of the join script, installs the chart
+under review from a registry the lab starts, and checks a database is created,
+Ready and deleted. A failure in one suite does not cancel the others. It is the pin
 contract. It never gates a pull request, so nothing stops a regression it would
 catch from merging unless a maintainer runs it.
 `kind-platform` in the chart workflow brings that lab up on a pull request
@@ -207,9 +210,10 @@ suites it needs are green, when the diff changes any of:
 
 | Change | Suites |
 |--------|--------|
-| The adapter's reconcile, delete, restore or Secret handling, or what it needs from RBAC to do them | all three |
-| `charts/`, the lab and bring-up scripts, or `scripts/hub-smoke.sh` | all three |
-| The version pin | all three |
+| The adapter's reconcile, delete, restore or Secret handling, or what it needs from RBAC to do them | all four |
+| `charts/`, the lab and bring-up scripts, or `scripts/hub-smoke.sh` | all four |
+| The version pin, which includes the Flux version | all four |
+| The HelmRelease the adapter renders for a managed environment, or the Flux bootstrap | `flux` |
 | The MCP binary's real-stack path | `mcp` |
 
 ```bash
@@ -217,8 +221,8 @@ gh workflow run smoke --ref <branch>
 gh workflow run smoke --ref <branch> -f suites=mcp
 ```
 
-The first runs all three suites. The second runs a subset: a comma separated
-list of `mysql`, `postgresql` and `mcp`. The suites run in parallel, so a full
+The first runs all four suites. The second runs a subset: a comma separated
+list of `mysql`, `postgresql`, `mcp` and `flux`. The suites run in parallel, so a full
 run takes about 45 minutes, and a run of one suite takes as long as that suite
 alone. It costs CI minutes only. The maintainer links the run in the PR's
 Verification section with its result. A run you did not make goes under Not

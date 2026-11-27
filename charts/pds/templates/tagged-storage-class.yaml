@@ -1,0 +1,22 @@
+{{- if .Values.taggedStorageClass.enabled }}
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .Values.taggedStorageClass.name }}
+  labels:
+    {{- include "pds.labels" . | nindent 4 }}
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  {{- range $i, $key := keys .Values.taggedStorageClass.tags | sortAlpha }}
+  tagSpecification_{{ add1 $i }}: {{ printf "%s=%s" $key (index $.Values.taggedStorageClass.tags $key) | quote }}
+  {{- end }}
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+{{- end }}

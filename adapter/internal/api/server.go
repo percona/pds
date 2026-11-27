@@ -12,6 +12,7 @@ import (
 	"github.com/percona/pds/adapter/internal/auth"
 	"github.com/percona/pds/adapter/internal/config"
 	"github.com/percona/pds/adapter/internal/features"
+	"github.com/percona/pds/adapter/internal/managed"
 	"github.com/percona/pds/adapter/internal/mcp"
 	"github.com/percona/pds/adapter/internal/service"
 )
@@ -38,6 +39,16 @@ type Deps struct {
 	// Support is nil when the adapter has no ServiceNow Secret, and the
 	// support routes then answer 501 so the UI hides its actions.
 	Support *service.Support
+
+	// CloudConnections is nil where no control plane principal is configured,
+	// and its routes then answer 501.
+	CloudConnections *service.CloudConnections
+	// ManagedEnvironments starts the creation and the deletion of a managed
+	// environment. It is nil where this deployment cannot build one.
+	ManagedEnvironments *managed.Environments
+	// Managed reads and changes managed environments after they exist. It is
+	// nil wherever ManagedEnvironments is.
+	Managed *managed.Manager
 
 	// Connections stores UI-pasted ServiceNow and Anthropic credentials.
 	Connections *service.Connections
@@ -124,6 +135,9 @@ type Server struct {
 	metrics         *service.Metrics
 	support         *service.Support
 	connections     *service.Connections
+	cloud           *service.CloudConnections
+	managedCreate   *managed.Environments
+	managed         *managed.Manager
 	chat            *service.Chat
 	chatHeartbeat   time.Duration
 	activity        *service.Activity
@@ -170,6 +184,9 @@ func NewServer(deps Deps) *Server {
 		metrics:         deps.Metrics,
 		support:         deps.Support,
 		connections:     deps.Connections,
+		cloud:           deps.CloudConnections,
+		managedCreate:   deps.ManagedEnvironments,
+		managed:         deps.Managed,
 		chat:            deps.Chat,
 		chatHeartbeat:   deps.ChatHeartbeat,
 		activity:        deps.Activity,
@@ -212,6 +229,14 @@ func NewServer(deps Deps) *Server {
 	s.router.Get("/api/internal/connect/bootstrap.sh", s.handleConnectBootstrap)
 	s.router.Get("/api/internal/connect/pds.tgz", s.handleConnectChart)
 	s.router.Get("/api/internal/connect/enrollment", s.handleConnectEnrollment)
+
+	// A customer's AWS account reaches these with a connect token, or with no
+	// credential at all for the generic template and script.
+	s.router.Get(cloudRoutePrefix+"template.yaml", s.handleCloudTemplate)
+	s.router.Get(cloudRoutePrefix+"connect.sh", s.handleCloudConnectScript)
+	s.router.Post(cloudRoutePrefix+"enroll", s.handleCloudEnroll)
+	s.router.Post(cloudRoutePrefix+"events", s.handleCloudEvent)
+	s.router.Post(cloudRoutePrefix+"verify", s.handleCloudVerify)
 
 	s.registerOAuthRoutes()
 	s.registerMCPRoutes()
@@ -277,10 +302,26 @@ func NewServer(deps Deps) *Server {
 				environments.Get("/connect", s.handleConnectGuide)
 				environments.With(s.requireCaller).Post("/connect/tokens", s.handleIssueJoinToken)
 
+				environments.Get("/cloud-connections", s.handleListCloudConnections)
+				environments.Get("/cloud-connections/{id}", s.handleGetCloudConnection)
+				environments.With(s.requireCaller).Post("/cloud-connections", s.handleCreateCloudConnection)
+				environments.With(s.requireCaller).Delete("/cloud-connections/{id}", s.handleRemoveCloudConnection)
+				environments.With(s.requireCaller).Post("/cloud-connections/{id}/environments", s.handleCreateManagedEnvironment)
+				environments.With(s.requireCaller).Post("/cloud-connection-tokens", s.handleIssueCloudToken)
+				environments.Get("/cloud-connection-tokens/{id}", s.handleGetCloudToken)
+				environments.With(s.requireCaller).Delete("/cloud-connection-tokens/{id}", s.handleCancelCloudToken)
+
 				environments.Group(func(environment chi.Router) {
 					environment.Use(s.objectTeam("name"))
 
 					environment.With(s.requireCaller).Delete("/environments/{name}", s.handleDisconnectEnvironment)
+					environment.Get("/environments/{name}", s.handleGetEnvironment)
+					environment.Get("/environments/{name}/remains", s.handleGetRemains)
+					environment.With(s.requireCaller).Post("/environments/{name}/runs", s.handleStartRun)
+					environment.With(s.requireCaller).Post("/environments/{name}/runs/{runId}/retry", s.handleRetryRun)
+					environment.With(s.requireCaller).Post("/environments/{name}/upgrades/defer", s.handleDeferUpgrade)
+					environment.With(s.requireCaller).Put("/environments/{name}/maintenance-window", s.handlePutMaintenanceWindow)
+					environment.With(s.requireCaller).Post("/environments/{name}/updates/preview", s.handlePreviewUpdate)
 					environment.Get("/environments/{name}/history", s.handleEnvironmentHistory)
 					environment.Get("/environments/{name}/monitoring", s.handleGetMonitoring)
 					environment.Get("/environments/{name}/monitoring/password", s.handleGetMonitoringPassword)

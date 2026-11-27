@@ -169,6 +169,9 @@ type environmentTargets struct {
 	BackupStorage string
 	// MonitoringConfig is the MonitoringConfig the pmm-client reports to.
 	MonitoringConfig string
+	// OwnershipID tags the database's load balancer, and is empty for an
+	// environment the control plane did not build.
+	OwnershipID string
 }
 
 // buildInstanceYAML writes one Instance manifest. A restoreFrom names the
@@ -215,7 +218,7 @@ func buildInstanceYAML(
 	}
 	if exposure.External {
 		proxy := spec.Components[everest.ComponentProxy]
-		proxy.Service = oe.LoadBalancerServiceFor(exposure)
+		proxy.Service = oe.LoadBalancerServiceFor(exposure, targets.OwnershipID)
 		spec.Components[everest.ComponentProxy] = proxy
 	}
 	if restoreFrom != "" {
@@ -291,38 +294,6 @@ func presetAnnotation(p profile) map[string]string {
 	}
 
 	return map[string]string{"openeverest.io/instance-preset": p.preset}
-}
-
-// annotationRestoredFrom marks the Instance of a PostgreSQL copy whose database
-// the agent seeded from a backup of the named source. It stays on the committed
-// manifest, so the hub can tell such a copy after a restart.
-const annotationRestoredFrom = "pds.percona.com/restored-from"
-
-// markRestored stamps the restore marker on a freshly built Instance manifest.
-func markRestored(body []byte, source string) ([]byte, error) {
-	var doc objectDoc
-	if err := yaml.Unmarshal(body, &doc); err != nil {
-		return nil, err
-	}
-	if doc.Metadata.Annotations == nil {
-		doc.Metadata.Annotations = map[string]string{}
-	}
-	doc.Metadata.Annotations[annotationRestoredFrom] = source
-
-	return yaml.Marshal(doc)
-}
-
-// restoredFromYAML reports whether the manifest carries the restore marker.
-func restoredFromYAML(body []byte) bool {
-	var doc struct {
-		Metadata everest.ObjectMeta `json:"metadata"`
-	}
-	if err := yaml.Unmarshal(body, &doc); err != nil {
-		return false
-	}
-	_, ok := doc.Metadata.Annotations[annotationRestoredFrom]
-
-	return ok
 }
 
 // mutateInstanceYAML reads a manifest the hub wrote, hands it to fn, and

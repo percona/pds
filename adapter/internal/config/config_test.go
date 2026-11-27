@@ -73,6 +73,21 @@ func clearEnv(t *testing.T) {
 		"HUB_URL",
 		"HUB_PUBLIC_URL",
 		"HUB_OAUTH_ISSUER",
+		"HUB_CLOUD_PRINCIPAL_ARN",
+		"HUB_MANAGED_OUTGOING_CIDRS",
+		"HUB_MANAGED_CHART_VERSION",
+		"HUB_MANAGED_CHART_URL",
+		"AGENT_RELEASE_REF",
+		"AGENT_BACKUP_USER",
+		"AGENT_BACKUP_USER_PATH",
+		"AGENT_BACKUP_BOUNDARY_ARN",
+		"AGENT_BACKUP_BUCKET",
+		"AGENT_BACKUP_SECRET",
+		"AGENT_BACKUP_TAG",
+		"AWS_REGION",
+		"HUB_PROVISION_LEASE_TTL",
+		"HUB_PROVISION_MAX_ATTEMPTS",
+		"HUB_PROVISION_WINDOW_MAX_AGE",
 		"HUB_GIT_URL",
 		"HUB_GITHUB_ORG",
 		"HUB_GITHUB_TOKEN",
@@ -1464,6 +1479,86 @@ func TestLoadRefusesAnOAuthIssuerThatIsNotAnOrigin(t *testing.T) {
 	assert.Contains(t, err.Error(), "HUB_OAUTH_ISSUER")
 }
 
+func TestLoadReadsTheCloudPrincipalAndRefusesAnAccountRoot(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("HUB_GIT_DIR", "/tmp/hub-git")
+	t.Setenv("HUB_OPERATOR_TOKEN", "op-secret")
+	t.Setenv("HUB_PUBLIC_URL", "https://hub.example")
+
+	got, err := config.Load()
+	require.NoError(t, err)
+	assert.Empty(t, got.CloudPrincipalARN, "no principal turns cloud connections off")
+
+	t.Setenv("HUB_CLOUD_PRINCIPAL_ARN", " arn:aws:iam::111122223333:role/pds-control-plane ")
+	got, err = config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, "arn:aws:iam::111122223333:role/pds-control-plane", got.CloudPrincipalARN)
+
+	for _, bad := range []string{"arn:aws:iam::111122223333:root", "111122223333", "*", "arn:aws:iam::1:role/x"} {
+		t.Setenv("HUB_CLOUD_PRINCIPAL_ARN", bad)
+		_, err = config.Load()
+		require.Error(t, err, bad)
+		assert.Contains(t, err.Error(), "HUB_CLOUD_PRINCIPAL_ARN")
+	}
+}
+
+func TestLoadReadsTheProvisioningSettings(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("HUB_GIT_DIR", "/tmp/hub-git")
+	t.Setenv("HUB_OPERATOR_TOKEN", "op-secret")
+	t.Setenv("HUB_PUBLIC_URL", "https://hub.example")
+
+	got, err := config.Load()
+	require.NoError(t, err)
+	assert.Empty(t, got.ManagedOutgoingCIDRs, "no declared addresses refuses managed environments")
+	assert.Equal(t, time.Minute, got.ProvisionLeaseTTL)
+	assert.Equal(t, 5, got.ProvisionMaxAttempts)
+	assert.Equal(t, 30*time.Minute, got.ProvisionWindowMaxAge)
+	assert.Empty(t, got.ManagedChartVersion, "no published chart refuses managed environments")
+	assert.Equal(t, "oci://ghcr.io/percona/charts", got.ManagedChartURL, "the published registry is the default")
+
+	t.Setenv("HUB_MANAGED_OUTGOING_CIDRS", " 203.0.113.7/32 , 198.51.100.0/24,")
+	t.Setenv("HUB_PROVISION_LEASE_TTL", "2m")
+	t.Setenv("HUB_PROVISION_MAX_ATTEMPTS", "8")
+	t.Setenv("HUB_PROVISION_WINDOW_MAX_AGE", "10m")
+	t.Setenv("HUB_MANAGED_CHART_VERSION", " 0.1.0-rc.1 ")
+	t.Setenv("HUB_MANAGED_CHART_URL", " oci://ghcr.io/example/charts ")
+	got, err = config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"203.0.113.7/32", "198.51.100.0/24"}, got.ManagedOutgoingCIDRs)
+	assert.Equal(t, 2*time.Minute, got.ProvisionLeaseTTL)
+	assert.Equal(t, 8, got.ProvisionMaxAttempts)
+	assert.Equal(t, 10*time.Minute, got.ProvisionWindowMaxAge)
+	assert.Equal(t, "0.1.0-rc.1", got.ManagedChartVersion)
+	assert.Equal(t, "oci://ghcr.io/example/charts", got.ManagedChartURL)
+
+	t.Setenv("HUB_MANAGED_OUTGOING_CIDRS", "0.0.0.0/0")
+	got, err = config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"0.0.0.0/0"}, got.ManagedOutgoingCIDRs, "open to everyone is accepted when chosen")
+}
+
+func TestLoadRefusesBadProvisioningSettings(t *testing.T) {
+	for name, value := range map[string]string{
+		"HUB_MANAGED_OUTGOING_CIDRS":   "203.0.113.7",
+		"HUB_MANAGED_CHART_VERSION":    "latest",
+		"HUB_MANAGED_CHART_URL":        "https://ghcr.io/percona/charts",
+		"HUB_PROVISION_LEASE_TTL":      "soon",
+		"HUB_PROVISION_MAX_ATTEMPTS":   "0",
+		"HUB_PROVISION_WINDOW_MAX_AGE": "-1m",
+	} {
+		clearEnv(t)
+		t.Setenv("HUB_GIT_DIR", "/tmp/hub-git")
+		t.Setenv("HUB_OPERATOR_TOKEN", "op-secret")
+		t.Setenv("HUB_PUBLIC_URL", "https://hub.example")
+		t.Setenv(name, value)
+
+		_, err := config.Load()
+		require.Error(t, err, name)
+		assert.Contains(t, err.Error(), name)
+	}
+}
+
 func setSupportTailnet(t *testing.T) {
 	t.Helper()
 
@@ -1583,4 +1678,91 @@ func TestLoadRefusesTheSameTagForEnvironmentsAndAddresses(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "SUPPORT_TAILNET_SERVICE_TAG")
+}
+
+func TestLoadReadsTheReleaseAnAgentReports(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("HUB_GIT_DIR", "/tmp/hub-git")
+	t.Setenv("HUB_OPERATOR_TOKEN", "op-secret")
+	t.Setenv("HUB_PUBLIC_URL", "https://hub.example")
+
+	got, err := config.Load()
+	require.NoError(t, err)
+	assert.Empty(t, got.AgentReleaseNamespace, "a connected environment reports no release")
+	assert.Empty(t, got.AgentReleaseName)
+
+	t.Setenv("AGENT_RELEASE_REF", " flux-system/pds ")
+	got, err = config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, "flux-system", got.AgentReleaseNamespace)
+	assert.Equal(t, "pds", got.AgentReleaseName)
+}
+
+func TestLoadRefusesAReleaseReferenceThatIsNotNamespaceAndName(t *testing.T) {
+	for _, bad := range []string{"pds", "flux-system/", "/pds", "a/b/c", "Flux System/pds"} {
+		clearEnv(t)
+		t.Setenv("HUB_GIT_DIR", "/tmp/hub-git")
+		t.Setenv("HUB_OPERATOR_TOKEN", "op-secret")
+		t.Setenv("HUB_PUBLIC_URL", "https://hub.example")
+		t.Setenv("AGENT_RELEASE_REF", bad)
+
+		_, err := config.Load()
+		require.Error(t, err, bad)
+		assert.Contains(t, err.Error(), "AGENT_RELEASE_REF")
+	}
+}
+
+func setAgentBackupKey(t *testing.T) {
+	t.Helper()
+
+	t.Setenv("AGENT_BACKUP_USER", "pds-k3j9x2m4p1q7-backup")
+	t.Setenv("AGENT_BACKUP_USER_PATH", "/pds/aaaaaaaaaaaa/")
+	t.Setenv("AGENT_BACKUP_BOUNDARY_ARN", "arn:aws:iam::123456789012:policy/pds/aaaaaaaaaaaa/pds-aaaaaaaaaaaa-backup-boundary")
+	t.Setenv("AGENT_BACKUP_BUCKET", "pds-123456789012-k3j9x2m4p1q7")
+	t.Setenv("AGENT_BACKUP_SECRET", "pds-s3")
+	t.Setenv("AGENT_BACKUP_TAG", "k3j9x2m4p1q7")
+	t.Setenv("AWS_REGION", "eu-west-1")
+}
+
+func TestLoadReadsTheBackupKeyAnAgentKeeps(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("HUB_GIT_DIR", "/tmp/hub-git")
+	t.Setenv("HUB_OPERATOR_TOKEN", "op-secret")
+	t.Setenv("HUB_PUBLIC_URL", "https://hub.example")
+
+	got, err := config.Load()
+	require.NoError(t, err)
+	assert.Empty(t, got.AgentBackup.User, "an environment that keeps its key some other way has none to make")
+
+	setAgentBackupKey(t)
+	got, err = config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, config.AgentBackup{
+		User: "pds-k3j9x2m4p1q7-backup", Path: "/pds/aaaaaaaaaaaa/",
+		BoundaryARN: "arn:aws:iam::123456789012:policy/pds/aaaaaaaaaaaa/pds-aaaaaaaaaaaa-backup-boundary",
+		Bucket:      "pds-123456789012-k3j9x2m4p1q7", Secret: "pds-s3", Tag: "k3j9x2m4p1q7", Region: "eu-west-1",
+	}, got.AgentBackup)
+}
+
+func TestLoadRefusesABackupKeySettingThatIsUnusableOrMissing(t *testing.T) {
+	for name, value := range map[string]string{
+		"AGENT_BACKUP_USER":         "has a space",
+		"AGENT_BACKUP_USER_PATH":    "/no-trailing-slash",
+		"AGENT_BACKUP_BOUNDARY_ARN": "arn:aws:iam::123456789012:role/not-a-policy",
+		"AGENT_BACKUP_BUCKET":       "Not_A_Bucket",
+		"AGENT_BACKUP_TAG":          "Has Space",
+		"AGENT_BACKUP_SECRET":       "",
+		"AWS_REGION":                "",
+	} {
+		clearEnv(t)
+		t.Setenv("HUB_GIT_DIR", "/tmp/hub-git")
+		t.Setenv("HUB_OPERATOR_TOKEN", "op-secret")
+		t.Setenv("HUB_PUBLIC_URL", "https://hub.example")
+		setAgentBackupKey(t)
+		t.Setenv(name, value)
+
+		_, err := config.Load()
+		require.Error(t, err, name)
+		assert.Contains(t, err.Error(), name)
+	}
 }

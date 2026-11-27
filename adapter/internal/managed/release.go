@@ -1,0 +1,240 @@
+package managed
+
+import (
+	"errors"
+	"fmt"
+
+	_ "embed"
+
+	"sigs.k8s.io/yaml"
+
+	"github.com/percona/pds/adapter/internal/hub"
+)
+
+// SpokeValues is the connected-environment overlay a managed environment's
+// release starts from. It is a copy of charts/pds/values-spoke.yaml, which a
+// test holds equal, because the adapter cannot embed a file outside its module.
+//
+//go:embed values-spoke.yaml
+var SpokeValues string
+
+// Names in the environment that the release and the steps agree on.
+const (
+	// AgentTokenSecret holds the agent's credential in the release's namespace.
+	// The release names it, so the token never reaches Git.
+	AgentTokenSecret = "pds-hub-agent-token"
+	// ReleaseName and ReleaseNamespace are those of the pds release, the same
+	// ones the join script uses for a connected environment.
+	ReleaseName      = "pds"
+	ReleaseNamespace = "everest-system"
+	// BackupStorage names the BackupStorage the release registers for the
+	// bucket, and BackupSecret the Secret with its access key. The agent
+	// creates the key in the environment and writes the Secret itself, so the
+	// key never reaches the control plane.
+	BackupStorage = "s3"
+	BackupSecret  = "pds-s3"
+	// HelmServiceAccount applies the release with cluster-admin equivalent
+	// rights, and is created once when Flux is bootstrapped.
+	HelmServiceAccount = "pds-helm"
+	// ChartRepository is the Flux source the release installs the chart from.
+	ChartRepository = "pds-charts"
+	// BackupUserRequest is the ConfigMap in the release's namespace that a delete
+	// creates to ask the agent to remove the IAM user it made for backups. The
+	// agent sets the removed key when it has.
+	BackupUserRequest    = "pds-backup-user"
+	BackupUserRequestKey = "request"
+	BackupUserRemove     = "remove"
+	BackupUserRemovedKey = "removed"
+)
+
+// BackupUserName is the IAM user the agent makes for an environment's backups.
+// The role the agent runs as may only touch the user named after its own
+// cluster, so the name follows from the environment's ID.
+func BackupUserName(environmentID string) string { return "pds-" + environmentID + "-backup" }
+
+// ReleaseInput is the small named set of values a managed environment adds to
+// the connected-environment overlay.
+type ReleaseInput struct {
+	ChartVersion string
+	// ChartURL is the OCI registry the chart is installed from.
+	ChartURL        string
+	HubURL          string
+	EnvironmentName string
+	// EnvironmentID is the value of the percona.com/pds tag the environment's
+	// volumes carry. Empty leaves the tagged StorageClass out, as on an
+	// environment that is not on AWS.
+	EnvironmentID   string
+	ImageRepository string
+	ImageTag        string
+	// Bucket and Region are the environment's backup store.
+	Bucket string
+	Region string
+	// BackupUser, BackupUserPath and BackupBoundaryARN name the IAM user the
+	// agent makes for the bucket's access key, and the boundary it is made with.
+	BackupUser        string
+	BackupUserPath    string
+	BackupBoundaryARN string
+}
+
+// RenderRelease renders the HelmRelease Flux applies for the whole agent
+// release: OpenEverest, the providers, PMM and the adapter as agent.
+func RenderRelease(in ReleaseInput) ([]byte, error) {
+	for name, value := range map[string]string{
+		"chart version": in.ChartVersion, "hub address": in.HubURL,
+		"environment name": in.EnvironmentName, "agent image": in.ImageRepository,
+		"backup bucket": in.Bucket, "backup region": in.Region,
+	} {
+		if value == "" {
+			return nil, fmt.Errorf("render the pds release: the %s is empty", name)
+		}
+	}
+
+	values := map[string]any{}
+	if err := yaml.Unmarshal([]byte(SpokeValues), &values); err != nil {
+		return nil, fmt.Errorf("read the connected-environment values: %w", err)
+	}
+	managedValues := map[string]any{
+		"adapter": map[string]any{
+			"image": map[string]any{"repository": in.ImageRepository, "tag": in.ImageTag},
+			"hub": map[string]any{
+				"url": in.HubURL, "environmentName": in.EnvironmentName,
+				"agentTokenExistingSecret": AgentTokenSecret,
+				// The agent reports this HelmRelease's state on its heartbeat, which
+				// is how an upgrade learns whether Flux applied or rolled it back.
+				"releaseRef": "flux-system/" + ReleaseName,
+			},
+			// The hub annotates each Instance with the preset a create resolves
+			// against, so the environment has to have them.
+			"installInstancePresets": true,
+			// The bucket's backup store replaces the MinIO a connected overlay starts from.
+			"everestBackupStorage": BackupStorage,
+		},
+		"stack": map[string]any{
+			// Flux installs PMM from the environment's Git, so the release leaves it out.
+			"pmm":   map[string]any{"subchart": false},
+			"minio": map[string]any{"enabled": false},
+			"s3": map[string]any{
+				"enabled": true, "bucket": in.Bucket, "region": in.Region,
+				"storageName": BackupStorage, "existingSecret": BackupSecret,
+			},
+		},
+		"openeverest": map[string]any{
+			"upgrade": map[string]any{"preflightChecks": false},
+		},
+	}
+	if in.BackupUser != "" {
+		// The agent makes this user and writes its key to the Secret, so the key
+		// never reaches the control plane or Git. Its tag is the environment's ID.
+		for name, value := range map[string]string{
+			"backup user path": in.BackupUserPath, "backup user boundary": in.BackupBoundaryARN, "environment id": in.EnvironmentID,
+		} {
+			if value == "" {
+				return nil, fmt.Errorf("render the pds release: the %s is empty", name)
+			}
+		}
+		managedValues["adapter"].(map[string]any)["backupKey"] = map[string]any{
+			"user": in.BackupUser, "path": in.BackupUserPath, "boundaryArn": in.BackupBoundaryARN, "tag": in.EnvironmentID,
+		}
+	}
+	if in.EnvironmentID != "" {
+		// Every volume a database claims carries the ownership tag, so the delete
+		// finds it by tag after the cluster is gone.
+		managedValues["taggedStorageClass"] = map[string]any{
+			"enabled": true, "name": hub.TaggedStorageClass, "tags": map[string]any{OwnershipTag: in.EnvironmentID},
+		}
+	}
+	merge(values, managedValues)
+
+	release := map[string]any{
+		"apiVersion": "helm.toolkit.fluxcd.io/v2",
+		"kind":       "HelmRelease",
+		"metadata":   map[string]any{"name": ReleaseName, "namespace": "flux-system"},
+		"spec": map[string]any{
+			"interval":           "30m",
+			"releaseName":        ReleaseName,
+			"targetNamespace":    ReleaseNamespace,
+			"storageNamespace":   ReleaseNamespace,
+			"serviceAccountName": HelmServiceAccount,
+			"chart": map[string]any{"spec": map[string]any{
+				"chart": "pds", "version": in.ChartVersion,
+				"sourceRef": map[string]any{"kind": "HelmRepository", "name": ChartRepository},
+			}},
+			// A new environment's first install waits for monitoring and its
+			// configuration Job, which together can take longer than Helm's
+			// 5 minute default.
+			"timeout": "15m",
+			// A failed install is left in place rather than uninstalled. Flux
+			// uninstalls before every install retry, and an uninstall removes the
+			// agent, so the environment would stop reporting what failed.
+			"install": map[string]any{
+				"createNamespace": true,
+				"remediation":     map[string]any{"retries": 0, "remediateLastFailure": false},
+			},
+			// A failed upgrade is attempted once, rolled back and not retried.
+			// Retries counts the attempts after the first, and a rollback after
+			// the last failure has to be asked for when there are none.
+			"upgrade": map[string]any{
+				"remediation":   map[string]any{"retries": 0, "remediateLastFailure": true, "strategy": "rollback"},
+				"cleanupOnFail": true,
+			},
+			"values": values,
+		},
+	}
+
+	body, err := yaml.Marshal(release)
+	if err != nil {
+		return nil, errors.Join(errors.New("render the pds release"), err)
+	}
+
+	return body, nil
+}
+
+// merge copies overlay into base, descending into maps both sides hold.
+func merge(base, overlay map[string]any) {
+	for key, value := range overlay {
+		if next, ok := value.(map[string]any); ok {
+			if existing, ok := base[key].(map[string]any); ok {
+				merge(existing, next)
+
+				continue
+			}
+		}
+		base[key] = value
+	}
+}
+
+// ReleaseFiles are the files that make the pds release part of the
+// environment's Git repository, under clusters/<environment>/platform/pds.
+func ReleaseFiles(environment string, in ReleaseInput) (map[string][]byte, error) {
+	if in.ChartURL == "" {
+		return nil, errors.New("render the pds release: the chart registry is empty")
+	}
+	release, err := RenderRelease(in)
+	if err != nil {
+		return nil, err
+	}
+	repository, err := yaml.Marshal(map[string]any{
+		"apiVersion": "source.toolkit.fluxcd.io/v1",
+		"kind":       "HelmRepository",
+		"metadata":   map[string]any{"name": ChartRepository, "namespace": "flux-system"},
+		"spec":       map[string]any{"type": "oci", "interval": "1h", "url": in.ChartURL},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("render the chart source: %w", err)
+	}
+	index, err := yaml.Marshal(map[string]any{
+		"apiVersion": "kustomize.config.k8s.io/v1beta1",
+		"kind":       "Kustomization",
+		"resources":  []string{"helmrepository.yaml", "helmrelease.yaml"},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("render the release index: %w", err)
+	}
+	dir := "clusters/" + environment + "/platform/pds/"
+
+	return map[string][]byte{
+		dir + "helmrelease.yaml":    release,
+		dir + "helmrepository.yaml": repository,
+		dir + "kustomization.yaml":  index,
+	}, nil
+}

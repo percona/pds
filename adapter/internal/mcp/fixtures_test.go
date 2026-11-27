@@ -70,8 +70,56 @@ func activityFixture() map[string]any {
 func environmentsFixture() map[string]any {
 	return map[string]any{"hub": true, "environments": []any{map[string]any{
 		"name": "spoke-a", "namespace": "pds", "status": "connected", "lastSeen": "2026-09-08T12:00:00Z",
-		"team": "default", "monitoring": true,
+		"team": "default", "monitoring": true, "origin": "connected", "state": "ready",
 	}}}
+}
+
+const cloudID = "0123456789ab"
+
+func cloudConnectionFixture() map[string]any {
+	return map[string]any{
+		"id": cloudID, "accountId": "123456789012", "alias": "acme", "state": "ready", "allowedRegions": []any{"eu-west-1"},
+		"stackRegion": "eu-west-1", "templateVersion": 1, "latestTemplateVersion": 1, "createdAt": "2026-09-08T12:00:00Z",
+		"environments": []any{},
+	}
+}
+
+func provisioningFixture(progress string, failure map[string]any) map[string]any {
+	out := map[string]any{
+		"run": map[string]any{"id": 5, "kind": "create", "status": "running", "startedAt": "2026-09-08T12:00:00Z"}, "progress": progress,
+		"phases": []any{
+			map[string]any{"name": "Creating network and Kubernetes cluster", "status": "failed"},
+			map[string]any{"name": "Connecting to the environment", "status": "pending"},
+			map[string]any{"name": "Installing PDS", "status": "pending"},
+			map[string]any{"name": "Finishing", "status": "pending"},
+		},
+	}
+	if failure != nil {
+		out["failure"] = failure
+	}
+
+	return out
+}
+
+// managedEnvironmentFixture is a managed environment whose create failed on an
+// AWS quota.
+func managedEnvironmentFixture() map[string]any {
+	return map[string]any{
+		"name": "orders", "status": "pending", "monitoring": false, "origin": "managed", "state": "failed",
+		"connectionId": cloudID, "region": "eu-west-1",
+		"provisioning": provisioningFixture("failed", map[string]any{
+			"sentence": "AWS account 123456789012 has reached the quota for Elastic IP addresses per Region in eu-west-1. Raise the quota in AWS, then retry.",
+			"action":   "retry",
+			"refusal":  map[string]any{"reason": "quota", "service": "Amazon EC2", "item": "Elastic IP addresses per Region", "region": "eu-west-1"},
+		}),
+	}
+}
+
+func startedFixture() map[string]any {
+	return map[string]any{
+		"run":          map[string]any{"id": 6, "kind": "rebuild", "status": "queued", "startedAt": "2026-09-08T12:00:00Z"},
+		"provisioning": provisioningFixture("in_progress", nil),
+	}
 }
 
 func ticketListFixture() map[string]any {

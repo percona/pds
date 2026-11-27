@@ -22,12 +22,13 @@ import {
 import type { CreateDatabaseInput, DatabaseAccessChoice, DatabaseEngine } from "../types";
 import { EngineIcon } from "./engine-icon";
 
-// A DNS-1123 label: what Kubernetes accepts as a name and what apps resolve as
-// a hostname. The adapter checks it again; this only saves a round trip.
-const dns1123 = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
+// A DNS-1035 label: the engine names a Kubernetes Service after the database,
+// and a Service name must start with a letter. The adapter checks it again;
+// this only saves a round trip.
+const databaseName = /^[a-z]([-a-z0-9]*[a-z0-9])?$/;
 
-const dns1123Message =
-  "Use lowercase letters, numbers, and dashes. Start and end with a letter or number.";
+const databaseNameMessage =
+  "Use lowercase letters, numbers, and dashes. Start with a letter and end with a letter or number.";
 
 const accessChoices: ReadonlyArray<{ value: DatabaseAccessChoice; label: string }> = [
   { value: "private", label: "Private" },
@@ -43,7 +44,7 @@ const schema = z
       .trim()
       .min(1, "Enter a name.")
       .max(63, "Use 63 characters or fewer.")
-      .regex(dns1123, dns1123Message),
+      .regex(databaseName, databaseNameMessage),
     cpu: boundedInteger("CPU", "cores", resourceBounds.cpu.min, resourceBounds.cpu.max),
     memory: boundedInteger("Memory", "GB", resourceBounds.memory.min, resourceBounds.memory.max),
     storage: boundedInteger(

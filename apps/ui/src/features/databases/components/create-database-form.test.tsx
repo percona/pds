@@ -62,11 +62,27 @@ describe("CreateDatabaseForm", () => {
 
     expect(
       await screen.findByText(
-        "Use lowercase letters, numbers, and dashes. Start and end with a letter or number.",
+        "Use lowercase letters, numbers, and dashes. Start with a letter and end with a letter or number.",
       ),
     ).toBeInTheDocument();
     expect(submitButton()).toBeDisabled();
     expect(nameField()).toHaveAttribute("aria-invalid", "true");
+  });
+
+  // The engine names a Kubernetes Service after the database, and a Service
+  // name must start with a letter, so such a database would never be created.
+  it("refuses a name that starts with a digit", async () => {
+    renderWithProviders(<CreateDatabaseForm environment="spoke-a" onSubmit={vi.fn()} />);
+
+    await userEvent.type(nameField(), "1stbyoc2db");
+    await userEvent.tab();
+
+    expect(
+      await screen.findByText(
+        "Use lowercase letters, numbers, and dashes. Start with a letter and end with a letter or number.",
+      ),
+    ).toBeInTheDocument();
+    expect(submitButton()).toBeDisabled();
   });
 
   it("submits the name with the default profile", async () => {

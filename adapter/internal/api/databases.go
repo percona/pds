@@ -603,10 +603,6 @@ func databaseError(err error, subject string) *AppError {
 		return Conflict("That environment is unreachable. Try again after it reports in.").
 			WithCause(err)
 
-	case errors.Is(err, hub.ErrRestoring):
-		return Conflict("This database is still being restored. Try again once the restore finishes.").
-			WithCause(err)
-
 	case errors.Is(err, hub.ErrRestoreNotSupported):
 		return NotImplemented("Restoring into a new database is not available for that engine. Contact Percona support to restore this backup.").
 			WithCause(err)
@@ -688,7 +684,7 @@ func databaseError(err error, subject string) *AppError {
 		return Validation(longName.UserMessage()).WithCause(err)
 
 	case errors.Is(err, engine.ErrInvalidName):
-		return Validation("A database name is lowercase letters, numbers, and dashes, up to 63 characters.").
+		return Validation("A database name starts with a letter and uses lowercase letters, numbers, and dashes, up to 63 characters.").
 			WithCause(err)
 
 	case errors.Is(err, engine.ErrInvalidNamespace):
