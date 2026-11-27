@@ -137,10 +137,7 @@ export function InviteForm({ onIssued }: InviteFormProps) {
         </Field>
       </div>
 
-      <div
-        className="flex items-start gap-2"
-        onPointerDown={(event) => event.stopPropagation()}
-      >
+      <div className="flex items-start gap-2" onPointerDown={(event) => event.stopPropagation()}>
         <input
           id={`${fieldId}-any`}
           type="checkbox"

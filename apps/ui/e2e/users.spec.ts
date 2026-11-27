@@ -147,9 +147,11 @@ test.describe("the Users screen", () => {
     await page.getByRole("button", { name: "Invite people" }).click();
     await page.getByLabel("Role").selectOption("admin");
     // A DOM click toggles the box. Playwright's check action does not, inside this dialog.
-    await page.getByRole("checkbox", { name: "Anyone with the link can join" }).evaluate((element) => {
-      (element as HTMLInputElement).click();
-    });
+    await page
+      .getByRole("checkbox", { name: "Anyone with the link can join" })
+      .evaluate((element) => {
+        (element as HTMLInputElement).click();
+      });
 
     await expect(page.getByLabel("Email")).toBeDisabled();
     await expect(page.getByLabel("Role")).toBeDisabled();
