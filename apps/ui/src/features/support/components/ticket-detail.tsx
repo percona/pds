@@ -1,4 +1,4 @@
-import { CircleAlert, ExternalLink, MessageSquare, PlugZap } from "lucide-react";
+import { CircleAlert, ExternalLink, MessageSquare } from "lucide-react";
 import { useId, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +11,7 @@ import { useReplyToTicket } from "../hooks/use-reply-to-ticket";
 import { useTicket } from "../hooks/use-ticket";
 import { publicSupportPortalUrl } from "../portal";
 import { autoCloseDays, describeTicketState } from "../ticket-state";
+import { SupportNotConnected } from "./support-not-connected";
 import type { SupportTicket, TicketComment } from "../types";
 
 /** One ticket with its state and its public comments. */
@@ -23,20 +24,7 @@ export function TicketDetail({ ticketNumber }: { ticketNumber: string }) {
 
   if (error) {
     if (error.code === "ErrNotImplemented") {
-      return (
-        <EmptyCard
-          title="Support is not connected"
-          detail={error.message}
-          icon={<PlugZap className="size-5 text-muted-foreground" strokeWidth={1.5} />}
-          action={
-            <Button variant="outline" asChild>
-              <a href={publicSupportPortalUrl} target="_blank" rel="noreferrer">
-                Open the support portal
-              </a>
-            </Button>
-          }
-        />
-      );
+      return <SupportNotConnected />;
     }
 
     return (

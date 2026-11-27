@@ -40,6 +40,26 @@ describe("CreateDatabaseForm", () => {
     expect(screen.getByText("1 member, on-demand backups")).toBeInTheDocument();
   });
 
+  it("shows each profile's size before anything is submitted", () => {
+    renderWithProviders(<CreateDatabaseForm environment="spoke-a" onSubmit={vi.fn()} />);
+
+    expect(screen.getByTestId("profile-card-dev")).toHaveTextContent("1 core");
+    expect(screen.getByTestId("profile-card-staging")).toHaveTextContent("100 GB storage");
+    expect(screen.getByTestId("profile-card-prod")).toHaveTextContent("16 GB memory");
+  });
+
+  // The PostgreSQL limit is shorter than the general one, and finding it out
+  // from an error after typing a name is the slow way.
+  it("states the name limit for the engine picked before a name is typed", async () => {
+    renderWithProviders(<CreateDatabaseForm environment="spoke-a" onSubmit={vi.fn()} />);
+
+    expect(nameField()).toHaveAccessibleDescription(/Up to 63 characters\./);
+
+    await userEvent.click(screen.getByRole("radio", { name: /PostgreSQL/ }));
+
+    expect(nameField()).toHaveAccessibleDescription(/Up to 37 characters for PostgreSQL\./);
+  });
+
   it("keeps submit disabled until the form is valid", () => {
     renderWithProviders(<CreateDatabaseForm environment="spoke-a" onSubmit={vi.fn()} />);
 

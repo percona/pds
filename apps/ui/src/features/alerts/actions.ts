@@ -65,3 +65,37 @@ function databaseTarget(
 export function alertTarget(alert: Alert, team?: string): AlertLinkTarget {
   return alertActionTarget(alert.action, alert.environment, alert.databaseId, team);
 }
+
+/**
+ * What following an alert's action does, said before the person follows it.
+ * It mirrors `alertActionTarget`, including the fall back to the environment
+ * when the alert names no database.
+ */
+export function alertActionSummary(alert: Alert): string {
+  const onDatabase = alert.databaseId !== undefined;
+
+  switch (alert.action.kind) {
+    case "open_database":
+      return onDatabase ? "Opens the database." : "Opens the environment.";
+    case "scale_storage":
+      return onDatabase
+        ? "Opens the database, where Scale changes its storage."
+        : "Opens the environment.";
+    case "scale_resources":
+      return onDatabase
+        ? "Opens the database, where Scale changes its CPU and memory."
+        : "Opens the environment.";
+    case "view_metrics":
+      return onDatabase
+        ? "Opens the Metrics tab on this database, on replication lag."
+        : "Opens the environment.";
+    case "retry_backup":
+      return onDatabase
+        ? "Opens the Backups tab. Retrying is a button there, so following this link changes nothing."
+        : "Opens the environment.";
+    case "update_connection":
+      return "Opens the environment's update page, which shows the command to run.";
+    default:
+      return "Opens the environment.";
+  }
+}

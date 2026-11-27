@@ -22,13 +22,15 @@ type TeamNameDialogProps = {
   onOpenChange: (open: boolean) => void;
   /** The Team being renamed, or undefined to create one. */
   team?: string;
+  /** Called with the name the Team has once the write is done. */
+  onSaved?: (name: string) => void;
 };
 
 /**
  * Creating a Team and renaming one ask for the same thing, a name, so they are
  * one dialog. A rename starts from the current name.
  */
-export function TeamNameDialog({ open, onOpenChange, team }: TeamNameDialogProps) {
+export function TeamNameDialog({ open, onOpenChange, team, onSaved }: TeamNameDialogProps) {
   const fieldId = useId();
   const [name, setName] = useState(team ?? "");
   const create = useCreateTeam();
@@ -73,6 +75,7 @@ export function TeamNameDialog({ open, onOpenChange, team }: TeamNameDialogProps
               onSuccess: () => {
                 toast.success(creating ? "Team created" : "Team renamed");
                 onOpenChange(false);
+                onSaved?.(trimmed);
               },
             });
           }}

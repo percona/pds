@@ -151,7 +151,7 @@ describe("DatabaseDetailPage", () => {
     expect(header.getByText("Prod")).toBeInTheDocument();
   });
 
-  it("offers connect, scale, back up, support, and delete in that order", async () => {
+  it("offers scale, back up, support, and delete in that order", async () => {
     stubDatabase(ready);
 
     renderWithProviders(<AppRoutes />, { route: detailRoute });
@@ -162,7 +162,7 @@ describe("DatabaseDetailPage", () => {
       .getAllByRole("button")
       .map((button) => button.textContent);
 
-    expect(actions).toEqual(["Connect", "Scale", "Back up now", "Contact support", "Delete"]);
+    expect(actions).toEqual(["Scale", "Back up now", "Contact support", "Delete"]);
   });
 
   it("opens the support dialog from the header", async () => {
@@ -257,50 +257,37 @@ describe("DatabaseDetailPage", () => {
     ]);
   });
 
-  // A create ends with a developer who wants to run something, so the landing
-  // screen opens the dialog on the command rather than on the string.
-  it("opens the connect dialog on the client command after a create", async () => {
+  // Reaching a new database is the first thing anyone does with it, so the
+  // Overview opens on Connect from a laptop, with the commands on screen.
+  it("leads the overview with connect, then the details, then the metrics", async () => {
     stubDatabase(ready);
-
-    renderWithProviders(<AppRoutes />, { route: detailRoute, state: { created: true } });
-
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(/This database runs on spoke-a/)).toBeInTheDocument();
-    expect(
-      within(dialog).getByText("1. Point kubectl at the Kubernetes cluster"),
-    ).toBeInTheDocument();
-    expect(
-      within(dialog).getByText("mysql -h 127.0.0.1 -P '3306' -u 'app' -p"),
-    ).toBeInTheDocument();
-  });
-
-  it("keeps the connection card above metrics until the string is copied", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    stubDatabase(ready);
-    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
 
     renderWithProviders(<AppRoutes />, { route: detailRoute });
 
-    expect(await screen.findByText(maskedUri)).toBeInTheDocument();
-
-    const before = screen.getByTestId("overview-blocks");
-    expect(Array.from(before.children).map((block) => block.getAttribute("data-block"))).toEqual([
+    expect(await screen.findByRole("button", { name: "From your laptop" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    const blocks = screen.getByTestId("overview-blocks");
+    expect(Array.from(blocks.children).map((block) => block.getAttribute("data-block"))).toEqual([
       "connect",
       "details",
       "metrics",
     ]);
+    expect(screen.getByText(/This database runs on spoke-a/)).toBeInTheDocument();
+    expect(screen.getByText("mysql -h 127.0.0.1 -P '3306' -u 'app' -p")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
 
-    await userEvent.click(screen.getByTestId("database-actions").querySelector("button")!);
-    await userEvent.click(await screen.findByRole("button", { name: "Copy step 4" }));
+  it("shows the connection string masked from your app, and never the password", async () => {
+    stubDatabase(ready);
 
-    await waitFor(() => {
-      const after = screen.getByTestId("overview-blocks");
-      expect(Array.from(after.children).map((block) => block.getAttribute("data-block"))).toEqual([
-        "metrics",
-        "connect",
-        "details",
-      ]);
-    });
+    const { container } = renderWithProviders(<AppRoutes />, { route: detailRoute });
+
+    await userEvent.click(await screen.findByRole("button", { name: "From your app" }));
+
+    expect(screen.getByText(maskedUri)).toBeInTheDocument();
+    expect(container.textContent).not.toContain(realUri);
   });
 
   it("sends ticket context with environment type from the support dialog", async () => {
@@ -394,21 +381,6 @@ describe("DatabaseDetailPage", () => {
     expect(await screen.findByTestId("metric-panel-cpu")).toBeInTheDocument();
     expect(screen.getAllByTestId(/^metric-panel-/)).toHaveLength(5);
     expect(screen.getByRole("group", { name: "Time window" })).toBeInTheDocument();
-  });
-
-  it("sends the connect action to the connection card", async () => {
-    stubDatabase(ready);
-
-    renderWithProviders(<AppRoutes />, { route: detailRoute });
-
-    await screen.findByTestId("database-header");
-    await userEvent.click(screen.getByRole("tab", { name: "Backups" }));
-
-    expect(screen.queryByText(maskedUri)).not.toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: "Connect" }));
-
-    expect(await screen.findByText(/This database runs on spoke-a/)).toBeInTheDocument();
   });
 
   it("opens the backup list and the schedule on the backups tab", async () => {
@@ -654,24 +626,5 @@ describe("DatabaseDetailPage", () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-
-  it("keeps the connect landing for the create that just finished", async () => {
-    stubDatabase(ready);
-
-    renderWithProviders(<AppRoutes />, { route: detailRoute, state: { created: true } });
-
-    // The connect dialog opens itself here, so the landing behind it is
-    // aria-hidden, which is what a modal is supposed to do to its background.
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "orders-dev is ready", hidden: true }),
-    ).toBeInTheDocument();
-    expect(screen.getByText(maskedUri, { ignore: "[role=dialog] *" })).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "Backups" })).not.toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: "Close" }));
-    await userEvent.click(await screen.findByRole("button", { name: "Open database" }));
-
-    expect(screen.getAllByRole("tab")).toHaveLength(7);
   });
 });

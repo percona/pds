@@ -14,6 +14,8 @@ describe("describeAction", () => {
       "connection.delete",
       "monitoring.password-read",
       "database.credential-read",
+      "invitation.create",
+      "support_access.open",
     ].map((action) => describeAction(action).label);
 
     expect(labels).toEqual([
@@ -27,6 +29,8 @@ describe("describeAction", () => {
       "Remove connection",
       "Copy monitoring password",
       "Read connection string",
+      "Invite person",
+      "Open support access",
     ]);
   });
 
@@ -71,6 +75,14 @@ describe("describeOutcome", () => {
       variant: "success",
     });
     expect(describeOutcome("succeeded", "connection.delete")).toMatchObject({
+      label: "Succeeded",
+      variant: "success",
+    });
+    expect(describeOutcome("succeeded", "invitation.create")).toMatchObject({
+      label: "Succeeded",
+      variant: "success",
+    });
+    expect(describeOutcome("succeeded", "support_access.open")).toMatchObject({
       label: "Succeeded",
       variant: "success",
     });

@@ -58,7 +58,7 @@ async function useTheme(page: Page, theme: "light" | "dark") {
   await page.addInitScript((value) => window.localStorage.setItem("pds-theme", value), theme);
 }
 
-test("create a database and land on the connection string", async ({ page }) => {
+test("create a database and land on connect", async ({ page }) => {
   await stubDatabases(page, [ready]);
 
   await page.goto("environments/spoke-a");
@@ -80,18 +80,16 @@ test("create a database and land on the connection string", async ({ page }) => 
   await expect(page.getByTestId("provisioning-step-volumes")).toContainText("Creating volumes");
 
   // The screen waits for the next status poll, which runs every five seconds.
-  // The connect dialog opens itself on the command as soon as the connection
-  // is published, so the landing behind it is aria-hidden, which is what a
-  // modal does to its background.
-  await expect(page.getByRole("heading", { level: 1, includeHidden: true })).toContainText(
-    "orders-dev is ready",
+  // Once the connection is published the Overview opens on Connect.
+  await expect(page.getByRole("button", { name: "From your laptop" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
     { timeout: 15_000 },
   );
-
-  const dialog = page.getByRole("dialog");
-  await expect(dialog.getByText(/This database runs on spoke-a/)).toBeVisible();
-  await expect(dialog.getByText("1. Point kubectl at the Kubernetes cluster")).toBeVisible();
-  await expect(dialog.getByText("mysql -h 127.0.0.1 -P '3306' -u 'app' -p")).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "orders-dev" })).toBeVisible();
+  await expect(page.getByText(/This database runs on spoke-a/)).toBeVisible();
+  await expect(page.getByText("1. Point kubectl at the Kubernetes cluster")).toBeVisible();
+  await expect(page.getByText("mysql -h 127.0.0.1 -P '3306' -u 'app' -p")).toBeVisible();
   await expect(page.getByText(uri)).toHaveCount(0);
 });
 
@@ -144,7 +142,7 @@ test("a failed create names the step and offers support", async ({ page }) => {
 
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.getByLabel("Subject")).toHaveValue("Cannot create database orders-dev");
-  await expect(page.getByLabel("Description")).toContainText("Failed step: Starting database");
+  await expect(page.getByLabel("Description")).toContainText("Environment: spoke-a");
   await expect(page.getByLabel("Description")).not.toContainText("mysql://");
 });
 

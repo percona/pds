@@ -170,6 +170,16 @@ describe("ClaimInvitePage", () => {
       message: "That invite link has expired. Ask Percona for a new one.",
     },
     { name: "never issued", status: 404, message: "That invite link is not valid." },
+    {
+      name: "from an organization admin and already used",
+      status: 409,
+      message: "That invite link has already been used. Ask your organization admin for a new one.",
+    },
+    {
+      name: "from an organization admin and expired",
+      status: 409,
+      message: "That invite link has expired. Ask your organization admin for a new one.",
+    },
   ])("shows the adapter's reason when the link is $name", async ({ status, message }) => {
     stubAdapter((path) => {
       if (path.startsWith("/api/auth/invite")) {
@@ -219,6 +229,18 @@ describe("ClaimInvitePage", () => {
     expect(
       screen.queryByRole("heading", { name: "This link cannot be used" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("does not blame the link when the control plane fails rather than refuses", async () => {
+    stubAdapter(() =>
+      jsonResponse({ code: "ErrInternal", message: "The change did not finish. Try again." }, 503),
+    );
+
+    renderWithProviders(<RootRoutes />, { route: "/claim?token=a-real-token" });
+
+    expect(
+      await screen.findByRole("heading", { name: "The control plane could not be reached" }),
+    ).toBeInTheDocument();
   });
 
   // The link is what a customer with no password has, so it cannot sit behind

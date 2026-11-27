@@ -20,10 +20,12 @@ import { RevokeInvitationDialog } from "./revoke-invitation-dialog";
 
 type InvitationListProps = {
   onIssued: (invitation: IssuedInvitation) => void;
+  /** Shows only the invites into this Team. Every invite when left out. */
+  team?: string;
 };
 
 /** What is still waiting to be claimed, with resend and revoke on each row. */
-export function InvitationList({ onIssued }: InvitationListProps) {
+export function InvitationList({ onIssued, team }: InvitationListProps) {
   const { data, error, isPending, isFetching, refetch } = useInvitations();
   const resend = useResendInvitation();
   const [revoking, setRevoking] = useState<Invitation | null>(null);
@@ -59,7 +61,9 @@ export function InvitationList({ onIssued }: InvitationListProps) {
     );
   }
 
-  if (data.length === 0) {
+  const pending = team === undefined ? data : data.filter((invitation) => invitation.team === team);
+
+  if (pending.length === 0) {
     return (
       <Notice
         icon={<Mail className="size-5 text-muted-foreground" strokeWidth={1.5} />}
@@ -85,7 +89,7 @@ export function InvitationList({ onIssued }: InvitationListProps) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data.map((invitation) => {
+            {pending.map((invitation) => {
               const who = invitation.email ?? "Anyone with the link";
 
               return (

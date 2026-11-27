@@ -24,7 +24,7 @@ import { isOrganizationNameReady, OrganizationNameField } from "./organization-n
  * name as a label. A session that cannot switch (it has no list to switch
  * between) gets the label too.
  */
-export function OrganizationSwitcher() {
+export function OrganizationSwitcher({ compact = false }: { compact?: boolean }) {
   const session = useSession().data;
   const [open, setOpen] = useState(false);
 
@@ -38,9 +38,15 @@ export function OrganizationSwitcher() {
 
   if (!switchable) {
     return (
-      <p className="flex items-center gap-2 px-2.5 py-2 text-sm font-medium" title="Organization">
+      <p
+        className={cn(
+          "flex items-center gap-2 px-2.5 py-2 text-sm font-medium",
+          compact && "justify-center px-0",
+        )}
+        title="Organization"
+      >
         <Building2 className="size-4 shrink-0" strokeWidth={1.5} aria-hidden="true" />
-        <span className="truncate">{session.organization}</span>
+        <span className={cn("truncate", compact && "sr-only")}>{session.organization}</span>
       </p>
     );
   }
@@ -50,19 +56,21 @@ export function OrganizationSwitcher() {
       <Button
         type="button"
         variant="ghost"
-        className="w-full justify-between px-2.5"
+        className={cn("w-full justify-between px-2.5", compact && "justify-center px-0")}
         aria-haspopup="dialog"
         onClick={() => setOpen(true)}
       >
         <span className="flex min-w-0 items-center gap-2">
           <Building2 className="size-4 shrink-0" strokeWidth={1.5} aria-hidden="true" />
-          <span className="truncate">{session.organization}</span>
+          <span className={cn("truncate", compact && "sr-only")}>{session.organization}</span>
         </span>
-        <ChevronsUpDown
-          className="size-4 shrink-0 text-muted-foreground"
-          strokeWidth={1.5}
-          aria-hidden="true"
-        />
+        {compact ? null : (
+          <ChevronsUpDown
+            className="size-4 shrink-0 text-muted-foreground"
+            strokeWidth={1.5}
+            aria-hidden="true"
+          />
+        )}
       </Button>
       <SwitchDialog open={open} onOpenChange={setOpen} organizations={organizations} />
     </>

@@ -127,12 +127,12 @@ test("create a PostgreSQL database and land on its connect steps", async ({ page
     },
   ]);
 
-  await expect(page.getByRole("heading", { level: 1, includeHidden: true })).toContainText(
-    "reports-dev is ready",
+  await expect(page.getByRole("button", { name: "From your laptop" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
     { timeout: 15_000 },
   );
-
-  await expect(page.getByRole("dialog").getByText(psqlCommand)).toBeVisible();
+  await expect(page.getByText(psqlCommand)).toBeVisible();
   await expect(page.getByText(uri)).toHaveCount(0);
 });
 
@@ -143,16 +143,16 @@ test("connect shows the masked string and four commands that never print the pas
 
   await page.goto(detailRoute);
   await expect(page.getByRole("heading", { level: 1, name: "reports-dev" })).toBeVisible();
-  await expect(page.getByText(maskedUri).first()).toBeVisible();
 
-  await page.getByTestId("database-actions").getByRole("button", { name: "Connect" }).click();
-
-  const dialog = page.getByRole("dialog");
-  await expect(dialog.getByText(/get secret 'pguser-reports-dev'/)).toBeVisible();
+  await expect(page.getByText(/get secret 'pguser-reports-dev'/)).toBeVisible();
   await expect(
-    dialog.getByText(/port-forward 'svc\/reports-dev-pgbouncer' '5432:5432'/),
+    page.getByText(/port-forward 'svc\/reports-dev-pgbouncer' '5432:5432'/),
   ).toBeVisible();
-  await expect(dialog.getByText(psqlCommand)).toBeVisible();
+  await expect(page.getByText(psqlCommand)).toBeVisible();
+  await expect(page.getByText(uri)).toHaveCount(0);
+
+  await page.getByRole("button", { name: "From your app" }).click();
+  await expect(page.getByText(maskedUri)).toBeVisible();
   await expect(page.getByText(uri)).toHaveCount(0);
 });
 
@@ -199,8 +199,7 @@ for (const theme of ["light", "dark"] as const) {
     await page.screenshot({ path: `test-results/postgresql-create-${theme}.png`, fullPage: true });
 
     await page.goto(detailRoute);
-    await page.getByTestId("database-actions").getByRole("button", { name: "Connect" }).click();
-    await expect(page.getByRole("dialog").getByText(psqlCommand)).toBeVisible();
+    await expect(page.getByText(psqlCommand)).toBeVisible();
     await page.screenshot({ path: `test-results/postgresql-connect-${theme}.png`, fullPage: true });
   });
 }

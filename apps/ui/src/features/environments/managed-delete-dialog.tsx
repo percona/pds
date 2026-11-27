@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CircleAlert } from "lucide-react";
+import { Check, CircleAlert } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -111,6 +112,8 @@ export function ManagedDeleteDialog({
           </DialogDescription>
         </DialogHeader>
 
+        {lost ? null : <WhatDeletingRemoves />}
+
         <form
           className="space-y-6"
           noValidate
@@ -211,6 +214,38 @@ export function ManagedDeleteDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** The delete run's steps, said as what is gone once it finishes. */
+const deletedThings: ReactNode[] = [
+  "The databases and their data",
+  "The load balancers and volumes",
+  "The network, the Kubernetes cluster and its worker nodes",
+  <>
+    Anything AWS left behind that carries the <span className="font-mono">percona.com/pds</span> tag
+  </>,
+  "The backup bucket and every backup in it",
+  "The IAM user the backups wrote as. If the environment cannot remove it, PDS names it and you delete it in the IAM console",
+];
+
+function WhatDeletingRemoves() {
+  return (
+    <div className="space-y-2">
+      <p className="text-sm font-medium">What deleting removes</p>
+      <ul aria-label="What deleting removes" className="space-y-1.5 text-sm">
+        {deletedThings.map((thing, index) => (
+          <li key={index} className="flex items-start gap-2">
+            <Check
+              className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+              strokeWidth={1.5}
+              aria-hidden="true"
+            />
+            <span>{thing}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

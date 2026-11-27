@@ -18,26 +18,21 @@ const ready = createMockDatabase({
 });
 
 describe("DatabaseHeader", () => {
-  it("opens the connect dialog", async () => {
-    const onConnect = vi.fn();
+  it("opens the scale dialog", async () => {
+    const onScale = vi.fn();
 
-    renderWithProviders(<DatabaseHeader database={ready} onConnect={onConnect} {...actions} />);
+    renderWithProviders(<DatabaseHeader database={ready} {...actions} onScale={onScale} />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Connect" }));
+    await userEvent.click(screen.getByRole("button", { name: "Scale" }));
 
-    expect(onConnect).toHaveBeenCalledTimes(1);
+    expect(onScale).toHaveBeenCalledTimes(1);
   });
 
-  // The detail page sends a database with no connection to the provisioning
-  // screen before this renders, but the header cannot know that, and opening
-  // a dialog onto nothing is worse than a control that is plainly off. The
-  // sentence saying why lives on the connect card, because a disabled button
-  // takes neither hover nor focus and could not carry one.
-  it("disables Connect when there is no connection to open", () => {
-    const coming = createMockDatabase({ name: "orders-dev", status: "ready" });
+  // Connect leads the Overview, so a second way in up here would be two
+  // places for the same thing.
+  it("has no Connect button", () => {
+    renderWithProviders(<DatabaseHeader database={ready} {...actions} />);
 
-    renderWithProviders(<DatabaseHeader database={coming} onConnect={() => {}} {...actions} />);
-
-    expect(screen.getByRole("button", { name: "Connect" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Connect" })).not.toBeInTheDocument();
   });
 });

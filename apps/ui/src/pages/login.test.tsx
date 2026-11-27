@@ -148,6 +148,9 @@ describe("LoginPage", () => {
       if (path.startsWith("/api/databases")) {
         return jsonResponse({ databases: [] });
       }
+      if (path === "/api/cloud-connections") {
+        return jsonResponse({ cloudConnections: [] });
+      }
       if (path === "/api/connections") {
         return jsonResponse({
           servicenow: { configured: false },
@@ -173,7 +176,7 @@ describe("LoginPage", () => {
 
     renderWithProviders(<RootRoutes />, { route: "/login" });
 
-    expect(await screen.findByRole("heading", { name: "Environments" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Home" })).toBeInTheDocument();
     expect(screen.getByTestId("sidebar")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Sign in" })).not.toBeInTheDocument();
   });

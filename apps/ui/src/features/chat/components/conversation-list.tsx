@@ -18,14 +18,17 @@ import type { ChatConversationSummary } from "../types";
 
 /**
  * Saved conversations, newest first. Picking one reopens it; each row can be
- * deleted after a confirm.
+ * deleted after a confirm. Disabled, no chat can be opened, so a reply in
+ * flight keeps the chat it belongs to on screen.
  */
 export function ConversationList({
   activeId,
+  disabled,
   onOpen,
   onDeleted,
 }: {
   activeId: string | undefined;
+  disabled: boolean;
   onOpen: (conversation: ChatConversationSummary) => void;
   onDeleted: (id: string) => void;
 }) {
@@ -84,10 +87,11 @@ export function ConversationList({
           <li key={conversation.id} className="flex items-center gap-1">
             <button
               type="button"
+              disabled={disabled}
               onClick={() => onOpen(conversation)}
               aria-current={conversation.id === activeId ? "true" : undefined}
               className={cn(
-                "min-w-0 flex-1 rounded-md px-2.5 py-2 text-left hover:bg-accent",
+                "min-w-0 flex-1 rounded-md px-2.5 py-2 text-left hover:bg-accent disabled:pointer-events-none disabled:opacity-50",
                 "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
                 conversation.id === activeId && "bg-accent",
               )}

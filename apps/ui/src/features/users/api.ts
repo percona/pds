@@ -1,5 +1,5 @@
 import { requestJson } from "@/lib/api";
-import type { Invitation, InviteInput, IssuedInvitation, Member } from "./types";
+import type { Invitation, InviteInput, IssuedInvitation, Member, MemberChange } from "./types";
 
 export async function fetchMembers(): Promise<Member[]> {
   const body = await requestJson<{ users: Member[] }>("/api/users");
@@ -24,4 +24,12 @@ export function resendInvitation(id: number): Promise<IssuedInvitation> {
 
 export function revokeInvitation(id: number): Promise<void> {
   return requestJson<void>(`/api/invitations/${id}`, { method: "DELETE" });
+}
+
+export function updateMember(id: number, change: MemberChange): Promise<void> {
+  return requestJson<void>(`/api/users/${id}`, { method: "PATCH", body: change });
+}
+
+export function removeMember(id: number): Promise<void> {
+  return requestJson<void>(`/api/users/${id}`, { method: "DELETE" });
 }

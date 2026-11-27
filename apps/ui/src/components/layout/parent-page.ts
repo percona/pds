@@ -11,13 +11,15 @@ export type ParentPage = {
   to: string;
   /** What the link says it goes back to, lower case: "Back to <label>". */
   label: string;
-  /** The surface the parent is gated by. A link to a turned off one is a not found page. */
-  surface: BackLinkSurface;
+  /**
+   * The surface the parent is gated by. A link to a turned off one is a not
+   * found page. Absent for a parent no surface turns off, such as Teams.
+   */
+  surface?: BackLinkSurface;
 };
 
 /**
- * Pages with no parent: the sidebar entries, the root, the chats screen,
- * the AI agents page, the Teams, Users and Settings screens, and the not found catch all, which has
+ * Pages with no parent: the sidebar entries, the root, the AI agents page, the Teams, Users and Settings screens, and the not found catch all, which has
  * nothing to sit under.
  */
 export const topLevelPaths = [
@@ -26,8 +28,8 @@ export const topLevelPaths = [
   "/alerts",
   "/activity",
   "/support",
-  "/chat",
   "/agents",
+  "/connectors",
   "/teams",
   "/users",
   "/settings",
@@ -36,8 +38,8 @@ export const topLevelPaths = [
 
 type Rule = {
   pattern: string;
-  /** The surface this page is gated by, the same one its route checks. */
-  surface: BackLinkSurface;
+  /** The surface this page is gated by, the same one its route checks. Absent when none does. */
+  surface?: BackLinkSurface;
   parent: (params: Record<string, string | undefined>) => ParentPage;
 };
 
@@ -106,6 +108,10 @@ const rules: Rule[] = [
     surface: "support",
     parent: () => ({ to: "/support", label: "support", surface: "support" }),
   },
+  {
+    pattern: "/teams/:name",
+    parent: () => ({ to: "/teams", label: "teams" }),
+  },
 ];
 
 export type ParentPageOptions = {
@@ -123,10 +129,11 @@ export function parentPage(pathname: string, options: ParentPageOptions): Parent
   const matched = rules
     .map((rule) => ({ rule, match: matchPath({ path: rule.pattern, end: true }, pathname) }))
     .find((item) => item.match !== null);
-  if (!matched?.match || !options.enabled(matched.rule.surface)) {
+  const on = (surface?: BackLinkSurface) => surface === undefined || options.enabled(surface);
+  if (!matched?.match || !on(matched.rule.surface)) {
     return null;
   }
   const parent = matched.rule.parent(matched.match.params);
 
-  return options.enabled(parent.surface) ? parent : null;
+  return on(parent.surface) ? parent : null;
 }

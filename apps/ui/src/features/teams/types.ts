@@ -1,5 +1,5 @@
-/** A Team of the Organization the admin acts in, with how many Users it holds. */
+/** A Team of the Organization the admin acts in, with the names of the Users in it. */
 export type Team = {
   name: string;
-  users: number;
+  members: string[];
 };

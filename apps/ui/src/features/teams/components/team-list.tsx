@@ -1,5 +1,6 @@
 import { CircleAlert, Pencil, Trash2, Users } from "lucide-react";
 import { useState } from "react";
+import { Link } from "react-router";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Notice } from "@/components/ui/notice";
@@ -12,13 +13,18 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useTeams } from "../hooks/use-teams";
+import { useTeamEnvironments, useTeams } from "../hooks/use-teams";
+import { teamPath } from "../team-path";
 import { DeleteTeamDialog } from "./delete-team-dialog";
 import { TeamNameDialog } from "./team-name-dialog";
 
-/** The Teams of the Organization, each with its Users and the two things an admin does to it. */
+/**
+ * The Teams of the Organization, each with its Users, the environments it owns
+ * and the two things an admin does to it.
+ */
 export function TeamList() {
   const { data, error, isPending, isFetching, refetch } = useTeams();
+  const environments = useTeamEnvironments();
   const [renaming, setRenaming] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
 
@@ -59,38 +65,79 @@ export function TeamList() {
             <TableRow className="hover:bg-transparent">
               <TableHead>Team</TableHead>
               <TableHead>Users</TableHead>
+              <TableHead>Environments</TableHead>
               <TableHead className="w-24">
                 <span className="sr-only">Actions</span>
               </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data.map((team) => (
-              <TableRow key={team.name}>
-                <TableCell className="font-medium">{team.name}</TableCell>
-                <TableCell className="font-mono">{team.users}</TableCell>
-                <TableCell>
-                  <div className="flex justify-end gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Rename ${team.name}`}
-                      onClick={() => setRenaming(team.name)}
+            {data.map((team) => {
+              const owned = environments.data?.filter((item) => item.team === team.name) ?? [];
+
+              return (
+                <TableRow key={team.name}>
+                  <TableCell>
+                    <Link
+                      to={teamPath(team.name)}
+                      className="rounded-md font-medium text-primary hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                     >
-                      <Pencil className="size-4" strokeWidth={1.5} aria-hidden="true" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Delete ${team.name}`}
-                      onClick={() => setDeleting(team.name)}
-                    >
-                      <Trash2 className="size-4" strokeWidth={1.5} aria-hidden="true" />
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
+                      {team.name}
+                    </Link>
+                  </TableCell>
+                  <TableCell>
+                    <div className="space-y-0.5">
+                      <p className="font-mono">{team.members.length}</p>
+                      {team.members.length > 0 ? (
+                        <p className="max-w-64 truncate text-xs text-muted-foreground">
+                          {team.members.join(", ")}
+                        </p>
+                      ) : null}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    {environments.isPending ? (
+                      <Skeleton className="h-4 w-24" />
+                    ) : environments.error ? (
+                      <span className="text-xs text-muted-foreground">Could not be read</span>
+                    ) : owned.length === 0 ? (
+                      <span className="text-xs text-muted-foreground">None</span>
+                    ) : (
+                      <ul className="flex flex-wrap gap-1">
+                        {owned.map((environment) => (
+                          <li
+                            key={environment.name}
+                            className="rounded-full border border-border px-2 py-0.5 font-mono text-xs"
+                          >
+                            {environment.name}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Rename ${team.name}`}
+                        onClick={() => setRenaming(team.name)}
+                      >
+                        <Pencil className="size-4" strokeWidth={1.5} aria-hidden="true" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Delete ${team.name}`}
+                        onClick={() => setDeleting(team.name)}
+                      >
+                        <Trash2 className="size-4" strokeWidth={1.5} aria-hidden="true" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </Card>
@@ -118,6 +165,7 @@ function TeamListSkeleton() {
           <div key={row} className="flex items-center gap-4 px-3 py-3">
             <Skeleton className="h-4 flex-1" />
             <Skeleton className="h-4 w-10" />
+            <Skeleton className="h-4 w-24" />
             <Skeleton className="h-4 w-16" />
           </div>
         ))}

@@ -177,7 +177,10 @@ describe("ConnectEnvironmentPage", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/create-environment\.sh/)).not.toBeInTheDocument();
-    expect(screen.getByText(/already runs Percona Database Service/)).toBeInTheDocument();
+    expect(screen.getByText(/AWS bills you for it/)).toBeInTheDocument();
+    // Amazon EKS in the customer's AWS account is the only place an environment runs.
+    expect(screen.queryByText(/--local/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/already run/)).not.toBeInTheDocument();
     expect(screen.getByText(/asks which AWS region/)).toBeInTheDocument();
     expect(screen.getByText("us-west-2")).toBeInTheDocument();
     expect(screen.getByText(/join secret/)).toBeInTheDocument();

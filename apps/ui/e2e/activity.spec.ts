@@ -222,6 +222,28 @@ test("the activity page lists every mutation, newest first", async ({ page }) =>
   await expect(rows.nth(1).getByTestId("activity-outcome")).toHaveText("Succeeded");
 });
 
+test("the filters narrow the feed, and only the database filter asks the control plane", async ({
+  page,
+}) => {
+  const urls = await stubActivity(page);
+
+  await page.goto("activity");
+  await expect(page.getByTestId("activity-row")).toHaveCount(3);
+  await expect(page.getByTestId("activity-count")).toContainText("Showing 3 of 3 loaded changes.");
+
+  await page.getByLabel("Made by").selectOption("chat");
+  await expect(page.getByTestId("activity-row")).toHaveCount(1);
+  await expect(page.getByTestId("activity-count")).toContainText("Showing 1 of 3 loaded changes.");
+  await expect(page).toHaveURL(/by=chat/);
+
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  await page.getByLabel("Database", { exact: true }).selectOption(ordersDev.id);
+  await expect(page.getByTestId("activity-row")).toHaveCount(2);
+  expect(urls.some((url) => new URL(url).searchParams.get("databaseId") === ordersDev.id)).toBe(
+    true,
+  );
+});
+
 test("the feed picks up a change without a manual refresh", async ({ page }) => {
   const urls = await stubActivity(page, { growAfterFirstPoll: true });
 

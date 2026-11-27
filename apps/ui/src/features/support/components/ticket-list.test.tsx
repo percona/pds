@@ -77,8 +77,8 @@ describe("TicketList", () => {
   });
 
   // The adapter answers 501 when it has no ServiceNow Secret. That is a
-  // deployment fact, so the page states it and points somewhere useful.
-  it("points at the public portal when the adapter has no ServiceNow Secret", async () => {
+  // deployment fact, so the page states it and points at where it is fixed.
+  it("points at Connectors when the adapter has no ServiceNow Secret", async () => {
     stubTickets(
       jsonResponse(
         { code: "ErrNotImplemented", message: "Support tickets are not configured." },
@@ -88,7 +88,10 @@ describe("TicketList", () => {
     renderWithProviders(<TicketList />);
 
     expect(await screen.findByText("Support is not connected")).toBeInTheDocument();
-    expect(screen.getByText("Support tickets are not configured.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Connectors" })).toHaveAttribute(
+      "href",
+      "/connectors",
+    );
     expect(screen.getByRole("link", { name: "Open the support portal" })).toHaveAttribute(
       "href",
       "https://www.percona.com/services/support",

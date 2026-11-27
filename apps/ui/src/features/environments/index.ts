@@ -22,7 +22,14 @@ export { ProvisioningPanel } from "./provisioning-panel";
 export { LifecyclePanel } from "./lifecycle-panel";
 export { LostPanel } from "./lost-panel";
 export { ManagedDeleteDialog } from "./managed-delete-dialog";
-export { lifecycleNotes, managedPill } from "./managed-state";
+export { DisconnectDialog } from "./disconnect-dialog";
+export {
+  environmentPill,
+  joiningEnvironment,
+  lifecycleNotes,
+  managedPill,
+  operableEnvironment,
+} from "./managed-state";
 export { MonitoringPanel } from "./monitoring-panel";
 export { awsCleanupPath, joinDatabaseNamespace, joinOwnershipTag } from "./aws-cleanup";
 export { GuideRefusal, Mono, Step, useGuideTarget } from "./guide";

@@ -1,5 +1,16 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, Loader2, MessageSquare } from "lucide-react";
+import {
+  AlertCircle,
+  Crosshair,
+  Database,
+  Globe,
+  History,
+  Loader2,
+  MessageSquare,
+  Minimize2,
+  SquarePen,
+  X,
+} from "lucide-react";
 import {
   useEffect,
   useMemo,
@@ -29,7 +40,7 @@ import {
   useSupportAvailability,
 } from "@/features/support";
 import type { TicketContextInput } from "@/features/support";
-import { resolveChatAction } from "../actions";
+import { databaseNameFromId, resolveChatAction } from "../actions";
 import { ChatCutOffError, type ApprovalDecision } from "../api";
 import {
   isFirstLine,
@@ -60,6 +71,7 @@ import type {
 } from "../types";
 import { ApprovalCard } from "./approval-card";
 import { ConversationList } from "./conversation-list";
+import { cn } from "@/lib/utils";
 
 const providerLabels: Record<ChatProvider, string> = {
   anthropic: "Anthropic",
@@ -101,11 +113,41 @@ function usePageDatabaseId(): string | undefined {
   return undefined;
 }
 
+/**
+ * What the open chat is about: the database a saved chat recorded, or the one a
+ * new chat will record when it is sent. Without one it reads across everything.
+ */
+function ChatContext({
+  thread,
+  startsOn,
+}: {
+  thread: ChatThread | undefined;
+  startsOn: string | undefined;
+}) {
+  const databaseId = thread ? thread.databaseId : startsOn;
+  const Icon = !databaseId ? Globe : thread ? Database : Crosshair;
+
+  return (
+    <p className="flex min-w-0 items-center gap-1.5 border-b border-border px-4 py-2 text-xs text-muted-foreground">
+      <Icon className="size-3.5 shrink-0" strokeWidth={1.5} aria-hidden="true" />
+      <span className="min-w-0 truncate">
+        {databaseId ? (
+          <>
+            {thread ? "About" : "Starts from"}{" "}
+            <span className="font-mono">{databaseNameFromId(databaseId)}</span>
+          </>
+        ) : (
+          "Across everything you can see"
+        )}
+      </span>
+    </p>
+  );
+}
+
 export function ChatWidget() {
-  const { open, setOpen } = useChatUi();
+  const { open, setOpen, pendingAsk, clearAsk } = useChatUi();
   const queryClient = useQueryClient();
   const pageDatabaseId = usePageDatabaseId();
-  const onChatPage = Boolean(useMatch({ path: "/chat", end: true }));
   const navigate = useNavigate();
   const connections = useConnections();
   const support = useSupportAvailability();
@@ -133,6 +175,11 @@ export function ChatWidget() {
   const [modelId, setModelId] = useState("");
   const [draft, setDraft] = useState("");
   const [activeId, setActiveId] = useState<string | undefined>(undefined);
+  // Expanded, the window grows in place to list the saved chats beside the open one.
+  const [expanded, setExpanded] = useState(false);
+  // The database another page asked about, which the next new chat records
+  // instead of the page that is open.
+  const [askedDatabaseId, setAskedDatabaseId] = useState<string | undefined>(undefined);
   // The first message of a new chat, shown until its conversation exists.
   const [pendingFirst, setPendingFirst] = useState<string | null>(null);
   // The key a first message went out with, kept when it failed so sending the
@@ -145,6 +192,7 @@ export function ChatWidget() {
   const providerRemoved = thread !== undefined && !isOfferedProvider(thread.provider);
   const chatProvider = providerRemoved ? undefined : (thread?.provider ?? provider);
   const chatModel = thread?.model ?? modelId;
+  const newChatDatabaseId = askedDatabaseId ?? pageDatabaseId;
   const [supportOpen, setSupportOpen] = useState(false);
   const [supportSubject, setSupportSubject] = useState("");
   const [supportDescription, setSupportDescription] = useState("");
@@ -160,27 +208,39 @@ export function ChatWidget() {
     send.text,
     send.approvals.length,
     open,
-    onChatPage,
+    expanded,
   ]);
 
   useEffect(() => {
-    if (!open && !onChatPage) {
+    if (!open) {
       return;
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") {
-        return;
-      }
-      setOpen(false);
-      if (onChatPage) {
-        navigate("/");
+      if (event.key === "Escape") {
+        setOpen(false);
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open, onChatPage, setOpen, navigate]);
+  }, [open, setOpen]);
+
+  // An ask from another page waits for a reply in flight, so that reply is not
+  // swapped out from under the person, then opens a new chat with the question.
+  useEffect(() => {
+    if (!pendingAsk || send.isPending) {
+      return;
+    }
+
+    setActiveId(undefined);
+    setPendingFirst(null);
+    setRetryKey(null);
+    setAskedDatabaseId(pendingAsk.databaseId);
+    setDraft(pendingAsk.question);
+    clearAsk();
+    requestAnimationFrame(() => document.getElementById("chat-message")?.focus());
+  }, [pendingAsk, send.isPending, clearAsk]);
 
   useEffect(() => {
     if (configuredProviders.length === 0) {
@@ -216,13 +276,7 @@ export function ChatWidget() {
     setActiveId(undefined);
     setPendingFirst(null);
     setRetryKey(null);
-  };
-
-  const hideChat = () => {
-    setOpen(false);
-    if (onChatPage) {
-      navigate("/");
-    }
+    setAskedDatabaseId(undefined);
   };
 
   // Switching the provider or the model starts a new conversation, because an
@@ -248,6 +302,7 @@ export function ChatWidget() {
     }
     setModelId(summary.model);
     setPendingFirst(null);
+    setAskedDatabaseId(undefined);
   };
 
   const handleSend = (text?: string) => {
@@ -261,7 +316,7 @@ export function ChatWidget() {
 
     const continuing = activeId;
     const selection = { provider: chatProvider, model: chatModel };
-    const startedOn = continuing ? undefined : pageDatabaseId;
+    const startedOn = continuing ? undefined : newChatDatabaseId;
     const requestKey = continuing
       ? undefined
       : retryKey?.message === content
@@ -404,193 +459,142 @@ export function ChatWidget() {
     });
   };
 
-  const conversationList = (
-    <ConversationList
-      activeId={activeId}
-      onOpen={handleOpenConversation}
-      onDeleted={(id) => {
-        if (id === activeId) {
-          startNewChat();
-        }
-      }}
-    />
-  );
-
-  // Show chats leaves the floating panel for a screen that is only chats:
-  // the saved list on the left, the open conversation on the right.
-  if (onChatPage) {
-    return (
-      <>
-        <section
-          id="environment-chat"
-          role="region"
-          aria-label="Chat"
-          className="fixed inset-y-0 right-0 left-64 z-30 flex bg-background"
-        >
-          <aside className="flex w-80 shrink-0 flex-col border-r border-border bg-card">
-            <header className="flex h-14 items-center px-4">
-              <h1 className="text-2xl font-semibold tracking-tight">Chats</h1>
-            </header>
-            <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">{conversationList}</div>
-          </aside>
-          <div className="flex min-w-0 flex-1 flex-col">
-            <header className="flex h-14 items-center justify-end gap-1 border-b border-border px-4">
-              {configuredProviders.length > 0 ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="whitespace-nowrap"
-                  disabled={send.isPending}
-                  onClick={startNewChat}
-                >
-                  New chat
-                </Button>
-              ) : null}
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="whitespace-nowrap"
-                onClick={hideChat}
-              >
-                Hide chat
-              </Button>
-            </header>
-            <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4">
-              {connections.isPending ? (
-                <div className="h-24 animate-pulse rounded-lg bg-accent" />
-              ) : configuredProviders.length === 0 ? (
-                <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
-                  <p className="text-sm text-muted-foreground">
-                    Paste a Claude or Cursor key to start chatting.
-                  </p>
-                  {connections.data ? <ModelKeyCards data={connections.data} /> : null}
-                </div>
-              ) : (
-                <ChatComposer
-                  configuredProviders={configuredProviders}
-                  provider={chatProvider}
-                  providerRemoved={providerRemoved}
-                  modelId={chatModel}
-                  draft={draft}
-                  activeId={activeId}
-                  conversation={conversation}
-                  pendingFirst={pendingFirst}
-                  sendPending={send.isPending}
-                  sendProgress={send.progress}
-                  sendText={send.text}
-                  approvals={send.approvals}
-                  onDecide={(id, decision) => decide.mutateAsync({ id, ...decision })}
-                  models={models}
-                  threadEndRef={threadEndRef}
-                  onProviderChange={handleProviderChange}
-                  onModelChange={handleModelChange}
-                  onDraftChange={setDraft}
-                  onSend={() => handleSend()}
-                  onAction={handleAction}
-                  onNewChat={startNewChat}
-                />
-              )}
-            </div>
-          </div>
-        </section>
-        <ContactSupportDialog
-          open={supportOpen}
-          onOpenChange={setSupportOpen}
-          subject={supportSubject}
-          description={supportDescription}
-          context={supportContext}
-          connected={support.connected}
-          portalUrl={support.portalUrl}
-        />
-      </>
-    );
-  }
+  const keyed = configuredProviders.length > 0;
+  const showHistory = expanded && keyed;
 
   return (
     <>
-      <div className="fixed right-6 bottom-6 z-40 flex flex-col items-end gap-2">
+      <div className="fixed right-4 bottom-4 z-40 flex flex-col items-end gap-2 sm:right-6 sm:bottom-6">
         {open ? (
           <section
             id="environment-chat"
             role="region"
             aria-label="Chat"
-            className="flex h-[32rem] w-[24rem] max-h-[calc(100vh-5rem)] max-w-[calc(100vw-3rem)] flex-col rounded-lg border border-border bg-card shadow-lg"
+            className={cn(
+              "flex max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-lg border border-border bg-card shadow-lg",
+              showHistory
+                ? "h-[42rem] max-h-[calc(100dvh-2rem)] w-[61rem]"
+                : "h-[32rem] max-h-[calc(100dvh-5rem)] w-[24rem]",
+            )}
           >
-            <header className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
-              <h2 className="text-base font-semibold">Chat</h2>
-              <div className="flex items-center gap-1">
-                {configuredProviders.length > 0 ? (
-                  <>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="whitespace-nowrap"
-                      disabled={send.isPending}
-                      onClick={() => navigate("/chat")}
-                    >
-                      Show chats
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="whitespace-nowrap"
-                      disabled={send.isPending}
-                      onClick={startNewChat}
-                    >
-                      New chat
-                    </Button>
-                  </>
-                ) : null}
+            <header className="flex items-center gap-1 border-b border-border py-2 pr-2 pl-4">
+              <h2 className="mr-1 text-base font-semibold">Ask PDS</h2>
+              {keyed ? (
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="whitespace-nowrap"
-                  onClick={hideChat}
+                  className="px-2 whitespace-nowrap text-primary"
+                  aria-expanded={showHistory}
+                  aria-controls="chat-history"
+                  onClick={() => setExpanded((value) => !value)}
                 >
-                  Hide chat
+                  {showHistory ? (
+                    <Minimize2 strokeWidth={1.5} aria-hidden="true" />
+                  ) : (
+                    <History strokeWidth={1.5} aria-hidden="true" />
+                  )}
+                  Chat history
                 </Button>
-              </div>
+              ) : null}
+              <span className="flex-1" />
+              {keyed && !showHistory ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-8"
+                  aria-label="New chat"
+                  disabled={send.isPending}
+                  onClick={startNewChat}
+                >
+                  <SquarePen strokeWidth={1.5} aria-hidden="true" />
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-8"
+                aria-label="Hide chat"
+                onClick={() => setOpen(false)}
+              >
+                <X strokeWidth={1.5} aria-hidden="true" />
+              </Button>
             </header>
-            <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4">
-              {connections.isPending ? (
-                <div className="h-24 animate-pulse rounded-lg bg-accent" />
-              ) : configuredProviders.length === 0 ? (
-                <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
-                  <p className="text-sm text-muted-foreground">
-                    Paste a Claude or Cursor key to start chatting.
-                  </p>
-                  {connections.data ? <ModelKeyCards data={connections.data} /> : null}
+            <div className={cn("flex min-h-0 flex-1 flex-col", showHistory && "sm:flex-row")}>
+              {showHistory ? (
+                <aside
+                  id="chat-history"
+                  aria-label="Chat history"
+                  className="flex max-h-44 shrink-0 flex-col border-b border-border sm:max-h-none sm:w-64 sm:border-r sm:border-b-0"
+                >
+                  <div className="flex items-center justify-between gap-2 px-3 pt-3 pb-2">
+                    <h3 className="text-xs font-medium text-muted-foreground">Chats</h3>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={send.isPending}
+                      onClick={startNewChat}
+                    >
+                      <SquarePen strokeWidth={1.5} aria-hidden="true" />
+                      New chat
+                    </Button>
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+                    <ConversationList
+                      activeId={activeId}
+                      disabled={send.isPending}
+                      onOpen={handleOpenConversation}
+                      onDeleted={(id) => {
+                        if (id === activeId) {
+                          startNewChat();
+                        }
+                      }}
+                    />
+                  </div>
+                </aside>
+              ) : null}
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                {keyed ? <ChatContext thread={thread} startsOn={newChatDatabaseId} /> : null}
+                <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4">
+                  {connections.isPending ? (
+                    <div className="h-24 animate-pulse rounded-lg bg-accent" />
+                  ) : !keyed ? (
+                    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
+                      <p className="text-sm text-muted-foreground">
+                        Paste a Claude or Cursor key to start chatting.
+                      </p>
+                      {connections.data ? <ModelKeyCards data={connections.data} /> : null}
+                    </div>
+                  ) : (
+                    <ChatComposer
+                      configuredProviders={configuredProviders}
+                      provider={chatProvider}
+                      providerRemoved={providerRemoved}
+                      modelId={chatModel}
+                      draft={draft}
+                      activeId={activeId}
+                      conversation={conversation}
+                      pendingFirst={pendingFirst}
+                      sendPending={send.isPending}
+                      sendProgress={send.progress}
+                      sendText={send.text}
+                      approvals={send.approvals}
+                      onDecide={(id, decision) => decide.mutateAsync({ id, ...decision })}
+                      models={models}
+                      threadEndRef={threadEndRef}
+                      onProviderChange={handleProviderChange}
+                      onModelChange={handleModelChange}
+                      onDraftChange={setDraft}
+                      onSend={() => handleSend()}
+                      onAction={handleAction}
+                      onNewChat={startNewChat}
+                    />
+                  )}
                 </div>
-              ) : (
-                <ChatComposer
-                  configuredProviders={configuredProviders}
-                  provider={chatProvider}
-                  providerRemoved={providerRemoved}
-                  modelId={chatModel}
-                  draft={draft}
-                  activeId={activeId}
-                  conversation={conversation}
-                  pendingFirst={pendingFirst}
-                  sendPending={send.isPending}
-                  sendProgress={send.progress}
-                  sendText={send.text}
-                  approvals={send.approvals}
-                  onDecide={(id, decision) => decide.mutateAsync({ id, ...decision })}
-                  models={models}
-                  threadEndRef={threadEndRef}
-                  onProviderChange={handleProviderChange}
-                  onModelChange={handleModelChange}
-                  onDraftChange={setDraft}
-                  onSend={() => handleSend()}
-                  onAction={handleAction}
-                  onNewChat={startNewChat}
-                />
-              )}
+              </div>
             </div>
           </section>
         ) : (
@@ -608,7 +612,7 @@ export function ChatWidget() {
             ) : (
               <>
                 <MessageSquare strokeWidth={1.5} aria-hidden="true" />
-                Open chat
+                Ask PDS
               </>
             )}
           </Button>

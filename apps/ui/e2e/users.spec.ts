@@ -106,13 +106,11 @@ test.describe("the Users screen", () => {
     await stubDirectory(page);
 
     await page.goto("");
-    await page
-      .getByRole("group", { name: "Organization" })
-      .getByRole("link", { name: "Users" })
-      .click();
+    await page.getByRole("button", { name: "Organization" }).click();
+    await page.getByRole("link", { name: "Users" }).click();
 
     await expect(page.getByRole("heading", { level: 1, name: "Users" })).toBeVisible();
-    await expect(page.getByRole("cell", { name: "Ada Lovelace" })).toBeVisible();
+    await expect(page.getByRole("cell", { name: "Ada Lovelace", exact: true })).toBeVisible();
     await expect(page.getByRole("cell", { name: "grace@example.com", exact: true })).toBeVisible();
   });
 
@@ -120,7 +118,8 @@ test.describe("the Users screen", () => {
     await stubDirectory(page);
     await page.goto("users");
 
-    await page.getByLabel("Email").fill("linus@example.com");
+    await page.getByRole("button", { name: "Invite people" }).click();
+    await page.getByLabel("Email addresses").fill("linus@example.com");
     await page.getByLabel("Team", { exact: true }).selectOption("payments");
     await page.getByRole("button", { name: "Send invite" }).click();
 
@@ -141,17 +140,36 @@ test.describe("the Users screen", () => {
     await expect(page.getByRole("cell", { name: "grace@example.com", exact: true })).toBeVisible();
   });
 
+  test("invites several addresses and opens the claim screen of one link", async ({ page }) => {
+    await stubDirectory(page);
+    await page.goto("users");
+
+    await page.getByRole("button", { name: "Invite people" }).click();
+    await page.getByLabel("Email addresses").fill("linus@example.com, ken@example.com");
+    await page.getByRole("button", { name: "Send 2 invites" }).click();
+
+    const links = page.getByRole("status");
+    await expect(links).toContainText("Invite sent to linus@example.com");
+    await expect(links).toContainText("Invite sent to ken@example.com");
+
+    const opened = page.context().waitForEvent("page");
+    await links.getByRole("link", { name: "Open as the invited person" }).first().click();
+    const claim = await opened;
+    await expect(claim).toHaveURL(/\/claim\?token=fresh-token$/);
+  });
+
   test("invites anyone with the link as a user", async ({ page }) => {
     await stubDirectory(page);
     await page.goto("users");
 
-    await page.getByLabel("Role").selectOption("admin");
-    await page.getByLabel("Anyone with the link can join").check();
+    await page.getByRole("button", { name: "Invite people" }).click();
+    await page.getByLabel("Role", { exact: true }).selectOption("admin");
+    await page.getByRole("checkbox", { name: "Anyone with the link can join" }).check();
 
-    await expect(page.getByLabel("Email")).toBeDisabled();
-    await expect(page.getByLabel("Role")).toBeDisabled();
-    await expect(page.getByLabel("Role")).toHaveValue("user");
-    await page.getByRole("button", { name: "Send invite" }).click();
+    await expect(page.getByLabel("Email addresses")).toBeDisabled();
+    await expect(page.getByLabel("Role", { exact: true })).toBeDisabled();
+    await expect(page.getByLabel("Role", { exact: true })).toHaveValue("user");
+    await page.getByRole("button", { name: "Create link" }).click();
 
     await expect(page.getByRole("status")).toContainText("Invite created for anyone");
   });
@@ -164,8 +182,9 @@ test.describe("the Users screen", () => {
       await page.setViewportSize({ width: 1440, height: 900 });
 
       await page.goto("users");
-      await page.getByLabel("Email").fill("linus@example.com");
-      await page.getByRole("button", { name: "Send invite" }).click();
+      await page.getByRole("button", { name: "Invite people" }).click();
+      await page.getByLabel("Email addresses").fill("linus@example.com ken@example.com");
+      await page.getByRole("button", { name: "Send 2 invites" }).click();
 
       await expect(page.getByRole("status")).toBeVisible();
       await expect(page.locator("html")).toHaveClass(theme === "dark" ? /dark/ : /^(?!.*dark).*$/);

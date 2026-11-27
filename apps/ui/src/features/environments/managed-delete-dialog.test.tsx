@@ -64,6 +64,9 @@ describe("ManagedDeleteDialog", () => {
 
     expect(screen.getByTestId("delete-consequence")).toHaveTextContent("payments");
     expect(screen.getByTestId("delete-consequence")).toHaveTextContent("there is no undo");
+    const removes = screen.getByRole("list", { name: "What deleting removes" });
+    expect(removes).toHaveTextContent("The backup bucket and every backup in it");
+    expect(removes).toHaveTextContent("The databases and their data");
   });
 
   it("deletes with the typed name and closes", async () => {

@@ -83,11 +83,12 @@ test.describe("AI agents", () => {
 
     const origin = new URL(page.url()).origin;
     await page
-      .getByRole("region", { name: "Other clients with remote servers" })
+      .getByRole("region", { name: "Any MCP client" })
       .getByRole("button", { name: "Copy address" })
       .click();
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(`${origin}/mcp`);
 
+    await page.getByText("My client only runs a local command").click();
     await page.getByRole("button", { name: /Read and change/ }).click();
     await expect(
       page.getByText(`PDS_URL=${origin} npx -y @gas-lab/pds-mcp@next login --access change`),
@@ -167,10 +168,23 @@ for (const theme of ["light", "dark"] as const) {
 
     await page.goto("agents");
 
-    await expect(
-      page.getByRole("heading", { level: 2, name: "Clients that only run a local command" }),
-    ).toBeVisible();
+    await page.getByText("My client only runs a local command").click();
+    await expect(page.getByRole("button", { name: "Copy login command" })).toBeVisible();
     await expect(page.locator("html")).toHaveClass(theme === "dark" ? /dark/ : /^(?!.*dark).*$/);
     await page.screenshot({ path: `test-results/agents-login-${theme}.png`, fullPage: true });
+  });
+
+  test(`the AI agents page fits a phone in ${theme} mode`, async ({ page }) => {
+    await useTheme(page, theme);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.setViewportSize({ width: 390, height: 844 });
+
+    await page.goto("agents");
+
+    await expect(page.getByRole("heading", { level: 1, name: "AI agents" })).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/agents-phone-${theme}.png`, fullPage: true });
   });
 }

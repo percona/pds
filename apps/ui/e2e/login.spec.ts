@@ -93,9 +93,8 @@ test("signing in opens the product, and signing out closes it again", async ({ p
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
 
-  // The page they asked for, not the home page: the gate remembers where they
-  // were sent from.
-  await expect(page.getByRole("heading", { level: 1, name: "Environments" })).toBeVisible();
+  // Signing in settles the acting team, which opens Home.
+  await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
   await expect(page.getByText(e2eUsername)).toBeVisible();
 
   await page.getByRole("button", { name: "Sign out" }).click();

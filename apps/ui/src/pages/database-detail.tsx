@@ -1,4 +1,4 @@
-import { CircleAlert, CircleCheck } from "lucide-react";
+import { CircleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
@@ -7,8 +7,6 @@ import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UnreachableBanner, useEnvironments } from "@/features/environments";
 import {
-  ConnectCard,
-  ConnectDialog,
   DatabaseHeader,
   DatabaseTabs,
   DeleteDialog,
@@ -16,7 +14,6 @@ import {
   RestoreDialog,
   ScaleDialog,
   isProvisioningComplete,
-  useConnectionCopied,
   useCreateBackup,
   useDatabase,
   useProvisioningEvents,
@@ -37,9 +34,9 @@ import {
 import { formatTimestamp } from "@/lib/format";
 
 /**
- * The database detail page. It has three bodies: the provisioning screen
- * while a create is running, the connect landing for the create that just
- * finished, and the tabbed detail for every other visit.
+ * The database detail page. It has two bodies: the provisioning screen while
+ * a create is running or after it failed, and the tabbed detail once the
+ * database has published its connection.
  */
 export function DatabaseDetailPage() {
   const params = useParams();
@@ -49,15 +46,9 @@ export function DatabaseDetailPage() {
     : "/environments";
   const location = useLocation();
   const navigate = useNavigate();
-  const justCreated =
-    (location.state as { created?: boolean; chatIntent?: NavigableIntent } | null)?.created ===
-    true;
   const chatIntent = (location.state as { chatIntent?: NavigableIntent } | null)?.chatIntent;
 
-  const [landingDismissed, setLandingDismissed] = useState(false);
   const [tab, setTab] = useState<DatabaseTab>("overview");
-  const [connectOpen, setConnectOpen] = useState(false);
-  const [landingOpened, setLandingOpened] = useState(false);
   const [scaleOpen, setScaleOpen] = useState(false);
   const [scaleField, setScaleField] = useState<ScaleField>("cpu");
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -70,7 +61,6 @@ export function DatabaseDetailPage() {
   // The dialog is opened from a row, so the row it was opened on is what says
   // which backup a restore reads from.
   const [restoreBackup, setRestoreBackup] = useState<Backup | undefined>(undefined);
-  const { copied, markCopied } = useConnectionCopied(id);
   const { environments } = useEnvironments();
   const environment = params.environment
     ? environments.find((item) => item.name === params.environment)
@@ -80,8 +70,7 @@ export function DatabaseDetailPage() {
   const { data, error, isPending, isFetching, refetch } = useDatabase(id);
   const { events, lastActiveStep, failureSettled } = useProvisioningEvents(data);
   const backup = useCreateBackup(id);
-  // Asked once for the page and handed down, so a failed create and a node down
-  // agree on whether a ticket can be sent at all.
+  // The header leaves Contact support out when no ticket can be sent.
   const support = useSupportAvailability();
 
   // A backup takes minutes, so the answer to the button is the pending row on
@@ -129,30 +118,14 @@ export function DatabaseDetailPage() {
     }
   };
 
-  // A create ends with a developer who wants to run something, so the dialog
-  // opens itself on the command as soon as the connection is published. Once
-  // only: closing it has to stay closed.
-  const landingReady = justCreated && !landingDismissed && Boolean(data?.connection);
-
-  useEffect(() => {
-    if (!landingReady || landingOpened) {
-      return;
-    }
-
-    setLandingOpened(true);
-    setConnectOpen(true);
-  }, [landingReady, landingOpened]);
-
   useEffect(() => {
     if (!chatIntent) {
       return;
     }
 
     runAction(chatIntent);
-
-    const created = (location.state as { created?: boolean } | null)?.created === true;
-    navigate(".", { replace: true, state: created ? { created: true } : null });
-  }, [chatIntent, location.state, navigate]);
+    navigate(".", { replace: true, state: null });
+  }, [chatIntent, navigate]);
 
   if (isPending) {
     return <DetailSkeleton />;
@@ -190,8 +163,6 @@ export function DatabaseDetailPage() {
           onRetry={() => void refetch()}
           retrying={isFetching}
           onDelete={() => setDeleteOpen(true)}
-          supportConnected={support.connected}
-          supportPortalUrl={support.portalUrl}
         />
         <DeleteDialog
           database={data}
@@ -203,37 +174,6 @@ export function DatabaseDetailPage() {
     );
   }
 
-  if (justCreated && !landingDismissed) {
-    return (
-      <div className="mx-auto w-full max-w-md animate-fade-in space-y-6 py-8">
-        <div className="flex flex-col items-center gap-3 text-center">
-          <CircleCheck className="size-5 text-success" strokeWidth={1.5} aria-hidden="true" />
-          <h1 className="text-2xl font-semibold tracking-tight">
-            <span className="font-mono">{data.name}</span> is ready
-          </h1>
-        </div>
-
-        <ConnectCard
-          database={data}
-          onConnect={() => {
-            setConnectOpen(true);
-          }}
-        />
-
-        <ConnectDialog
-          database={data}
-          open={connectOpen}
-          onOpenChange={setConnectOpen}
-          onCopied={markCopied}
-        />
-
-        <div className="flex justify-center">
-          <Button onClick={() => setLandingDismissed(true)}>Open database</Button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="animate-fade-in space-y-6">
       {unreachable ? (
@@ -241,7 +181,6 @@ export function DatabaseDetailPage() {
       ) : null}
       <DatabaseHeader
         database={data}
-        onConnect={() => setConnectOpen(true)}
         onScale={() => setScaleOpen(true)}
         onBackUpNow={startBackup}
         backingUp={backup.isPending}
@@ -280,12 +219,6 @@ export function DatabaseDetailPage() {
           }
         }}
       />
-      <ConnectDialog
-        database={data}
-        open={connectOpen}
-        onOpenChange={setConnectOpen}
-        onCopied={markCopied}
-      />
       <ContactSupportDialog
         open={supportOpen}
         onOpenChange={setSupportOpen}
@@ -299,8 +232,6 @@ export function DatabaseDetailPage() {
         database={data}
         tab={tab}
         onTabChange={setTab}
-        connectionCopied={copied}
-        onConnect={() => setConnectOpen(true)}
         onBackUpNow={startBackup}
         backingUp={backup.isPending}
         backupEnabled={!unreachable}

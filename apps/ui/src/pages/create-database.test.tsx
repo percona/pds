@@ -243,9 +243,13 @@ describe("CreateDatabasePage", () => {
     expect(await screen.findByText("Usually 6 to 12 minutes")).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Creating orders-dev");
     expect(screen.getByTestId("provisioning-step-volumes")).toHaveTextContent("Creating volumes");
+    expect(screen.getByTestId("provisioning-step-volumes")).toHaveTextContent("In progress");
+    expect(screen.getByTestId("provisioning-step-database")).toHaveTextContent("Starting database");
+    expect(screen.getByTestId("provisioning-step-app-user")).toHaveTextContent("Creating app user");
+    expect(screen.getByTestId("provisioning-step-app-user")).toHaveTextContent("Waiting");
   });
 
-  it("lands on connect once the connection is published", async () => {
+  it("opens the overview on connect once the connection is published", async () => {
     const ready = createMockDatabase({
       id: "spoke-a/pds.orders-dev",
       name: "orders-dev",
@@ -274,12 +278,12 @@ describe("CreateDatabasePage", () => {
 
     renderWithProviders(<AppRoutes />, { route: "/databases/spoke-a/pds.orders-dev" });
 
-    expect(
-      await screen.findByText("mysql://app:••••••••@orders-dev.pds.svc:3306/orders-dev"),
-    ).toBeInTheDocument();
-    // The header and the card both lead to the same dialog, which is where
-    // every copy happens.
-    expect(screen.getAllByRole("button", { name: "Connect" })).toHaveLength(2);
+    expect(await screen.findByRole("button", { name: "From your laptop" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("keeps the user on the form when the adapter rejects the name", async () => {

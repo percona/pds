@@ -11,7 +11,7 @@ import {
 import { cn } from "@/lib/utils";
 
 /** The label under the product name, and the popup it opens. */
-export function ExperimentalNotice() {
+export function ExperimentalNotice({ compact = false }: { compact?: boolean }) {
   return (
     <Dialog>
       <DialogTrigger
@@ -19,10 +19,11 @@ export function ExperimentalNotice() {
         className={cn(
           badgeVariants({ variant: "outline" }),
           "w-fit gap-1 px-2 py-0 text-muted-foreground hover:bg-accent hover:text-foreground",
+          compact && "size-7 justify-center px-0",
         )}
       >
         <FlaskConical className="size-3" strokeWidth={1.5} aria-hidden="true" />
-        Experimental
+        {compact ? <span className="sr-only">Experimental</span> : "Experimental"}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>

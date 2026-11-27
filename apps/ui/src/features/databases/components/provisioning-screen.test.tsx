@@ -108,15 +108,16 @@ describe("ProvisioningScreen", () => {
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 
-  it("opens the support dialog pre-filled with the failed step and the last event", async () => {
+  it("opens the support dialog pre-filled with the database it is about", async () => {
+    const database = createMockDatabase({
+      name: "orders-dev",
+      profile: "prod",
+      status: "failed",
+      message: "No node has enough memory for 3 members.",
+    });
     renderWithProviders(
       <ProvisioningScreen
-        database={createMockDatabase({
-          name: "orders-dev",
-          profile: "prod",
-          status: "failed",
-          message: "No node has enough memory for 3 members.",
-        })}
+        database={database}
         failedStep="database"
         events={{ database: "Pod orders-dev-0 restarted 5 times" }}
         onRetry={vi.fn()}
@@ -130,12 +131,7 @@ describe("ProvisioningScreen", () => {
     );
 
     const description = screen.getByLabelText<HTMLTextAreaElement>("Description");
-    expect(description.value).toContain("Failed step: Starting database");
-    expect(description.value).toContain("Profile: prod");
-    expect(description.value).not.toContain("Environment type:");
-    expect(description.value).toContain("Members: 1");
-    expect(description.value).toContain("Last event: Pod orders-dev-0 restarted 5 times");
-    expect(description.value).toContain("No node has enough memory for 3 members.");
+    expect(description.value).toContain(`Environment: ${database.environment}`);
   });
 
   it("sends ticket context with environment type when the ticket is sent", async () => {
@@ -195,23 +191,19 @@ describe("ProvisioningScreen", () => {
     });
   });
 
-  // The support action is only worth offering where the adapter can actually
-  // open a ticket.
-  it("offers the support portal instead of a ticket when support is not connected", () => {
+  it("offers Try again, Contact support and Delete on a failure", () => {
     renderWithProviders(
       <ProvisioningScreen
         database={createMockDatabase({ name: "orders-dev", status: "failed" })}
         failedStep="database"
         onRetry={vi.fn()}
-        supportConnected={false}
+        onDelete={vi.fn()}
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "Contact support" })).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Open support portal/ })).toHaveAttribute(
-      "href",
-      "https://www.percona.com/services/support",
-    );
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Contact support" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
   });
 
   it("does not offer a retry while the database is still coming up", () => {

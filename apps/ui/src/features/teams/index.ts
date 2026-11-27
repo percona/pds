@@ -4,5 +4,7 @@ export { TeamLabel } from "./components/team-label";
 export { TeamSelector } from "./components/team-selector";
 export { TeamList } from "./components/team-list";
 export { TeamNameDialog } from "./components/team-name-dialog";
-export { teamsKey, useTeams } from "./hooks/use-teams";
+export { DeleteTeamDialog } from "./components/delete-team-dialog";
+export { teamsKey, useTeamEnvironments, useTeams } from "./hooks/use-teams";
+export { teamPath } from "./team-path";
 export type { Team } from "./types";

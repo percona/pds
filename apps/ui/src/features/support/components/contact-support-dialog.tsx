@@ -124,7 +124,7 @@ export function ContactSupportDialog({
                 Connection strings, passwords, and tokens are removed before the ticket is sent.
               </p>
             ) : (
-              <NotConnected portalUrl={portalUrl} />
+              <NotConnected portalUrl={portalUrl} onLeave={() => onOpenChange(false)} />
             )}
 
             {send.error ? (
@@ -165,18 +165,28 @@ export function ContactSupportDialog({
 }
 
 /**
- * What an environment with no ServiceNow Secret shows instead of a send button. It
- * states the reason and offers the route that does work.
+ * What a control plane with no ServiceNow connection shows instead of a send
+ * button. It says where the connection is made and offers the route that works
+ * today.
  */
-function NotConnected({ portalUrl }: { portalUrl: string }) {
+function NotConnected({ portalUrl, onLeave }: { portalUrl: string; onLeave: () => void }) {
   return (
     <div className="space-y-2" data-testid="support-not-connected">
       <p className="text-sm">Support is not connected yet.</p>
       <p className="text-sm text-muted-foreground">
-        Copy the text above into a ticket on the Percona support portal, or ask your Percona contact
-        for the ServiceNow tokens this control plane needs.
+        Copy the text above into a case on the Percona support portal, or ask an admin to connect
+        ServiceNow in Connectors.
       </p>
-      <PortalLink href={portalUrl}>Open the support portal</PortalLink>
+      <div className="flex flex-wrap items-center gap-4">
+        <Link
+          to="/connectors"
+          onClick={onLeave}
+          className="text-sm font-medium text-primary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          Open Connectors
+        </Link>
+        <PortalLink href={portalUrl}>Open the support portal</PortalLink>
+      </div>
     </div>
   );
 }

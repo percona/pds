@@ -4,19 +4,13 @@ import {
   CircleCheck,
   CircleDashed,
   CircleX,
-  ExternalLink,
   Loader2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import {
-  buildTicketContext,
-  ContactSupportDialog,
-  provisioningErrorMessage,
-  publicSupportPortalUrl,
-} from "@/features/support";
+import { ContactSupportButton, provisioningErrorMessage } from "@/features/support";
 import { cn } from "@/lib/utils";
 import { buildProvisioningSteps } from "../provisioning";
 import type { ProvisioningEvents, ProvisioningStep, ProvisioningStepId } from "../provisioning";
@@ -46,12 +40,6 @@ type ProvisioningScreenProps = {
   retrying?: boolean;
   /** Opens the delete dialog, which clears a failed create nothing was committed for. */
   onDelete?: () => void;
-  /**
-   * False when the adapter has no ServiceNow Secret. The support action is then
-   * left out and the public portal takes its place.
-   */
-  supportConnected?: boolean;
-  supportPortalUrl?: string;
 };
 
 /**
@@ -66,11 +54,7 @@ export function ProvisioningScreen({
   onRetry,
   retrying,
   onDelete,
-  supportConnected = true,
-  supportPortalUrl = publicSupportPortalUrl,
 }: ProvisioningScreenProps) {
-  const [supportOpen, setSupportOpen] = useState(false);
-
   const steps = buildProvisioningSteps(database, { events, failedStep, failed: failedOverride });
   const failed = steps.find((step) => step.state === "failed");
 
@@ -107,22 +91,17 @@ export function ProvisioningScreen({
               {database.message ?? "No reason was reported."}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button onClick={onRetry} loading={retrying}>
               Try again
             </Button>
-            {supportConnected ? (
-              <Button variant="outline" onClick={() => setSupportOpen(true)}>
-                Contact support
-              </Button>
-            ) : (
-              <Button variant="outline" asChild>
-                <a href={supportPortalUrl} target="_blank" rel="noreferrer">
-                  Open support portal
-                  <ExternalLink className="size-3.5" strokeWidth={1.5} aria-hidden="true" />
-                </a>
-              </Button>
-            )}
+            {/* The database's facts travel as the ticket context, with the
+                failed step's last event as what went wrong. */}
+            <ContactSupportButton
+              subject={`Cannot create database ${database.name}`}
+              database={database}
+              errorMessage={provisioningErrorMessage(database, failed)}
+            />
             {onDelete ? (
               <Button variant="outline" onClick={onDelete}>
                 Delete
@@ -131,18 +110,6 @@ export function ProvisioningScreen({
           </div>
         </div>
       ) : null}
-
-      <ContactSupportDialog
-        open={supportOpen}
-        onOpenChange={setSupportOpen}
-        subject={`Cannot create database ${database.name}`}
-        description={ticketDescription(database, failed)}
-        context={buildTicketContext(database, {
-          errorMessage: provisioningErrorMessage(database, failed),
-        })}
-        connected={supportConnected}
-        portalUrl={supportPortalUrl}
-      />
     </div>
   );
 }
@@ -182,33 +149,4 @@ function StepRow({ step }: { step: ProvisioningStep }) {
       ) : null}
     </li>
   );
-}
-
-/**
- * The ticket body. It carries what support needs to reproduce the failure and
- * nothing that would leak: no connection string, no password, no secret name.
- */
-function ticketDescription(database: Database, failed?: ProvisioningStep): string {
-  const lines = [
-    `Database: ${database.name}`,
-    `Engine: ${database.engine}${database.version ? ` ${database.version}` : ""}`,
-    `Profile: ${database.profile}`,
-    `Namespace: ${database.namespace}`,
-    `Members: ${database.members}`,
-    `Status: ${database.status}`,
-  ];
-
-  if (failed) {
-    lines.push(`Failed step: ${failed.label}`);
-
-    if (failed.event) {
-      lines.push(`Last event: ${failed.event}`);
-    }
-  }
-
-  if (database.message) {
-    lines.push(`Reason: ${database.message}`);
-  }
-
-  return lines.join("\n");
 }

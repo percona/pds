@@ -64,7 +64,7 @@ describe("AppShell", () => {
   it("renders the product name and primary navigation", async () => {
     renderShell();
 
-    expect(screen.getByText("PDS", { exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "PDS" })).toHaveAttribute("href", "/");
     expect(screen.queryByText("MySQL on this Kubernetes cluster")).not.toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Main" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Environments" })).toHaveAttribute(
@@ -76,8 +76,9 @@ describe("AppShell", () => {
       "href",
       "/activity",
     );
+    expect(screen.queryByRole("link", { name: "Chats" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Chat$/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open chat" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ask PDS" })).toBeInTheDocument();
   });
 
   it("keeps Environments in the sidebar while environment discovery is failing", async () => {
@@ -119,18 +120,7 @@ describe("AppShell", () => {
     expect(screen.queryByText("MySQL on this Kubernetes cluster")).not.toBeInTheDocument();
   });
 
-  it("adds support to the navigation once the adapter reports it is connected", async () => {
-    renderShell();
-
-    expect(await screen.findByRole("link", { name: "Support" })).toHaveAttribute(
-      "href",
-      "/support",
-    );
-  });
-
-  // No ServiceNow Secret means no tickets to list, so the entry is left out
-  // rather than leading to a page that only says so.
-  it("leaves support out of the navigation when the adapter answers 501", async () => {
+  it("keeps support in the navigation whether or not ServiceNow is connected", async () => {
     stubSupport(
       jsonResponse(
         { code: "ErrNotImplemented", message: "Support tickets are not configured." },
@@ -139,16 +129,13 @@ describe("AppShell", () => {
     );
     renderShell();
 
-    await waitFor(() =>
-      expect(screen.getByRole("link", { name: "Environments" })).toBeInTheDocument(),
-    );
-    expect(screen.queryByRole("button", { name: /^Chat$/ })).not.toBeInTheDocument();
-    await waitFor(() =>
-      expect(screen.queryByRole("link", { name: "Support" })).not.toBeInTheDocument(),
+    expect(await screen.findByRole("link", { name: "Support" })).toHaveAttribute(
+      "href",
+      "/support",
     );
   });
 
-  it("orders navigation as environments, alerts, chats, AI agents, activity, then support", async () => {
+  it("orders navigation as environments, alerts, AI agents, activity, then support", async () => {
     renderShell();
 
     const nav = await screen.findByRole("navigation", { name: "Main" });
@@ -157,8 +144,8 @@ describe("AppShell", () => {
     expect(items.map((link) => link.textContent?.trim())).toEqual([
       "Environments",
       "Alerts",
-      "Chats",
       "AI agents",
+      "Connectors",
       "Activity",
       "Support",
     ]);
@@ -187,10 +174,99 @@ describe("AppShell", () => {
     expect(screen.getByRole("main")).toHaveTextContent("page body");
   });
 
+  it("collapses the sidebar to icons and remembers the choice", async () => {
+    renderShell();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Collapse sidebar" }));
+
+    const sidebar = screen.getByTestId("sidebar");
+    expect(sidebar.className).toContain("w-16");
+    expect(sidebar.className).not.toContain("w-64");
+    expect(screen.getByRole("main").className).toContain("pl-16");
+    expect(window.localStorage.getItem("pds-sidebar")).toBe("collapsed");
+
+    const environments = screen.getByRole("link", { name: "Environments" });
+    expect(within(environments).getByRole("tooltip", { hidden: true })).toHaveTextContent(
+      "Environments",
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Expand sidebar" }));
+
+    expect(screen.getByTestId("sidebar").className).toContain("w-64");
+    expect(screen.getByRole("main").className).toContain("pl-64");
+    expect(window.localStorage.getItem("pds-sidebar")).toBe("expanded");
+  });
+
+  it("starts collapsed when that choice was remembered", () => {
+    window.localStorage.setItem("pds-sidebar", "collapsed");
+
+    renderShell();
+
+    expect(screen.getByTestId("sidebar").className).toContain("w-16");
+    expect(screen.getByRole("main").className).toContain("pl-16");
+  });
+
+  it("keeps the critical count visible when the sidebar is collapsed", async () => {
+    const report = createMockAlertReport({
+      alerts: [createMockAlert({ id: "a" }), createMockAlert({ id: "b" })],
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string) =>
+        Promise.resolve(
+          String(input) === "/api/alerts"
+            ? jsonResponse(report)
+            : jsonResponse({ environments: [] }),
+        ),
+      ),
+    );
+
+    renderShell();
+
+    expect(await screen.findByText("2 critical alerts firing")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    expect(screen.getByText("2 critical alerts firing")).toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
+  });
+
+  it("opens the sidebar as a drawer on a phone", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      (query: string) =>
+        ({
+          matches: query.includes("max-width"),
+          media: query,
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          addListener: () => {},
+          removeListener: () => {},
+          dispatchEvent: () => false,
+          onchange: null,
+        }) as MediaQueryList,
+    );
+
+    renderShell();
+
+    expect(screen.queryByTestId("sidebar")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Collapse sidebar" })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Open menu" }));
+
+    const sidebar = screen.getByTestId("sidebar");
+    expect(sidebar.className).toContain("w-64");
+    expect(screen.getByRole("button", { name: "Close menu" })).toHaveFocus();
+    expect(screen.getByRole("link", { name: "Environments" })).toBeVisible();
+
+    await userEvent.click(screen.getByTestId("sidebar-scrim"));
+
+    expect(screen.queryByTestId("sidebar")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open menu" })).toHaveFocus();
+  });
+
   it("opens chat over the current page instead of leaving it", async () => {
     renderShell();
 
-    await userEvent.click(screen.getByRole("button", { name: "Open chat" }));
+    await userEvent.click(screen.getByRole("button", { name: "Ask PDS" }));
 
     expect(screen.getByRole("region", { name: "Chat" })).toBeInTheDocument();
     expect(screen.getByRole("main")).toHaveTextContent("page body");

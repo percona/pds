@@ -139,6 +139,24 @@ test.describe("the Teams screen", () => {
         },
       }),
     );
+    await page.route("**/api/invitations", (route) => route.fulfill({ json: { invitations: [] } }));
+    // The Teams screens read every Team's environments, which name their Team.
+    await page.route(
+      (url) => url.pathname === "/api/environments",
+      (route) =>
+        route.fulfill({
+          json: {
+            environments: [
+              {
+                name: "spoke-a",
+                status: "connected",
+                lastSeen: "2026-09-08T12:00:00Z",
+                team: "payments",
+              },
+            ],
+          },
+        }),
+    );
   }
 
   test.beforeEach(async ({ page }) => {
@@ -149,10 +167,8 @@ test.describe("the Teams screen", () => {
     await stubTeams(page);
 
     await page.goto("");
-    await page
-      .getByRole("group", { name: "Organization" })
-      .getByRole("link", { name: "Teams" })
-      .click();
+    await page.getByRole("button", { name: "Organization" }).click();
+    await page.getByRole("link", { name: "Teams" }).click();
 
     await expect(page.getByRole("heading", { level: 1, name: "Teams" })).toBeVisible();
     await expect(page.getByRole("cell", { name: "payments", exact: true })).toBeVisible();
@@ -183,6 +199,8 @@ test.describe("the Teams screen", () => {
       .getByRole("dialog", { name: "Create team" })
       .getByRole("button", { name: "Create team" })
       .click();
+    await expect(page.getByRole("heading", { level: 1, name: "platform" })).toBeVisible();
+    await page.getByRole("link", { name: "Back to teams" }).click();
     await expect(page.getByRole("cell", { name: "platform", exact: true })).toBeVisible();
 
     await page.getByRole("button", { name: "Rename platform" }).click();
@@ -224,6 +242,35 @@ test.describe("the Teams screen", () => {
       "That team still has users. Move or remove them first.",
     );
   });
+
+  test("a team's page shows its users and the environments it owns", async ({ page }) => {
+    await stubTeams(page);
+    await page.goto("teams");
+
+    await page.getByRole("link", { name: "payments", exact: true }).click();
+
+    await expect(page.getByRole("heading", { level: 1, name: "payments" })).toBeVisible();
+    await expect(page.getByRole("cell", { name: "Grace Hopper", exact: true })).toBeVisible();
+    await expect(page.getByRole("cell", { name: "Ada Lovelace", exact: true })).toHaveCount(0);
+    await expect(
+      page.getByRole("list", { name: "Environments of payments" }).getByText("spoke-a"),
+    ).toBeVisible();
+  });
+
+  for (const theme of ["light", "dark"] as const) {
+    test(`the team page renders in ${theme} mode`, async ({ page }) => {
+      await useTheme(page, theme);
+      await stubTeams(page);
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.setViewportSize({ width: 1440, height: 900 });
+
+      await page.goto("teams/payments");
+
+      await expect(page.getByRole("cell", { name: "Grace Hopper", exact: true })).toBeVisible();
+      await expect(page.locator("html")).toHaveClass(theme === "dark" ? /dark/ : /^(?!.*dark).*$/);
+      await page.screenshot({ path: `test-results/team-${theme}.png`, fullPage: true });
+    });
+  }
 
   for (const theme of ["light", "dark"] as const) {
     test(`the Teams screen renders in ${theme} mode`, async ({ page }) => {

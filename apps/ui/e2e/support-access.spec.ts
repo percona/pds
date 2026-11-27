@@ -77,8 +77,8 @@ for (const theme of ["light", "dark"] as const) {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.setViewportSize({ width: 1440, height: 900 });
 
-    await page.goto("environments");
-    await page.getByRole("button", { name: "Support access" }).click();
+    await page.goto("environments/spoke-a");
+    await page.getByRole("tab", { name: "Support access" }).click();
     await expect(page.getByRole("radio", { name: /Read only/ })).toBeChecked();
     await expect(page.getByLabel("Duration")).toHaveValue("4");
     await page.screenshot({

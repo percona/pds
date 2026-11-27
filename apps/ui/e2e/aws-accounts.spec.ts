@@ -145,9 +145,7 @@ async function shoot(page: Page, name: string, theme: "light" | "dark") {
   await page.screenshot({ path: `test-results/${name}-${theme}.png`, fullPage: true });
 }
 
-test("the environments page shows accounts and managed environments with their progress", async ({
-  page,
-}) => {
+test("the environments page shows accounts and managed environments", async ({ page }) => {
   await stubManaged(page);
 
   await page.goto("environments");
@@ -155,9 +153,22 @@ test("the environments page shows accounts and managed environments with their p
   await expect(page.getByRole("heading", { level: 2, name: "AWS accounts" })).toBeVisible();
   await expect(page.getByText("Out of date", { exact: true })).toBeVisible();
   await expect(page.getByText("Unreachable", { exact: true })).toBeVisible();
-  await expect(page.getByText("Fix the AWS account")).toBeVisible();
+  await expect(page.getByText("Failed", { exact: true })).toBeVisible();
+});
+
+test("a managed environment's page shows its run and where it is built", async ({ page }) => {
+  await stubManaged(page);
+
+  await page.goto("environments/billing");
+
+  await expect(page.getByRole("heading", { level: 1, name: "billing" })).toBeVisible();
+  await expect(page.getByText(/Managed by PDS in AWS account/)).toBeVisible();
   await expect(page.getByText(phases[0]).first()).toBeVisible();
   await expect(page.getByRole("alert")).toContainText("has no room for another VPC");
+  await expect(page.getByRole("tab", { name: "Monitoring" })).toHaveCount(0);
+
+  await page.goto("environments/sandbox");
+  await expect(page.getByText("Fix the AWS account")).toBeVisible();
 });
 
 test("Retry re-runs the failed step of a create", async ({ page }) => {
@@ -172,7 +183,7 @@ test("Retry re-runs the failed step of a create", async ({ page }) => {
     });
   });
 
-  await page.goto("environments");
+  await page.goto("environments/billing");
   await page.getByRole("button", { name: "Retry" }).click();
 
   await expect.poll(() => retried).toBe("POST");
@@ -190,9 +201,9 @@ test("Delete asks for the environment name and sends it", async ({ page }) => {
     });
   });
 
-  await page.goto("environments");
-  const row = page.locator("li", { hasText: "reports" }).first();
-  await row.getByRole("button", { name: "Delete" }).click();
+  await page.goto("environments/reports");
+  await page.getByRole("tab", { name: "Settings" }).click();
+  await page.getByRole("button", { name: "Delete" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("button", { name: "Delete" })).toBeDisabled();
   await dialog.getByLabel("Environment name").fill("reports");
@@ -220,12 +231,9 @@ for (const theme of ["light", "dark"] as const) {
     await stubManaged(page);
     await page.setViewportSize({ width: 1440, height: 900 });
 
-    await page.goto("environments");
-    await page
-      .locator("li", { hasText: "sandbox" })
-      .first()
-      .getByRole("button", { name: "Delete" })
-      .click();
+    await page.goto("environments/sandbox");
+    await page.getByRole("tab", { name: "Settings" }).click();
+    await page.getByRole("button", { name: "Delete" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
     await page.getByLabel("Environment name").fill("sandbox");
 
@@ -297,7 +305,7 @@ for (const theme of ["light", "dark"] as const) {
   });
 }
 
-test("a new environment is created through the chosen account and the list follows", async ({
+test("a new environment is created through the chosen account and its page follows the run", async ({
   page,
 }) => {
   await stubAccounts(page);
@@ -319,5 +327,5 @@ test("a new environment is created through the chosen account and the list follo
   await expect
     .poll(() => posted)
     .toBe(JSON.stringify({ name: "orders-prod", region: "eu-west-1" }));
-  await expect(page.getByRole("heading", { level: 1, name: "Environments" })).toBeVisible();
+  await expect(page).toHaveURL(/\/environments\/orders-prod$/);
 });

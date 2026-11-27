@@ -1,12 +1,14 @@
+import type { Environment } from "@/features/environments";
+import { ALL_TEAMS } from "@/lib/acting-team";
 import { requestJson } from "@/lib/api";
 import type { Team } from "./types";
 
 type TeamsBody = { teams: Array<{ name: string }> };
-type UsersBody = { users: Array<{ team: string }> };
+type UsersBody = { users: Array<{ name: string; team: string }> };
 
 /**
- * Reads the Teams with how many Users each holds. The control plane lists
- * Teams by name alone, so the counts come from the Users, read beside them.
+ * Reads the Teams with the Users each holds. The control plane lists Teams by
+ * name alone, so the members come from the Users, read beside them.
  */
 export async function fetchTeams(): Promise<Team[]> {
   const [teams, users] = await Promise.all([
@@ -16,8 +18,20 @@ export async function fetchTeams(): Promise<Team[]> {
 
   return teams.teams.map(({ name }) => ({
     name,
-    users: users.users.filter((user) => user.team === name).length,
+    members: users.users.filter((user) => user.team === name).map((user) => user.name),
   }));
+}
+
+/**
+ * Reads the environments of every Team at once, whichever Team the console
+ * acts in, because only that list names the Team each one belongs to.
+ */
+export async function fetchEnvironmentsOfEveryTeam(): Promise<Environment[]> {
+  const body = await requestJson<{ environments?: Environment[] }>("/api/environments", {
+    team: ALL_TEAMS,
+  });
+
+  return Array.isArray(body?.environments) ? body.environments : [];
 }
 
 export function createTeam(name: string): Promise<void> {

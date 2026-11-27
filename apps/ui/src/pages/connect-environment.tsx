@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
+import { CircleDollarSign } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -17,6 +18,7 @@ import {
   useEnvironments,
 } from "@/features/environments";
 import { useTeamToCreateIn } from "@/features/teams";
+import { cn } from "@/lib/utils";
 
 export function ConnectEnvironmentPage() {
   const queryClient = useQueryClient();
@@ -60,15 +62,10 @@ export function ConnectEnvironmentPage() {
     <div className="space-y-6">
       <PageHeader
         title="Create an environment"
-        description="One command creates an EKS cluster, installs the platform, and connects it here as an environment."
+        description="One command creates an EKS cluster in your AWS account, installs the platform, and connects it here as an environment."
       />
 
-      <Link
-        to="/environments/new"
-        className="inline-block rounded-md text-sm font-medium text-primary hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-      >
-        Let PDS create it in your AWS account instead
-      </Link>
+      <ModeSwitch mode="command" name={name} />
 
       <div className="space-y-6">
         <Step n={1} title="Name this environment">
@@ -189,28 +186,84 @@ export function ConnectEnvironmentPage() {
 }
 
 /**
- * What the command will spend, and the region an empty answer falls back to
- * when the machine running it has no AWS region of its own. The command asks
- * before it creates anything. The region named here is only that fallback.
+ * What the command needs and what it spends. The command asks for the region
+ * before it creates anything; the region named here is only what an empty
+ * answer falls back to on a machine with no AWS region of its own.
  */
 function Prerequisites({ region }: { region?: string }) {
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-3">
       <p className="text-sm text-muted-foreground">
-        Run this on a machine with aws, eksctl, kubectl, helm, and python3. You do not paste an
-        address.
+        Run this on a machine with aws, eksctl, kubectl, helm, and python3. It asks which AWS region
+        to use, with <span className="font-mono">{region ?? "us-west-2"}</span> when you have none
+        set, then creates an EKS cluster there with four t3.2xlarge nodes and an S3 bucket, installs
+        Percona Database Service and connects it here.
       </p>
-      <p className="text-sm text-muted-foreground">
-        It asks which AWS region to use. An empty answer uses the region in your AWS configuration,
-        or <span className="font-mono">{region ?? "us-west-2"}</span> when you have not set one. It
-        then creates an EKS cluster there with four t3.2xlarge nodes and an S3 bucket, which cost
-        money, then installs Percona Database Service and connects it here as an environment. A
-        Kubernetes cluster that already runs Percona Database Service keeps that release rather than
-        gaining a second one, and its own sign in page turns off. Add{" "}
-        <span className="font-mono">--local</span> to join a Kubernetes cluster you already run
-        instead, which creates nothing in AWS.
-      </p>
+      <CostNotice>
+        Everything is created in your AWS account, and AWS bills you for it. Disconnecting an
+        environment later does not delete it.
+      </CostNotice>
     </div>
+  );
+}
+
+/** The warning that what PDS or the command builds is billed by AWS. */
+export function CostNotice({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex items-start gap-2 rounded-lg border border-border px-4 py-3 text-sm">
+      <CircleDollarSign
+        className="mt-0.5 size-4 shrink-0 text-warning"
+        strokeWidth={1.5}
+        aria-hidden="true"
+      />
+      <p>{children}</p>
+    </div>
+  );
+}
+
+type CreateMode = "managed" | "command";
+
+/**
+ * PDS building the environment is the default. Running the command yourself is
+ * the other way, one switch away, and the name typed so far goes with it.
+ */
+export function ModeSwitch({ mode, name }: { mode: CreateMode; name: string }) {
+  const named = name ? `name=${encodeURIComponent(name)}` : "";
+  const choices: { value: CreateMode; label: string; to: string }[] = [
+    {
+      value: "managed",
+      label: "PDS creates it in your AWS account",
+      to: `/environments/new${named ? `?${named}` : ""}`,
+    },
+    {
+      value: "command",
+      label: "Run a command yourself",
+      to: `/environments/new?mode=command${named ? `&${named}` : ""}`,
+    },
+  ];
+
+  return (
+    <nav
+      aria-label="How to create it"
+      className="flex w-full flex-col gap-1 rounded-lg border border-border p-1 sm:inline-flex sm:w-auto sm:flex-row"
+    >
+      {choices.map((choice) => (
+        <Link
+          key={choice.value}
+          to={choice.to}
+          replace
+          aria-current={choice.value === mode ? "page" : undefined}
+          className={cn(
+            "rounded-md px-3 py-1.5 text-sm font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+            choice.value === mode
+              ? "bg-accent text-foreground"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {choice.label}
+        </Link>
+      ))}
+    </nav>
   );
 }
 

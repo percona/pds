@@ -2,6 +2,11 @@ import {
   ArrowDownToLine,
   Ban,
   CalendarClock,
+  LifeBuoy,
+  Mail,
+  UserCheck,
+  UserPlus,
+  UserX,
   CircleAlert,
   CircleCheck,
   CircleDashed,
@@ -41,6 +46,19 @@ const actions: Record<string, ActionDescription> = {
   "monitoring.password-read": { label: "Copy monitoring password", icon: KeyRound },
   "database.credential-read": { label: "Read connection string", icon: KeyRound },
   "agent.revoke": { label: "Revoke agent", icon: Ban },
+  "invitation.create": { label: "Invite person", icon: UserPlus },
+  "invitation.resend": { label: "Resend invite", icon: Mail },
+  "invitation.revoke": { label: "Revoke invite", icon: UserX },
+  "invitation.claim": { label: "Claim invite", icon: UserCheck },
+  "invitation.refuse": { label: "Refuse invite", icon: Ban },
+  "support_access.open": { label: "Open support access", icon: LifeBuoy },
+  "support_access.extend": { label: "Extend support access", icon: LifeBuoy },
+  "support_access.end": { label: "End support access", icon: LifeBuoy },
+  "support_access.install": { label: "Install support access", icon: LifeBuoy },
+  "support_access.uninstall": { label: "Remove support access", icon: LifeBuoy },
+  "support_access.fail": { label: "Support access failed", icon: LifeBuoy },
+  "support_access.expire": { label: "Support access ended", icon: LifeBuoy },
+  "support_access.remove": { label: "Remove support access", icon: LifeBuoy },
 };
 
 /**
@@ -113,6 +131,19 @@ const synchronousActions = new Set<string>([
   "monitoring.password-read",
   "database.credential-read",
   "agent.revoke",
+  "invitation.create",
+  "invitation.resend",
+  "invitation.revoke",
+  "invitation.claim",
+  "invitation.refuse",
+  "support_access.open",
+  "support_access.extend",
+  "support_access.end",
+  "support_access.install",
+  "support_access.uninstall",
+  "support_access.fail",
+  "support_access.expire",
+  "support_access.remove",
 ]);
 
 /**
@@ -128,13 +159,20 @@ const synchronousActions = new Set<string>([
  * no work was started to contradict it.
  */
 export function describeOutcome(outcome: string, action?: string): OutcomeDescription {
+  const shown = shownOutcome(outcome, action);
+
+  return outcomes[shown] ?? { label: shown, icon: CircleDashed, variant: "muted" };
+}
+
+/**
+ * The outcome a row shows, which is what the outcome filter matches on, so a
+ * filter for Succeeded never lists a row that reads Accepted.
+ */
+export function shownOutcome(outcome: string, action?: string): string {
   // The adapter now records "accepted" for the work it only started, so this
   // remap is for rows written before it did. The activity ring keeps months of
   // them and they must not start reading as finished work.
   const asynchronous = action !== undefined && !synchronousActions.has(action);
-  if (outcome === "succeeded" && asynchronous) {
-    return outcomes.accepted;
-  }
 
-  return outcomes[outcome] ?? { label: outcome, icon: CircleDashed, variant: "muted" };
+  return outcome === "succeeded" && asynchronous ? "accepted" : outcome;
 }
