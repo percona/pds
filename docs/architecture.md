@@ -1375,7 +1375,9 @@ still open old rows.
   a credential, token, key or kubeconfig. `internal/provision` works them. Any
   replica claims a run with `FOR UPDATE SKIP LOCKED` and a renewable lease, and a
   restart is a lapsed lease. A partial unique index allows one unfinished run per
-  environment, a failed one included. Delete is the exception: it cancels an idle
+  environment, a failed one included. A failed `upgrade_pds` or `upgrade_kubernetes`
+  run is the exception for any later run, which cancels it, so a rolled-back
+  upgrade does not stop the next one or the hourly check. Delete is the other exception: it cancels an idle
   run and flags a running one, whose worker stops at the next lease renewal. A
   step is the unit of retry: transient errors back off (five attempts over about
   ten minutes by default), then the run is Failed and Retry re-runs from the

@@ -235,10 +235,10 @@ func (e *Engine) StartWith(ctx context.Context, team uint, environment, kind, pa
 	return e.db.StartWith(ctx, team, environment, kind, names, params, e.opts.Now())
 }
 
-// Busy reports whether the environment has a run in hand, so a job that reads
-// its infrastructure can leave one that a run is changing.
+// Busy reports whether a run is changing the environment, so a job that reads
+// its infrastructure can leave it alone. A failed run is not changing it.
 func (e *Engine) Busy(ctx context.Context, team uint, environment string) (bool, error) {
-	return e.db.Unfinished(ctx, team, environment)
+	return e.db.InProgress(ctx, team, environment)
 }
 
 // Retry re-runs the environment's failed run from its failed step.

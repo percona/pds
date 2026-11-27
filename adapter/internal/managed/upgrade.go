@@ -9,11 +9,12 @@ import (
 
 	"github.com/percona/pds/adapter/internal/hub"
 	"github.com/percona/pds/adapter/internal/provision"
+	"github.com/percona/pds/adapter/internal/store"
 )
 
 // KindUpgradePDS is the run kind that moves an environment's pds release to a
 // newer chart version through Git and Flux.
-const KindUpgradePDS = "upgrade_pds"
+const KindUpgradePDS = store.KindUpgradePDS
 
 const stepApplyRelease = "apply-release"
 

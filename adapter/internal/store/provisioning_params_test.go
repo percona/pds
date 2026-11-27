@@ -45,17 +45,17 @@ func TestAParameterisedRunStillHoldsTheEnvironment(t *testing.T) {
 	require.ErrorIs(t, err, store.ErrRunActive)
 }
 
-func TestUnfinishedSaysWhetherTheEnvironmentHasARunInHand(t *testing.T) {
+func TestInProgressSaysWhetherARunIsChangingTheEnvironment(t *testing.T) {
 	db, admin := newOrganizationWithAdmin(t)
 	prov := db.Provisioning()
 
-	busy, err := prov.Unfinished(t.Context(), admin.TeamID, "orders")
+	busy, err := prov.InProgress(t.Context(), admin.TeamID, "orders")
 	require.NoError(t, err)
 	assert.False(t, busy)
 
 	run, err := prov.Start(t.Context(), admin.TeamID, "orders", "create", []string{"assume-role"}, time.Now())
 	require.NoError(t, err)
-	busy, err = prov.Unfinished(t.Context(), admin.TeamID, "orders")
+	busy, err = prov.InProgress(t.Context(), admin.TeamID, "orders")
 	require.NoError(t, err)
 	assert.True(t, busy)
 
@@ -63,11 +63,11 @@ func TestUnfinishedSaysWhetherTheEnvironmentHasARunInHand(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, claimed)
 	require.NoError(t, prov.EndRun(t.Context(), run.ID, "w1", store.RunSucceeded, time.Now()))
-	busy, err = prov.Unfinished(t.Context(), admin.TeamID, "orders")
+	busy, err = prov.InProgress(t.Context(), admin.TeamID, "orders")
 	require.NoError(t, err)
 	assert.False(t, busy)
 
-	busy, err = prov.Unfinished(t.Context(), admin.TeamID, "billing")
+	busy, err = prov.InProgress(t.Context(), admin.TeamID, "billing")
 	require.NoError(t, err)
 	assert.False(t, busy, "another environment is not busy")
 }
