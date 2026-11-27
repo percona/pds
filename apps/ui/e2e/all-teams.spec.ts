@@ -85,6 +85,8 @@ test.describe("All teams", () => {
     await page.goto("environments");
 
     await page.getByRole("combobox", { name: "Working in team" }).selectOption("all");
+    await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
+    await page.goto("environments");
 
     await expect(page.getByText("spoke-pay").first()).toBeVisible();
     await expect(page.getByText("spoke-default").first()).toBeVisible();

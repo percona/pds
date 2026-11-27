@@ -16,7 +16,7 @@ afterEach(() => {
 });
 
 describe("AppRoutes", () => {
-  it("redirects the root path to the environments list", async () => {
+  it("shows Home at the root path", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL) => {
@@ -46,9 +46,7 @@ describe("AppRoutes", () => {
 
     renderWithProviders(<AppRoutes />, { route: "/" });
 
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "Environments" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Home" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { level: 1, name: "Databases" })).not.toBeInTheDocument();
   });
 

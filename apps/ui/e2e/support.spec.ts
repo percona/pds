@@ -158,7 +158,7 @@ test.describe("support tickets", () => {
     await stubUnconfigured(page);
     await page.goto("./");
 
-    await expect(page.getByRole("heading", { level: 1, name: "Environments" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Support" })).toHaveCount(0);
 
     await page.goto("support");

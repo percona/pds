@@ -30,7 +30,7 @@ import {
 } from "@/features/environments";
 import { useIsAdmin } from "@/features/auth";
 import { accountName, useAwsAccounts } from "@/features/aws-accounts";
-import { SupportAccessPanel } from "@/features/support-access";
+import { SupportAccessPanel, SupportAccessStatus } from "@/features/support-access";
 import { useFeature } from "@/features/flags";
 import { DatabaseList, engineChoicePhrase, useDatabases } from "@/features/databases";
 import { useDatabasesCpu } from "@/features/monitoring";
@@ -198,7 +198,10 @@ export function DatabasesPage() {
           <MonitoringPanel environment={routeEnvironment} />
         </TabsContent>
         {supportAccessOn && !managed ? (
-          <TabsContent value="support">
+          <TabsContent value="support" className="space-y-4">
+            {environment?.supportAccess ? (
+              <SupportAccessStatus summary={environment.supportAccess} />
+            ) : null}
             <SupportAccessPanel environment={routeEnvironment} canChange={isAdmin} />
           </TabsContent>
         ) : null}

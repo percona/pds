@@ -119,7 +119,8 @@ test("a row notes an update and drift, and Updates opens the panel", async ({ pa
   await page.goto("environments");
   await expect(page.getByText("Update available")).toBeVisible();
   await expect(row(page, "orders").getByText("Changed outside PDS")).toBeVisible();
-  await row(page, "orders").getByRole("button", { name: "Updates" }).click();
+  await page.goto("environments/orders");
+  await page.getByRole("tab", { name: "Updates" }).click();
 
   await expect(page.getByText("PDS 1.5.0 is available.")).toBeVisible();
   await expect(page.getByText("Template revision 2, latest 3")).toBeVisible();
@@ -149,8 +150,8 @@ test("Upgrade now, Defer and the window editor send their requests", async ({ pa
     return route.fulfill({ json: lifecycle() });
   });
 
-  await page.goto("environments");
-  await row(page, "orders").getByRole("button", { name: "Updates" }).click();
+  await page.goto("environments/orders");
+  await page.getByRole("tab", { name: "Updates" }).click();
   await page.getByRole("button", { name: "Upgrade now" }).click();
   await expect.poll(() => sent.run).toBe(JSON.stringify({ kind: "upgrade_pds" }));
 
@@ -183,8 +184,8 @@ test("an update that would replace the network is explained and never offered", 
     }),
   );
 
-  await page.goto("environments");
-  await row(page, "orders").getByRole("button", { name: "Updates" }).click();
+  await page.goto("environments/orders");
+  await page.getByRole("tab", { name: "Updates" }).click();
   await page.getByRole("button", { name: "Review update" }).click();
 
   const dialog = page.getByRole("dialog");
@@ -245,8 +246,8 @@ for (const theme of ["light", "dark"] as const) {
     await stubList(page);
     await page.setViewportSize({ width: 1440, height: 1500 });
 
-    await page.goto("environments");
-    await row(page, "orders").getByRole("button", { name: "Updates" }).click();
+    await page.goto("environments/orders");
+    await page.getByRole("tab", { name: "Updates" }).click();
     await page.getByRole("button", { name: "Edit window" }).click();
     await expect(page.getByLabel("Time zone")).toBeVisible();
 
@@ -261,8 +262,8 @@ for (const theme of ["light", "dark"] as const) {
     );
     await page.setViewportSize({ width: 1440, height: 900 });
 
-    await page.goto("environments");
-    await row(page, "orders").getByRole("button", { name: "Updates" }).click();
+    await page.goto("environments/orders");
+    await page.getByRole("tab", { name: "Updates" }).click();
     await page.getByRole("button", { name: "Review update" }).click();
     await expect(page.getByRole("list", { name: "Changes to the stack" })).toBeVisible();
 
@@ -285,8 +286,8 @@ for (const theme of ["light", "dark"] as const) {
     );
     await page.setViewportSize({ width: 1440, height: 900 });
 
-    await page.goto("environments");
-    await row(page, "orders").getByRole("button", { name: "Updates" }).click();
+    await page.goto("environments/orders");
+    await page.getByRole("tab", { name: "Updates" }).click();
     await page.getByRole("button", { name: "Review update" }).click();
     await expect(page.getByRole("dialog").getByRole("alert")).toBeVisible();
 

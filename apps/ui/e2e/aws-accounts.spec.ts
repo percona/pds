@@ -190,9 +190,9 @@ test("Delete asks for the environment name and sends it", async ({ page }) => {
     });
   });
 
-  await page.goto("environments");
-  const row = page.locator("li", { hasText: "reports" }).first();
-  await row.getByRole("button", { name: "Delete" }).click();
+  await page.goto("environments/reports");
+  await page.getByRole("tab", { name: "Settings" }).click();
+  await page.getByRole("button", { name: "Delete" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("button", { name: "Delete" })).toBeDisabled();
   await dialog.getByLabel("Environment name").fill("reports");
@@ -220,12 +220,9 @@ for (const theme of ["light", "dark"] as const) {
     await stubManaged(page);
     await page.setViewportSize({ width: 1440, height: 900 });
 
-    await page.goto("environments");
-    await page
-      .locator("li", { hasText: "sandbox" })
-      .first()
-      .getByRole("button", { name: "Delete" })
-      .click();
+    await page.goto("environments/sandbox");
+    await page.getByRole("tab", { name: "Settings" }).click();
+    await page.getByRole("button", { name: "Delete" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
     await page.getByLabel("Environment name").fill("sandbox");
 
