@@ -173,7 +173,7 @@ async function stubChat(page: Page) {
 
 async function openChat(page: Page) {
   await page.goto("environments/spoke-a");
-  await page.getByRole("button", { name: "Open chat" }).click();
+  await page.getByRole("button", { name: "Ask PDS" }).click();
   await expect(page.getByRole("region", { name: "Chat" })).toBeVisible();
 }
 
@@ -197,7 +197,7 @@ test("anthropic configured sends one turn with assistant text and an action", as
 
   await openChat(page);
 
-  await expect(page.getByRole("button", { name: "Open chat" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Ask PDS" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Hide chat" })).toBeVisible();
 
   await page.getByLabel("Message").fill("what databases exist?");

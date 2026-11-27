@@ -149,10 +149,8 @@ test.describe("the Teams screen", () => {
     await stubTeams(page);
 
     await page.goto("");
-    await page
-      .getByRole("group", { name: "Organization" })
-      .getByRole("link", { name: "Teams" })
-      .click();
+    await page.getByRole("button", { name: "Organization" }).click();
+    await page.getByRole("link", { name: "Teams" }).click();
 
     await expect(page.getByRole("heading", { level: 1, name: "Teams" })).toBeVisible();
     await expect(page.getByRole("cell", { name: "payments", exact: true })).toBeVisible();

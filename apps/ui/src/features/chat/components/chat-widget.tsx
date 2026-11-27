@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useSidebarPreference } from "@/components/layout/sidebar-preference";
 import { useChatUi } from "@/features/chat/chat-ui";
 import { ModelKeyCards, useConnections } from "@/features/connections";
 import { databaseHref, databaseKey, fetchDatabase } from "@/features/databases";
@@ -60,6 +61,7 @@ import type {
 } from "../types";
 import { ApprovalCard } from "./approval-card";
 import { ConversationList } from "./conversation-list";
+import { cn } from "@/lib/utils";
 
 const providerLabels: Record<ChatProvider, string> = {
   anthropic: "Anthropic",
@@ -103,6 +105,7 @@ function usePageDatabaseId(): string | undefined {
 
 export function ChatWidget() {
   const { open, setOpen } = useChatUi();
+  const { rail, phone } = useSidebarPreference();
   const queryClient = useQueryClient();
   const pageDatabaseId = usePageDatabaseId();
   const onChatPage = Boolean(useMatch({ path: "/chat", end: true }));
@@ -425,7 +428,11 @@ export function ChatWidget() {
           id="environment-chat"
           role="region"
           aria-label="Chat"
-          className="fixed inset-y-0 right-0 left-64 z-30 flex bg-background"
+          className={cn(
+            "fixed z-30 flex bg-background",
+            phone ? "top-14 right-0 bottom-0 left-0" : "inset-y-0 right-0",
+            !phone && (rail ? "left-16" : "left-64"),
+          )}
         >
           <aside className="flex w-80 shrink-0 flex-col border-r border-border bg-card">
             <header className="flex h-14 items-center px-4">
@@ -608,7 +615,7 @@ export function ChatWidget() {
             ) : (
               <>
                 <MessageSquare strokeWidth={1.5} aria-hidden="true" />
-                Open chat
+                Ask PDS
               </>
             )}
           </Button>

@@ -1,7 +1,17 @@
 import { screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Sidebar } from "@/components/layout/sidebar";
+import { SidebarPreferenceProvider } from "@/components/layout/sidebar-preference";
 import { renderWithProviders } from "@/test/utils";
+
+function renderSidebar() {
+  return renderWithProviders(
+    <SidebarPreferenceProvider>
+      <Sidebar />
+    </SidebarPreferenceProvider>,
+  );
+}
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -43,9 +53,16 @@ describe("Sidebar organization", () => {
       organizations: [acme],
     });
 
-    renderWithProviders(<Sidebar />);
+    renderSidebar();
 
-    const group = await screen.findByRole("group", { name: "Organization" });
+    const toggle = await screen.findByRole("button", { name: "Organization" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("link", { name: "Teams" })).not.toBeInTheDocument();
+
+    await userEvent.click(toggle);
+
+    const group = screen.getByRole("group", { name: "Organization" });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(within(group).getByRole("link", { name: "Teams" })).toHaveAttribute("href", "/teams");
     expect(within(group).getByRole("link", { name: "Users" })).toHaveAttribute("href", "/users");
     expect(within(group).getByRole("link", { name: "Settings" })).toHaveAttribute(
@@ -64,9 +81,10 @@ describe("Sidebar organization", () => {
       organizations: [{ ...acme, role: "user" }],
     });
 
-    renderWithProviders(<Sidebar />);
+    renderSidebar();
 
     expect(await screen.findByText("Acme")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Organization" })).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Organization" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Teams" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Users" })).not.toBeInTheDocument();
@@ -83,7 +101,7 @@ describe("Sidebar organization", () => {
       organizations: [{ ...acme, role: "user" }, initech],
     });
 
-    renderWithProviders(<Sidebar />);
+    renderSidebar();
 
     expect(await screen.findByRole("button", { name: /Acme/ })).toBeVisible();
     expect(screen.queryByRole("group", { name: "Organization" })).not.toBeInTheDocument();
@@ -92,15 +110,37 @@ describe("Sidebar organization", () => {
   it("names the person rather than the username when the session knows them", async () => {
     stubSession({ username: "acme", user: "Ada Lovelace", organization: "Acme", role: "admin" });
 
-    renderWithProviders(<Sidebar />);
+    renderSidebar();
 
     expect(await screen.findByText("Ada Lovelace")).toBeVisible();
+  });
+
+  it("opens Organization beside its icon when the sidebar is collapsed", async () => {
+    stubSession({
+      username: "acme",
+      user: "Ada",
+      organization: "Acme",
+      role: "admin",
+      organizations: [acme],
+    });
+    window.localStorage.setItem("pds-sidebar", "collapsed");
+
+    renderSidebar();
+
+    expect(screen.getByTestId("sidebar").className).toContain("w-16");
+    expect(screen.queryByRole("link", { name: "Teams" })).not.toBeInTheDocument();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Organization" }));
+
+    const menu = screen.getByRole("group", { name: "Organization" });
+    expect(within(menu).getByRole("link", { name: "Teams" })).toBeVisible();
+    expect(menu.className).toContain("absolute");
   });
 
   it("shows the Experimental label to a user, not only to an admin", async () => {
     stubSession({ username: "acme", user: "Grace", organization: "Acme", role: "user" });
 
-    renderWithProviders(<Sidebar />);
+    renderSidebar();
 
     expect(await screen.findByRole("button", { name: /Experimental/ })).toBeVisible();
   });

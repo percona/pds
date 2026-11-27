@@ -52,9 +52,11 @@ a skipped or focused test.
   shadows. Shadows only on dialogs and popovers.
 - Controls are `rounded-md`, cards, dialogs and panels `rounded-lg`, badges
   and status pills `rounded-full`.
-- Layout: a fixed `w-64` sidebar, content in `max-w-6xl mx-auto px-6`,
-  sections `py-8`, blocks `space-y-6`, columns in CSS Grid. Desktop first;
-  tablet must not break; phone is best effort.
+- Layout: a sidebar `w-64` (256px) that collapses to `w-16` (64px) from a
+  control at its top. The choice is remembered. Below 768px the sidebar is a
+  drawer over a scrim. Content stays in `max-w-6xl mx-auto px-6`, sections
+  `py-8`, blocks `space-y-6`, columns in CSS Grid. Desktop first; tablet must
+  not break; a phone width has no horizontal scroll.
 
 ## Type and icons
 

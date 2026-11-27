@@ -181,7 +181,7 @@ async function renderOpenChat(flags?: Partial<FeatureFlags>, route?: string) {
     </ChatUiProvider>,
     { flags, route },
   );
-  await userEvent.click(screen.getByRole("button", { name: "Open chat" }));
+  await userEvent.click(screen.getByRole("button", { name: "Ask PDS" }));
   return result;
 }
 
@@ -203,7 +203,7 @@ describe("ChatWidget", () => {
       </ChatUiProvider>,
     );
 
-    expect(screen.getByRole("button", { name: "Open chat" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ask PDS" })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Chat" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Message")).not.toBeInTheDocument();
   });

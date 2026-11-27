@@ -164,7 +164,7 @@ describe("navigation", () => {
       within(nav)
         .getAllByRole("link")
         .map((link) => link.textContent?.trim()),
-    ).toEqual(["Environments", "Alerts", "Chats", "AI agents", "Activity", "Support"]);
+    ).toEqual(["Environments", "Alerts", "AI agents", "Activity", "Support"]);
   });
 });
 
@@ -178,14 +178,14 @@ describe("chat", () => {
     );
 
     await waitFor(() => expect(screen.getByRole("main")).toHaveTextContent("page body"));
-    expect(screen.queryByRole("button", { name: "Open chat" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Ask PDS" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Chats" })).not.toBeInTheDocument();
   });
 
   it("renders the chat widget when the surface is on", () => {
     renderShell();
 
-    expect(screen.getByRole("button", { name: "Open chat" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ask PDS" })).toBeInTheDocument();
   });
 });
 
@@ -204,7 +204,7 @@ describe("hub overlay", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Connections" }));
     expect(screen.getByTestId("connection-assistant")).toBeInTheDocument();
     expect(screen.getByTestId("connection-cursor")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open chat" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ask PDS" })).toBeInTheDocument();
   });
 
   it("shows activity and keeps environments and support", async () => {
@@ -224,9 +224,9 @@ describe("hub overlay", () => {
       within(nav)
         .getAllByRole("link")
         .map((link) => link.textContent?.trim()),
-    ).toEqual(["Environments", "Alerts", "Chats", "AI agents", "Activity", "Support"]);
+    ).toEqual(["Environments", "Alerts", "AI agents", "Activity", "Support"]);
     expect(screen.queryByRole("link", { name: "Databases" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open chat" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ask PDS" })).toBeInTheDocument();
   });
 
   it("opens chat from the chat route", async () => {

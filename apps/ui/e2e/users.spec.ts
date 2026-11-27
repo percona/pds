@@ -106,10 +106,8 @@ test.describe("the Users screen", () => {
     await stubDirectory(page);
 
     await page.goto("");
-    await page
-      .getByRole("group", { name: "Organization" })
-      .getByRole("link", { name: "Users" })
-      .click();
+    await page.getByRole("button", { name: "Organization" }).click();
+    await page.getByRole("link", { name: "Users" }).click();
 
     await expect(page.getByRole("heading", { level: 1, name: "Users" })).toBeVisible();
     await expect(page.getByRole("cell", { name: "Ada Lovelace" })).toBeVisible();
